@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Data files (niet op GitHub)
+*.xlsx
+*.xls
+*.csv
+
+# Claude Code
+.claude/
