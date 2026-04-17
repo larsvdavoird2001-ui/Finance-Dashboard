@@ -1,6 +1,7 @@
 // db.ts — Supabase database service laag voor TPG Finance
 // Alle CRUD operaties voor de 5 tabellen.
-import { supabase } from './supabase'
+// Als Supabase niet geconfigureerd is, retourneren alle functies lege data.
+import { supabase, supabaseEnabled } from './supabase'
 import type { ClosingEntry, FteEntry, ImportRecord, OhwEntityData } from '../data/types'
 import type { RawDataEntry } from '../store/useRawDataStore'
 
@@ -23,42 +24,43 @@ function snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {
 
 // ── Closing Entries ─────────────────────────────────────────────────────────
 export async function fetchClosingEntries(): Promise<ClosingEntry[]> {
+  if (!supabaseEnabled) return []
   const { data, error } = await supabase.from('closing_entries').select('*')
   if (error) { console.error('fetchClosingEntries:', error); return [] }
   return (data ?? []).map(row => snakeToCamel(row) as unknown as ClosingEntry)
 }
 
 export async function upsertClosingEntry(entry: ClosingEntry): Promise<void> {
+  if (!supabaseEnabled) return
   const row = camelToSnake(entry as unknown as Record<string, unknown>)
-  row['kosten_overrides'] = entry.kostenOverrides
-  delete row['kosten_overrides'] // already handled by camelToSnake
   const { error } = await supabase.from('closing_entries').upsert(row, { onConflict: 'id' })
   if (error) console.error('upsertClosingEntry:', error)
 }
 
 export async function upsertAllClosingEntries(entries: ClosingEntry[]): Promise<void> {
-  const rows = entries.map(e => {
-    const row = camelToSnake(e as unknown as Record<string, unknown>)
-    return row
-  })
+  if (!supabaseEnabled) return
+  const rows = entries.map(e => camelToSnake(e as unknown as Record<string, unknown>))
   const { error } = await supabase.from('closing_entries').upsert(rows, { onConflict: 'id' })
   if (error) console.error('upsertAllClosingEntries:', error)
 }
 
 // ── FTE Entries ─────────────────────────────────────────────────────────────
 export async function fetchFteEntries(): Promise<FteEntry[]> {
+  if (!supabaseEnabled) return []
   const { data, error } = await supabase.from('fte_entries').select('*')
   if (error) { console.error('fetchFteEntries:', error); return [] }
   return (data ?? []).map(row => snakeToCamel(row) as unknown as FteEntry)
 }
 
 export async function upsertFteEntry(entry: FteEntry): Promise<void> {
+  if (!supabaseEnabled) return
   const row = camelToSnake(entry as unknown as Record<string, unknown>)
   const { error } = await supabase.from('fte_entries').upsert(row, { onConflict: 'id' })
   if (error) console.error('upsertFteEntry:', error)
 }
 
 export async function upsertAllFteEntries(entries: FteEntry[]): Promise<void> {
+  if (!supabaseEnabled) return
   const rows = entries.map(e => camelToSnake(e as unknown as Record<string, unknown>))
   const { error } = await supabase.from('fte_entries').upsert(rows, { onConflict: 'id' })
   if (error) console.error('upsertAllFteEntries:', error)
@@ -66,11 +68,11 @@ export async function upsertAllFteEntries(entries: FteEntry[]): Promise<void> {
 
 // ── Import Records ──────────────────────────────────────────────────────────
 export async function fetchImportRecords(): Promise<ImportRecord[]> {
+  if (!supabaseEnabled) return []
   const { data, error } = await supabase.from('import_records').select('*').order('created_at', { ascending: false })
   if (error) { console.error('fetchImportRecords:', error); return [] }
   return (data ?? []).map(row => {
     const obj = snakeToCamel(row) as unknown as ImportRecord
-    // jsonb velden direct overnemen
     obj.perBv = row.per_bv ?? {}
     obj.headers = row.headers ?? []
     obj.preview = row.preview ?? []
@@ -79,6 +81,7 @@ export async function fetchImportRecords(): Promise<ImportRecord[]> {
 }
 
 export async function insertImportRecord(record: ImportRecord): Promise<void> {
+  if (!supabaseEnabled) return
   const row: Record<string, unknown> = {
     id: record.id,
     slot_id: record.slotId,
@@ -103,6 +106,7 @@ export async function insertImportRecord(record: ImportRecord): Promise<void> {
 }
 
 export async function updateImportRecordStatus(id: string, status: string, reason?: string): Promise<void> {
+  if (!supabaseEnabled) return
   const patch: Record<string, unknown> = { status }
   if (reason !== undefined) patch['rejection_reason'] = reason
   const { error } = await supabase.from('import_records').update(patch).eq('id', id)
@@ -110,12 +114,14 @@ export async function updateImportRecordStatus(id: string, status: string, reaso
 }
 
 export async function deleteImportRecord(id: string): Promise<void> {
+  if (!supabaseEnabled) return
   const { error } = await supabase.from('import_records').delete().eq('id', id)
   if (error) console.error('deleteImportRecord:', error)
 }
 
 // ── Import Raw Data ─────────────────────────────────────────────────────────
 export async function insertRawData(entry: RawDataEntry): Promise<void> {
+  if (!supabaseEnabled) return
   const row = {
     record_id: entry.recordId,
     slot_id: entry.slotId,
@@ -128,26 +134,26 @@ export async function insertRawData(entry: RawDataEntry): Promise<void> {
     bv_col: entry.bvCol,
     status: entry.status,
   }
-  const { error } = await supabase.from('import_raw_data').upsert(row, { onConflict: 'record_id' }).select()
-  // Als upsert niet werkt op record_id (geen unique constraint), delete+insert
-  if (error) {
-    await supabase.from('import_raw_data').delete().eq('record_id', entry.recordId)
-    const { error: e2 } = await supabase.from('import_raw_data').insert(row)
-    if (e2) console.error('insertRawData:', e2)
-  }
+  // delete+insert pattern (import_raw_data heeft geen unique op record_id)
+  await supabase.from('import_raw_data').delete().eq('record_id', entry.recordId)
+  const { error } = await supabase.from('import_raw_data').insert(row)
+  if (error) console.error('insertRawData:', error)
 }
 
 export async function updateRawDataStatus(recordId: string, status: string): Promise<void> {
+  if (!supabaseEnabled) return
   const { error } = await supabase.from('import_raw_data').update({ status }).eq('record_id', recordId)
   if (error) console.error('updateRawDataStatus:', error)
 }
 
 export async function deleteRawData(recordId: string): Promise<void> {
+  if (!supabaseEnabled) return
   const { error } = await supabase.from('import_raw_data').delete().eq('record_id', recordId)
   if (error) console.error('deleteRawData:', error)
 }
 
 export async function fetchRawData(): Promise<RawDataEntry[]> {
+  if (!supabaseEnabled) return []
   const { data, error } = await supabase.from('import_raw_data').select('*')
   if (error) { console.error('fetchRawData:', error); return [] }
   return (data ?? []).map(row => ({
@@ -166,6 +172,7 @@ export async function fetchRawData(): Promise<RawDataEntry[]> {
 
 // ── OHW Entities ────────────────────────────────────────────────────────────
 export async function fetchOhwEntities(year: string): Promise<OhwEntityData[]> {
+  if (!supabaseEnabled) return []
   const { data, error } = await supabase
     .from('ohw_entities')
     .select('*')
@@ -176,6 +183,7 @@ export async function fetchOhwEntities(year: string): Promise<OhwEntityData[]> {
 }
 
 export async function upsertOhwEntity(year: string, entity: OhwEntityData): Promise<void> {
+  if (!supabaseEnabled) return
   const row = {
     year,
     entity: entity.entity,
@@ -188,6 +196,7 @@ export async function upsertOhwEntity(year: string, entity: OhwEntityData): Prom
 }
 
 export async function upsertAllOhwEntities(year: string, entities: OhwEntityData[]): Promise<void> {
+  if (!supabaseEnabled) return
   const rows = entities.map(e => ({
     year,
     entity: e.entity,
