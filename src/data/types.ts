@@ -1,0 +1,108 @@
+export interface OhwRow {
+  id: string
+  responsible?: string
+  description: string
+  values: Record<string, number | null>
+  remark?: string
+  /** Niet-verwijderbaar/niet-aanpasbaar — rij wordt gevuld vanuit import */
+  locked?: boolean
+  /** Welke import-slot vult deze rij (bijv. 'uren_lijst', 'd_lijst', 'ohw') */
+  sourceSlot?: string
+}
+
+export interface OhwSection {
+  id: string
+  title: string
+  rows: OhwRow[]
+}
+
+export interface OhwEntityData {
+  entity: string
+  label: string
+  onderhanden: OhwSection[]
+  totaalOnderhanden: Record<string, number | null>
+  debiteuren: Record<string, number | null>
+  factuurvolume: Record<string, number | null>
+  mutatieOhw: Record<string, number | null>
+  nettoOmzetVoorIC: Record<string, number | null>
+  icVerrekening: OhwRow[]
+  totaalIC: Record<string, number | null>
+  nettoOmzet: Record<string, number | null>
+  budget: Record<string, number | null>
+  delta: Record<string, number | null>
+  vooruitgefactureerd?: OhwRow[]
+  totaalVooruitgefactureerd?: Record<string, number | null>
+  mutatieVooruitgefactureerd?: Record<string, number | null>
+}
+
+export interface OhwYearData {
+  allMonths: string[]
+  displayMonths: string[]
+  openingMonth: string
+  entities: OhwEntityData[]
+}
+
+export type TabId = 'dashboard' | 'hours' | 'financials' | 'ohw' | 'pl' | 'budget' | 'maand'
+
+export type BvId = 'Consultancy' | 'Projects' | 'Software'
+
+export interface HoursRecord {
+  bv: BvId
+  month: string
+  written: number
+  declarable: number
+  nonDeclarable: number
+  capacity: number
+  type: 'actual' | 'current' | 'forecast'
+}
+
+export interface ImportRecord {
+  id: string
+  slotId: string
+  slotLabel: string
+  month: string
+  fileName: string
+  uploadedAt: string
+  perBv: Record<string, number>
+  totalAmount: number
+  rowCount: number
+  parsedCount: number
+  skippedCount: number
+  detectedAmountCol: string
+  detectedBvCol: string
+  headers: string[]
+  preview: Record<string, unknown>[]
+  status: 'pending' | 'approved' | 'rejected'
+  rejectionReason?: string
+}
+
+export interface ClosingEntry {
+  id: string
+  bv: BvId
+  month: string
+  factuurvolume: number
+  debiteuren: number
+  ohwMutatie: number
+  kostencorrectie: number
+  accruals: number
+  handmatigeCorrectie: number
+  operationeleKosten: number
+  amortisatieAfschrijvingen: number
+  /** Per-regel overrides voor directe/operationele kosten en amortisatie.
+   *  Key = PL-sleutel (bijv. 'directe_inkoopkosten'), value = positief getal. */
+  kostenOverrides: Record<string, number>
+  remark: string
+}
+
+export interface GlobalFilter {
+  year: '2025' | '2026' | 'all'
+  bv: BvId | 'all'
+}
+
+export interface FteEntry {
+  id: string
+  bv: BvId
+  month: string
+  fte: number        // fulltime equivalent (decimaal, bijv. 12.4)
+  headcount: number  // aantal personen (integer)
+}
