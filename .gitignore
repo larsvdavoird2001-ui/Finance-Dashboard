@@ -28,5 +28,9 @@ dist-ssr
 *.xls
 *.csv
 
+# Environment variables
+.env
+.env.local
+
 # Claude Code
 .claude/
