@@ -7,13 +7,15 @@ import { monthlyActuals2026 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
 import { fmt, parseNL } from '../../lib/format'
 import { parseImportFile } from '../../lib/parseImport'
-import type { ParseOverrides } from '../../lib/parseImport'
+import type { ParseOverrides, TariffLookup } from '../../lib/parseImport'
+import { useTariffStore } from '../../store/useTariffStore'
 import { useRawDataStore } from '../../store/useRawDataStore'
 import type { BvId, ClosingEntry, ImportRecord, GlobalFilter } from '../../data/types'
 import { useToast } from '../../hooks/useToast'
 import { Toast } from '../common/Toast'
 import { ImportApprovalModal } from './ImportApprovalModal'
 import { useNavStore } from '../../store/useNavStore'
+import { TariffTable } from './TariffTable'
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
@@ -43,7 +45,7 @@ const UPLOAD_SLOTS: UploadSlot[] = [
   { id: 'uren_lijst',      label: 'Uren lijst',       icon: '📋', description: 'Alleen Projects — vult OHW-regel "U-Projecten met tarief"', appliesTo: [], targetBv: 'Projects', targetRowId: 'p1', targetEntity: 'Projects' },
   { id: 'd_lijst',         label: 'D Lijst',          icon: '📊', description: 'Alleen Consultancy — vult OHW-regel "D facturatie"', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c1', targetEntity: 'Consultancy' },
   { id: 'conceptfacturen', label: 'Conceptfacturen',  icon: '📄', description: 'SAP conceptfacturen — bijdrage aan factuurvolume (alle BVs)', appliesTo: ['factuurvolume'] },
-  { id: 'missing_hours',   label: 'Missing Hours',    icon: '⚠', description: 'Medewerkers met ontbrekende uren in SAP (alle BVs)', appliesTo: [] },
+  { id: 'missing_hours',   label: 'Missing Hours',    icon: '⚠', description: 'Alleen Consultancy — berekent missing hours × tarief × 0,9 → OHW', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c4', targetEntity: 'Consultancy' },
   { id: 'ohw',             label: 'OHW Excel',        icon: '🏗', description: 'Alleen Projects — vult OHW-regel "Onderhanden projecten (OHW Excel)"', appliesTo: [], targetBv: 'Projects', targetRowId: 'p10', targetEntity: 'Projects' },
 ]
 
@@ -111,7 +113,7 @@ const AMORTISATIE_SUBS = [
 
 export function MaandTab({ filter: _filter }: Props) {
   const [month, setMonth] = useState<string>('Mar-26')
-  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export'>('afsluiting')
+  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven'>('afsluiting')
   const [expandedCosts, setExpandedCosts] = useState<Set<CostSectionId>>(new Set())
   const toggleCostSection = (id: CostSectionId) =>
     setExpandedCosts(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
@@ -148,6 +150,13 @@ export function MaandTab({ filter: _filter }: Props) {
   const { toasts, showToast } = useToast()
   const ohwData2026 = useOhwStore(s => s.data2026)
   const updateRowValue = useOhwStore(s => s.updateRowValue)
+  const tariffEntries = useTariffStore(s => s.entries)
+
+  // Bouw tariff lookup voor missing hours parser
+  const tariffLookup: TariffLookup = {}
+  for (const t of tariffEntries) {
+    tariffLookup[t.id] = { tarief: t.tarief, naam: t.naam }
+  }
   const { entries: fteEntries, updateEntry: updateFte } = useFteStore()
   const fteEntry = (bv: BvId) => fteEntries.find(e => e.bv === bv && e.month === month)
 
@@ -278,7 +287,7 @@ export function MaandTab({ filter: _filter }: Props) {
   const handleFileUpload = async (slotId: string, file: File) => {
     setUploadLoading(prev => ({ ...prev, [slotId]: true }))
     try {
-      const result = await parseImportFile(file, slotId)
+      const result = await parseImportFile(file, slotId, undefined, slotId === 'missing_hours' ? tariffLookup : undefined)
       const slot = UPLOAD_SLOTS.find(s => s.id === slotId)!
       const record: ImportRecord = {
         id: `${slotId}-${Date.now()}`,
@@ -328,7 +337,7 @@ export function MaandTab({ filter: _filter }: Props) {
     if (!pendingRecord || !pendingFile) return
     const overrides: ParseOverrides = { amountCol: amountCol || undefined, bvCol: bvCol || undefined }
     try {
-      const result = await parseImportFile(pendingFile, pendingRecord.slotId, overrides)
+      const result = await parseImportFile(pendingFile, pendingRecord.slotId, overrides, pendingRecord.slotId === 'missing_hours' ? tariffLookup : undefined)
       const updated: ImportRecord = {
         ...pendingRecord,
         perBv: result.perBv,
@@ -433,6 +442,7 @@ export function MaandTab({ filter: _filter }: Props) {
               )}
             </button>
             <button className={`tab${activeSection === 'export' ? ' active' : ''}`} onClick={() => setActiveSection('export')}>Export & Log</button>
+            <button className={`tab${activeSection === 'tarieven' ? ' active' : ''}`} onClick={() => setActiveSection('tarieven')}>IC Tarieven</button>
           </div>
 
           {activeSection === 'afsluiting' && (
@@ -677,6 +687,9 @@ export function MaandTab({ filter: _filter }: Props) {
             </div>
           </>
         )}
+
+        {/* ── IC TARIEVEN ─────────────────────────────────────────────────── */}
+        {activeSection === 'tarieven' && <TariffTable />}
 
         {/* ── AFSLUITING ──────────────────────────────────────────────────── */}
         {activeSection === 'afsluiting' && (

@@ -107,7 +107,7 @@ export const consultancyData2026: OhwEntityData = {
         { id: "c1", description: "D facturatie", values: { "Dec-25": 182463, "Jan-26": 367303, "Feb-26": 561492 }, locked: true, sourceSlot: 'd_lijst' },
         { id: "c2", description: "Factuurdocumenten", values: { "Dec-25": 18350 } },
         { id: "c3", description: "Uren zonder tarief", values: { "Jan-26": 1553 } },
-        { id: "c4", description: "Missing hours (nog niet geboekte of goed gekeurde uren)", values: { "Dec-25": 39569, "Jan-26": 64256, "Feb-26": 76090 } },
+        { id: "c4", description: "Missing hours (nog niet geboekte of goed gekeurde uren)", values: { "Dec-25": 39569, "Jan-26": 64256, "Feb-26": 76090 }, locked: true, sourceSlot: 'missing_hours' },
         { id: "c5", description: "BAM indexatie (CAO verhoging)", values: { "Dec-25": 18842 } },
         { id: "c6", description: "Voorziening BAM Indexatie", values: { "Dec-25": -18000 } },
         { id: "c7", description: "Indexatie Van Gelder, Circet en Allinq (18,680-86,998-241,774), Index 2.8%", values: { "Jan-26": 9800, "Feb-26": 10000 } },

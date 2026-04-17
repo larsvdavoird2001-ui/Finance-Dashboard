@@ -64,9 +64,12 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     absoluteValue: true,
   },
   missing_hours: {
-    amountCols: ['ontbrekende uren', 'missing', 'uren', 'hours'],
+    amountCols: ['ontbrekende uren', 'missing', 'uren', 'hours', 'missing hours', 'totaal uren'],
     bvCols: ['winstcentrum', 'bv', 'afdeling'],
-    positiveOnly: true,
+    positiveOnly: false,
+    targetBv: 'Consultancy',
+    targetRowId: 'c4',
+    targetEntity: 'Consultancy',
   },
   ohw: {
     amountCols: ['ohw', 'onderhanden', 'waarde', 'bedrag', 'amount', 'saldo', 'balance', 'totaal'],
@@ -415,10 +418,131 @@ function parseOhwExcel(wb: XLSX.WorkBook, config: SlotAmountConfig): ParseResult
   }
 }
 
+// ── Missing Hours speciaal: werknemer ID × tarief × 0.9 ─────────────────────
+// Tarieven worden meegegeven zodat de parser niet afhankelijk is van de store.
+export interface TariffLookup {
+  [employeeId: string]: { tarief: number; naam: string }
+}
+
+function parseMissingHours(
+  rows: Record<string, unknown>[],
+  headers: string[],
+  tariffs: TariffLookup,
+  config: SlotAmountConfig,
+): ParseResult {
+  const warnings: string[] = []
+  const DECLARABILITEIT = 0.9
+
+  // Zoek de kolom met werknemer ID (numeriek veld, "id", "medewerker", "personeelsnummer", etc.)
+  const idColCandidates = ['id', 'medewerker id', 'personeelsnummer', 'employee id', 'werknemer',
+    'medew', 'pers.nr', 'persnr', 'personeelsnr', 'nummer', 'nr', 'employee']
+  let idCol = ''
+  for (const h of headers) {
+    const hl = h.toLowerCase()
+    if (idColCandidates.some(kw => hl.includes(kw))) { idCol = h; break }
+  }
+  // Fallback: zoek kolom met veel numerieke waarden die matchen met tariff IDs
+  if (!idCol) {
+    let bestMatch = 0
+    for (const h of headers) {
+      let matches = 0
+      for (const row of rows.slice(0, 50)) {
+        const v = String(row[h] ?? '').trim()
+        if (v && tariffs[v]) matches++
+      }
+      if (matches > bestMatch) { bestMatch = matches; idCol = h }
+    }
+  }
+
+  // Zoek de uren kolom
+  const hoursKw = ['uren', 'hours', 'missing', 'ontbrekend', 'totaal uren', 'missing hours', 'aantal']
+  let hoursCol = ''
+  for (const h of headers) {
+    const hl = h.toLowerCase()
+    if (hoursKw.some(kw => hl.includes(kw))) { hoursCol = h; break }
+  }
+  // Fallback: zoek numerieke kolom die niet het ID is
+  if (!hoursCol) {
+    for (const h of headers) {
+      if (h === idCol) continue
+      const sample = rows.slice(0, 20)
+      const numeric = sample.filter(r => parseDutchNumber(r[h]) !== null).length
+      if (numeric > sample.length * 0.5) { hoursCol = h; break }
+    }
+  }
+
+  if (!idCol) warnings.push('Geen werknemer-ID kolom gevonden. Controleer het bestand.')
+  if (!hoursCol) warnings.push('Geen uren-kolom gevonden. Controleer het bestand.')
+
+  let totalBerekend = 0
+  let parsedCount = 0
+  let skippedCount = 0
+  let matchedCount = 0
+  let unmatchedIds: string[] = []
+
+  for (const row of rows) {
+    const empId = String(row[idCol] ?? '').trim().replace(/\.0$/, '') // strip ".0" from numeric IDs
+    const hours = parseDutchNumber(row[hoursCol])
+
+    if (!empId || hours === null) { skippedCount++; continue }
+    parsedCount++
+
+    const tariff = tariffs[empId]
+    if (!tariff) {
+      unmatchedIds.push(empId)
+      skippedCount++
+      continue
+    }
+
+    const bedrag = Math.abs(hours) * tariff.tarief * DECLARABILITEIT
+    totalBerekend += bedrag
+    matchedCount++
+  }
+
+  // Afronden op hele euro
+  totalBerekend = Math.round(totalBerekend)
+
+  if (unmatchedIds.length > 0) {
+    const unique = [...new Set(unmatchedIds)]
+    warnings.push(
+      `${unique.length} medewerker(s) niet gevonden in tarieftabel: ${unique.slice(0, 5).join(', ')}` +
+      (unique.length > 5 ? ` en ${unique.length - 5} meer` : '') +
+      `. Deze worden overgeslagen.`
+    )
+  }
+
+  warnings.push(
+    `Berekening: ${matchedCount} medewerkers × tarief × ${DECLARABILITEIT} declarabiliteit = € ${totalBerekend.toLocaleString('nl-NL')}`
+  )
+
+  return {
+    perBv: {
+      Consultancy: totalBerekend,
+      Projects: 0,
+      Software: 0,
+    },
+    totalAmount: totalBerekend,
+    rowCount: rows.length,
+    parsedCount,
+    skippedCount,
+    detectedAmountCol: hoursCol || '(uren)',
+    detectedBvCol: idCol || '(werknemer ID)',
+    headers,
+    preview: rows.slice(0, 5) as Record<string, unknown>[],
+    rawRows: rows as Record<string, unknown>[],
+    warnings,
+    targetBv: config.targetBv,
+    targetRowId: config.targetRowId,
+    targetEntity: config.targetEntity,
+    unmatchedCount: unmatchedIds.length,
+  }
+}
+
 export async function parseImportFile(
   file: File,
   slotId: string,
   overrides?: ParseOverrides,
+  tariffLookup?: TariffLookup,
 ): Promise<ParseResult> {
   const config = SLOT_CONFIGS[slotId] ?? SLOT_CONFIGS.factuurvolume
 
@@ -430,17 +554,16 @@ export async function parseImportFile(
         const data = e.target?.result
         const wb = XLSX.read(data, { type: 'array', cellDates: true })
 
-        // ── OHW Excel: speciaal geval — lees totaal uit tabblad "Onderhande Werk", kolom AO, rij 1 ──
+        // ── OHW Excel: speciaal geval — lees totaal uit tabblad "Onderhande Werk", kolom AO ──
         if (slotId === 'ohw') {
           const ohwResult = parseOhwExcel(wb, config)
           if (ohwResult) { resolve(ohwResult); return }
-          // Fallback: als het tabblad niet gevonden wordt, ga door met generieke parsing
         }
 
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
           defval: '',
-          raw: false, // laat XLSX getallen als strings — wij parsen robuust
+          raw: false,
         })
 
         if (rows.length === 0) {
@@ -449,6 +572,12 @@ export async function parseImportFile(
         }
 
         const headers = Object.keys(rows[0])
+
+        // ── Missing Hours: speciaal geval — werknemer ID × tarief × 0.9 ──
+        if (slotId === 'missing_hours' && tariffLookup) {
+          resolve(parseMissingHours(rows, headers, tariffLookup, config))
+          return
+        }
         const warnings: string[] = []
 
         // Kolom-detectie (of handmatige override)

@@ -14,6 +14,7 @@ const SOURCE_LABELS: Record<string, string> = {
   uren_lijst: 'Uren lijst',
   d_lijst: 'D Lijst',
   ohw: 'OHW Excel',
+  missing_hours: 'Missing Hours',
 }
 
 // Description cell: tekst afgekapt met ellipsis, schuift open bij focus

@@ -84,6 +84,24 @@ CREATE TABLE IF NOT EXISTS ohw_entities (
   UNIQUE(year, entity)
 );
 
+-- 6. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
+CREATE TABLE IF NOT EXISTS tariff_entries (
+  id text PRIMARY KEY,                -- werknemer ID
+  bedrijf text DEFAULT '',
+  naam text DEFAULT '',
+  powerbi_naam text DEFAULT '',
+  stroming text DEFAULT '',
+  tarief numeric DEFAULT 0,
+  fte numeric,
+  functie text DEFAULT '',
+  leiding_gevende text DEFAULT '',
+  manager text DEFAULT '',
+  powerbi_naam2 text DEFAULT '',
+  team text DEFAULT '',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
 -- ============================================================================
 -- Row Level Security (RLS) — open voor anonieme toegang (intern dashboard)
 -- ============================================================================
@@ -92,6 +110,7 @@ ALTER TABLE fte_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE import_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE import_raw_data ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ohw_entities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tariff_entries ENABLE ROW LEVEL SECURITY;
 
 -- Policies: volledige lees/schrijf-toegang voor iedereen (aanpassen als auth nodig is)
 CREATE POLICY "Allow all on closing_entries" ON closing_entries FOR ALL USING (true) WITH CHECK (true);
@@ -99,6 +118,7 @@ CREATE POLICY "Allow all on fte_entries" ON fte_entries FOR ALL USING (true) WIT
 CREATE POLICY "Allow all on import_records" ON import_records FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on import_raw_data" ON import_raw_data FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on ohw_entities" ON ohw_entities FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on tariff_entries" ON tariff_entries FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================================
 -- Indexes voor snelle queries
@@ -109,6 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_import_month ON import_records(month);
 CREATE INDEX IF NOT EXISTS idx_import_status ON import_records(status);
 CREATE INDEX IF NOT EXISTS idx_raw_record ON import_raw_data(record_id);
 CREATE INDEX IF NOT EXISTS idx_ohw_year_entity ON ohw_entities(year, entity);
+CREATE INDEX IF NOT EXISTS idx_tariff_bedrijf ON tariff_entries(bedrijf);
 
 -- ============================================================================
 -- updated_at trigger — automatisch bijwerken bij UPDATE
@@ -131,4 +152,8 @@ CREATE OR REPLACE TRIGGER trg_fte_updated
 
 CREATE OR REPLACE TRIGGER trg_ohw_updated
   BEFORE UPDATE ON ohw_entities
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE OR REPLACE TRIGGER trg_tariff_updated
+  BEFORE UPDATE ON tariff_entries
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();

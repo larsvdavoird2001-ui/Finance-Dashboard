@@ -94,6 +94,21 @@ export interface ClosingEntry {
   remark: string
 }
 
+export interface TariffEntry {
+  id: string         // werknemer ID (bijv. "10299")
+  bedrijf: string    // BV naam (Projects, Consultancy, Software, Spanje)
+  naam: string
+  powerbiNaam: string
+  stroming: string
+  tarief: number     // uurtarief
+  fte: number | null
+  functie: string
+  leidingGevende: string
+  manager: string
+  powerbiNaam2: string
+  team: string
+}
+
 export interface GlobalFilter {
   year: '2025' | '2026' | 'all'
   bv: BvId | 'all'
