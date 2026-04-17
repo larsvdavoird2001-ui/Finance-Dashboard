@@ -152,10 +152,12 @@ export function MaandTab({ filter: _filter }: Props) {
   const updateRowValue = useOhwStore(s => s.updateRowValue)
   const tariffEntries = useTariffStore(s => s.entries)
 
-  // Bouw tariff lookup voor missing hours parser
+  // Bouw tariff lookup voor missing hours parser — ALLEEN Consultancy medewerkers
   const tariffLookup: TariffLookup = {}
   for (const t of tariffEntries) {
-    tariffLookup[t.id] = { tarief: t.tarief, naam: t.naam }
+    if (t.bedrijf === 'Consultancy') {
+      tariffLookup[t.id] = { tarief: t.tarief, naam: t.naam }
+    }
   }
   const { entries: fteEntries, updateEntry: updateFte } = useFteStore()
   const fteEntry = (bv: BvId) => fteEntries.find(e => e.bv === bv && e.month === month)

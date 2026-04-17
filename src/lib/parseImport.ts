@@ -419,9 +419,21 @@ function parseOhwExcel(wb: XLSX.WorkBook, config: SlotAmountConfig): ParseResult
 }
 
 // ── Missing Hours speciaal: werknemer ID × tarief × 0.9 ─────────────────────
-// Tarieven worden meegegeven zodat de parser niet afhankelijk is van de store.
+// Alleen Consultancy medewerkers worden meegenomen in de berekening.
+// De parser analyseert eerst de structuur van het bestand om de juiste kolommen
+// te vinden door werknemer IDs te matchen tegen de tarieftabel.
 export interface TariffLookup {
   [employeeId: string]: { tarief: number; naam: string }
+}
+
+/** Normaliseer een waarde naar een ID-string: strip decimalen, whitespace, ".0" */
+function normalizeId(val: unknown): string {
+  if (val === null || val === undefined || val === '') return ''
+  let s = String(val).trim()
+  // Numerieke waarden: 10573.0 → "10573"
+  if (/^\d+\.0*$/.test(s)) s = s.replace(/\.0*$/, '')
+  // Soms met leading zeros of spaties
+  return s.replace(/\s/g, '')
 }
 
 function parseMissingHours(
@@ -433,70 +445,109 @@ function parseMissingHours(
   const warnings: string[] = []
   const DECLARABILITEIT = 0.9
 
-  // Zoek de kolom met werknemer ID (numeriek veld, "id", "medewerker", "personeelsnummer", etc.)
-  const idColCandidates = ['id', 'medewerker id', 'personeelsnummer', 'employee id', 'werknemer',
-    'medew', 'pers.nr', 'persnr', 'personeelsnr', 'nummer', 'nr', 'employee']
+  // Alle bekende tarief-IDs voor snelle lookup
+  const tariffIds = new Set(Object.keys(tariffs))
+
+  // ── STAP 1: Analyseer elke kolom — zoek de ID-kolom door te matchen met tarieftabel ──
+  // Dit is het sterkste signaal: welke kolom bevat de meeste bekende werknemer IDs?
+  warnings.push(`Bestandsanalyse: ${rows.length} rijen, ${headers.length} kolommen`)
+
   let idCol = ''
+  let bestIdMatches = 0
+
   for (const h of headers) {
-    const hl = h.toLowerCase()
-    if (idColCandidates.some(kw => hl.includes(kw))) { idCol = h; break }
-  }
-  // Fallback: zoek kolom met veel numerieke waarden die matchen met tariff IDs
-  if (!idCol) {
-    let bestMatch = 0
-    for (const h of headers) {
-      let matches = 0
-      for (const row of rows.slice(0, 50)) {
-        const v = String(row[h] ?? '').trim()
-        if (v && tariffs[v]) matches++
-      }
-      if (matches > bestMatch) { bestMatch = matches; idCol = h }
+    let matches = 0
+    const sample = rows.length > 100 ? rows.slice(0, 100) : rows
+    for (const row of sample) {
+      const v = normalizeId(row[h])
+      if (v && tariffIds.has(v)) matches++
+    }
+    if (matches > bestIdMatches) {
+      bestIdMatches = matches
+      idCol = h
     }
   }
 
-  // Zoek de uren kolom
-  const hoursKw = ['uren', 'hours', 'missing', 'ontbrekend', 'totaal uren', 'missing hours', 'aantal']
+  // Ook keyword-match als extra check
+  if (bestIdMatches === 0) {
+    const idKw = ['id', 'medewerker', 'personeelsnummer', 'employee', 'werknemer',
+      'pers.nr', 'persnr', 'personeelsnr', 'nummer', 'medew']
+    for (const h of headers) {
+      const hl = h.toLowerCase()
+      if (idKw.some(kw => hl.includes(kw))) { idCol = h; break }
+    }
+  }
+
+  // ── STAP 2: Zoek de uren-kolom ──
+  // Eerst op keyword, dan op data-analyse (numerieke kolom met redelijke waarden)
+  const hoursKw = ['uren', 'hours', 'missing', 'ontbrekend', 'totaal uren',
+    'missing hours', 'aantal', 'hrs', 'verschil', 'ontbrekende']
   let hoursCol = ''
   for (const h of headers) {
     const hl = h.toLowerCase()
     if (hoursKw.some(kw => hl.includes(kw))) { hoursCol = h; break }
   }
-  // Fallback: zoek numerieke kolom die niet het ID is
+  // Fallback: zoek numerieke kolom die niet het ID is en redelijke urenwaarden heeft (0-500)
   if (!hoursCol) {
+    let bestScore = 0
     for (const h of headers) {
       if (h === idCol) continue
-      const sample = rows.slice(0, 20)
-      const numeric = sample.filter(r => parseDutchNumber(r[h]) !== null).length
-      if (numeric > sample.length * 0.5) { hoursCol = h; break }
+      const sample = rows.slice(0, 30)
+      let numericCount = 0
+      let reasonable = 0
+      for (const row of sample) {
+        const v = parseDutchNumber(row[h])
+        if (v !== null) {
+          numericCount++
+          if (Math.abs(v) <= 500) reasonable++
+        }
+      }
+      const score = numericCount > 0 ? (reasonable / numericCount) * (numericCount / sample.length) : 0
+      if (score > bestScore && numericCount > sample.length * 0.3) {
+        bestScore = score
+        hoursCol = h
+      }
     }
   }
 
-  if (!idCol) warnings.push('Geen werknemer-ID kolom gevonden. Controleer het bestand.')
-  if (!hoursCol) warnings.push('Geen uren-kolom gevonden. Controleer het bestand.')
+  // Rapporteer gevonden kolommen
+  if (idCol) {
+    warnings.push(`Werknemer-ID kolom: "${idCol}" (${bestIdMatches} matches met tarieftabel)`)
+  } else {
+    warnings.push('⚠ Geen werknemer-ID kolom gevonden — controleer of het bestand werknemer IDs bevat.')
+  }
+  if (hoursCol) {
+    warnings.push(`Uren-kolom: "${hoursCol}"`)
+  } else {
+    warnings.push('⚠ Geen uren-kolom gevonden — controleer het bestand.')
+  }
 
+  // ── STAP 3: Bereken per medewerker ──
   let totalBerekend = 0
   let parsedCount = 0
   let skippedCount = 0
   let matchedCount = 0
-  let unmatchedIds: string[] = []
+  let nonConsultancySkipped = 0
+  const unmatchedIds: string[] = []
+  const details: Array<{ id: string; naam: string; uren: number; tarief: number; bedrag: number }> = []
 
   for (const row of rows) {
-    const empId = String(row[idCol] ?? '').trim().replace(/\.0$/, '') // strip ".0" from numeric IDs
+    const empId = normalizeId(row[idCol])
     const hours = parseDutchNumber(row[hoursCol])
 
-    if (!empId || hours === null) { skippedCount++; continue }
+    if (!empId || hours === null || hours === 0) { skippedCount++; continue }
     parsedCount++
 
     const tariff = tariffs[empId]
     if (!tariff) {
       unmatchedIds.push(empId)
-      skippedCount++
       continue
     }
 
     const bedrag = Math.abs(hours) * tariff.tarief * DECLARABILITEIT
     totalBerekend += bedrag
     matchedCount++
+    details.push({ id: empId, naam: tariff.naam, uren: Math.abs(hours), tarief: tariff.tarief, bedrag })
   }
 
   // Afronden op hele euro
@@ -505,15 +556,25 @@ function parseMissingHours(
   if (unmatchedIds.length > 0) {
     const unique = [...new Set(unmatchedIds)]
     warnings.push(
-      `${unique.length} medewerker(s) niet gevonden in tarieftabel: ${unique.slice(0, 5).join(', ')}` +
+      `${unique.length} werknemer(s) niet in Consultancy tarieftabel: ` +
+      unique.slice(0, 5).join(', ') +
       (unique.length > 5 ? ` en ${unique.length - 5} meer` : '') +
-      `. Deze worden overgeslagen.`
+      ` (overgeslagen — mogelijk andere BV)`
     )
   }
 
   warnings.push(
-    `Berekening: ${matchedCount} medewerkers × tarief × ${DECLARABILITEIT} declarabiliteit = € ${totalBerekend.toLocaleString('nl-NL')}`
+    `Resultaat: ${matchedCount} Consultancy medewerkers × tarief × ${DECLARABILITEIT} = € ${totalBerekend.toLocaleString('nl-NL')}`
   )
+
+  // Top 5 grootste bijdragen tonen
+  details.sort((a, b) => b.bedrag - a.bedrag)
+  if (details.length > 0) {
+    const top = details.slice(0, 5).map(d =>
+      `${d.naam}: ${d.uren.toFixed(1)}u × €${d.tarief} × 0,9 = €${Math.round(d.bedrag).toLocaleString('nl-NL')}`
+    ).join(' | ')
+    warnings.push(`Top bijdragen: ${top}`)
+  }
 
   return {
     perBv: {
