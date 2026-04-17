@@ -1,10 +1,7 @@
 import { create } from 'zustand'
 import type { FteEntry, BvId } from '../data/types'
+import { fetchFteEntries, upsertFteEntry, upsertAllFteEntries } from '../lib/db'
 
-// Baseline FTE and headcount based on hours data (Jan-Mar 2026 actuals)
-// Consultancy ~14k hrs / 152 hrs per fte/month ≈ 92 FTE
-// Projects    ~3.1k hrs / 152 ≈ 20 FTE
-// Software    ~2.7k hrs / 152 ≈ 18 FTE
 const MONTHS = ['Jan-26', 'Feb-26', 'Mar-26']
 
 const BASELINE: Record<BvId, { fte: number; headcount: number }> = {
@@ -32,15 +29,32 @@ function makeEntries(): FteEntry[] {
 
 interface FteStore {
   entries: FteEntry[]
+  loaded: boolean
+  loadFromDb: () => Promise<void>
   updateEntry: (id: string, patch: Partial<Pick<FteEntry, 'fte' | 'headcount'>>) => void
   getEntry:    (bv: BvId, month: string) => FteEntry | undefined
 }
 
 export const useFteStore = create<FteStore>((set, get) => ({
   entries: makeEntries(),
+  loaded: false,
 
-  updateEntry: (id, patch) =>
-    set(s => ({ entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e) })),
+  loadFromDb: async () => {
+    const rows = await fetchFteEntries()
+    if (rows.length > 0) {
+      set({ entries: rows, loaded: true })
+    } else {
+      const initial = makeEntries()
+      await upsertAllFteEntries(initial)
+      set({ loaded: true })
+    }
+  },
+
+  updateEntry: (id, patch) => {
+    set(s => ({ entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e) }))
+    const entry = get().entries.find(e => e.id === id)
+    if (entry) upsertFteEntry(entry)
+  },
 
   getEntry: (bv, month) => get().entries.find(e => e.bv === bv && e.month === month),
 }))

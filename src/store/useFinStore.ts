@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { ClosingEntry, BvId } from '../data/types'
+import { fetchClosingEntries, upsertClosingEntry, upsertAllClosingEntries } from '../lib/db'
 
 // Initial closing data sourced from P02.2026 Maandrapportage actuals
 const INITIAL_ENTRIES: ClosingEntry[] = [
@@ -64,6 +65,8 @@ const INITIAL_ENTRIES: ClosingEntry[] = [
 
 interface FinStore {
   entries: ClosingEntry[]
+  loaded: boolean
+  loadFromDb: () => Promise<void>
   updateEntry: (id: string, patch: Partial<Omit<ClosingEntry, 'id'>>) => void
   getEntry: (bv: BvId, month: string) => ClosingEntry | undefined
   getMonthEntries: (month: string) => ClosingEntry[]
@@ -71,11 +74,27 @@ interface FinStore {
 
 export const useFinStore = create<FinStore>((set, get) => ({
   entries: INITIAL_ENTRIES,
+  loaded: false,
 
-  updateEntry: (id, patch) =>
+  loadFromDb: async () => {
+    const rows = await fetchClosingEntries()
+    if (rows.length > 0) {
+      set({ entries: rows, loaded: true })
+    } else {
+      // Eerste keer: seed initial data naar Supabase
+      await upsertAllClosingEntries(INITIAL_ENTRIES)
+      set({ loaded: true })
+    }
+  },
+
+  updateEntry: (id, patch) => {
     set(s => ({
       entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e),
-    })),
+    }))
+    // Async sync naar Supabase
+    const entry = get().entries.find(e => e.id === id)
+    if (entry) upsertClosingEntry(entry)
+  },
 
   getEntry: (bv, month) =>
     get().entries.find(e => e.bv === bv && e.month === month),
