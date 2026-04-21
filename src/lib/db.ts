@@ -208,6 +208,50 @@ export async function upsertAllOhwEntities(year: string, entities: OhwEntityData
   if (error) console.error('upsertAllOhwEntities:', error)
 }
 
+// ── Budget Overrides (Budgetten tab — editable forward-month budgets) ──────
+export interface BudgetOverrideRow {
+  entity: string  // 'Consultancy' | 'Projects' | 'Software' | 'Holdings'
+  month: string   // bv. 'Apr-26'
+  plKey: string   // P&L-sleutel, bv. 'netto_omzet'
+  value: number
+}
+
+export async function fetchBudgetOverrides(): Promise<BudgetOverrideRow[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('budget_overrides').select('*')
+  if (error) { console.error('fetchBudgetOverrides:', error); return [] }
+  return (data ?? []).map(row => ({
+    entity: row.entity,
+    month: row.month,
+    plKey: row.pl_key,
+    value: Number(row.value ?? 0),
+  }))
+}
+
+export async function upsertBudgetOverride(row: BudgetOverrideRow): Promise<void> {
+  if (!supabaseEnabled) return
+  const payload = {
+    entity: row.entity,
+    month: row.month,
+    pl_key: row.plKey,
+    value: row.value,
+  }
+  const { error } = await supabase
+    .from('budget_overrides')
+    .upsert(payload, { onConflict: 'entity,month,pl_key' })
+  if (error) console.error('upsertBudgetOverride:', error)
+}
+
+export async function deleteBudgetOverridesForMonth(entity: string, month: string): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase
+    .from('budget_overrides')
+    .delete()
+    .eq('entity', entity)
+    .eq('month', month)
+  if (error) console.error('deleteBudgetOverridesForMonth:', error)
+}
+
 // ── OHW Evidence (bijlages / onderbouwing bestanden) ────────────────────────
 export interface EvidenceEntry {
   id: string

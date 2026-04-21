@@ -6,6 +6,7 @@ import { useRawDataStore } from '../store/useRawDataStore'
 import { useOhwStore } from '../store/useOhwStore'
 import { useTariffStore } from '../store/useTariffStore'
 import { useEvidenceStore } from '../store/useEvidenceStore'
+import { useBudgetStore } from '../store/useBudgetStore'
 
 /** Laad alle stores vanuit Supabase bij app start.
  *  Retourneert { ready, error } — toon een loader tot ready=true. */
@@ -20,6 +21,7 @@ export function useDbInit() {
   const loadOhw = useOhwStore(s => s.loadFromDb)
   const loadTariff = useTariffStore(s => s.loadFromDb)
   const loadEvidence = useEvidenceStore(s => s.loadFromDb)
+  const loadBudget = useBudgetStore(s => s.loadFromDb)
 
   useEffect(() => {
     let cancelled = false
@@ -35,6 +37,7 @@ export function useDbInit() {
           loadOhw(),
           loadTariff(),
           loadEvidence(),
+          loadBudget(),
         ])
         if (!cancelled) setReady(true)
       } catch (err) {

@@ -2,6 +2,11 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { monthlyBudget2026 } from '../data/plData'
 import type { EntityName } from '../data/plData'
+import {
+  fetchBudgetOverrides,
+  upsertBudgetOverride,
+  deleteBudgetOverridesForMonth,
+} from '../lib/db'
 
 export const BUDGET_MONTHS_2026 = [
   'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26',
@@ -9,8 +14,13 @@ export const BUDGET_MONTHS_2026 = [
 ]
 
 /**
- * Budget data = source (from plData for Jan/Feb/Mar) + editable overrides for
- * future months. Overrides persisted in localStorage.
+ * Budget data = source (from plData voor Jan/Feb/Mar) + editable overrides
+ * voor toekomstige maanden.
+ *
+ * Persistentie: Supabase is de primaire opslag (tabel `budget_overrides`).
+ * localStorage wordt ook gebruikt als fallback-cache zodat bewerkingen
+ * behouden blijven als Supabase offline is; bij volgende load-cycle
+ * overschrijven Supabase-waarden de cache.
  *
  * Structure: overrides[entity][month][plKey] = value (signed, like source data)
  */
@@ -22,12 +32,13 @@ function emptyOverrides(): BudgetOverrides {
 
 interface BudgetState {
   overrides: BudgetOverrides
+  loaded: boolean
+  loadFromDb: () => Promise<void>
   setValue: (entity: EntityName, month: string, key: string, val: number) => void
   setMonth: (entity: EntityName, month: string, data: Record<string, number>) => void
   clearMonth: (entity: EntityName, month: string) => void
-  /** Effective budget for a BV/month: source ?? override ?? 0  */
+  /** Effective budget for a BV/month: source + override merged */
   getMonth: (entity: EntityName, month: string) => Record<string, number>
-  /** Raw source data (for display of "source" badge in UI) */
   hasSource: (entity: EntityName, month: string) => boolean
   hasOverride: (entity: EntityName, month: string) => boolean
 }
@@ -36,6 +47,25 @@ export const useBudgetStore = create<BudgetState>()(
   persist(
     (set, get) => ({
       overrides: emptyOverrides(),
+      loaded: false,
+
+      loadFromDb: async () => {
+        const rows = await fetchBudgetOverrides()
+        if (rows.length > 0) {
+          // Reconstrueer de geneste struct
+          const overrides = emptyOverrides()
+          for (const r of rows) {
+            const entity = r.entity as EntityName
+            if (!overrides[entity]) continue
+            if (!overrides[entity][r.month]) overrides[entity][r.month] = {}
+            overrides[entity][r.month][r.plKey] = r.value
+          }
+          set({ overrides, loaded: true })
+        } else {
+          // Geen remote data — behoud lokale cache (via persist middleware)
+          set({ loaded: true })
+        }
+      },
 
       setValue: (entity, month, key, val) => {
         set(s => {
@@ -45,6 +75,8 @@ export const useBudgetStore = create<BudgetState>()(
           entityOv[month] = monthOv
           return { overrides: { ...s.overrides, [entity]: entityOv } }
         })
+        // Sync naar Supabase (fire-and-forget)
+        upsertBudgetOverride({ entity, month, plKey: key, value: val })
       },
 
       setMonth: (entity, month, data) => {
@@ -53,6 +85,10 @@ export const useBudgetStore = create<BudgetState>()(
           entityOv[month] = { ...data }
           return { overrides: { ...s.overrides, [entity]: entityOv } }
         })
+        // Sync elk key naar Supabase
+        for (const [k, v] of Object.entries(data)) {
+          upsertBudgetOverride({ entity, month, plKey: k, value: v })
+        }
       },
 
       clearMonth: (entity, month) => {
@@ -61,6 +97,8 @@ export const useBudgetStore = create<BudgetState>()(
           delete entityOv[month]
           return { overrides: { ...s.overrides, [entity]: entityOv } }
         })
+        // Verwijder alle rows voor deze entity+month uit Supabase
+        deleteBudgetOverridesForMonth(entity, month)
       },
 
       getMonth: (entity, month) => {
