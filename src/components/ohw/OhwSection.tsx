@@ -3,6 +3,7 @@ import type { OhwSection as OhwSectionType, OhwRow } from '../../data/types'
 import { fmt, parseNL, gv } from '../../lib/format'
 import { useNavStore } from '../../store/useNavStore'
 import { useEvidenceStore, downloadEvidence, fileIcon, formatFileSize } from '../../store/useEvidenceStore'
+import { useOhwStore } from '../../store/useOhwStore'
 
 interface Props {
   section: OhwSectionType
@@ -110,6 +111,36 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
   const navigateTo = useNavStore(s => s.navigateTo)
   const evidenceEntries = useEvidenceStore(s => s.entries)
   const [expandedEvidenceRow, setExpandedEvidenceRow] = useState<string | null>(null)
+  // Handmatige override op een locked cel: { rowId, month, value, remark }
+  const [overrideCell, setOverrideCell] = useState<null | { rowId: string; month: string; value: string; remark: string }>(null)
+  const updateRowValueStore = useOhwStore(s => s.updateRowValue)
+  const updateRowRemarkStore = useOhwStore(s => s.updateRowRemark)
+
+  const startOverride = (row: OhwRow, month: string) => {
+    const currentValue = gv(row.values, month)
+    const currentRemark = row.remarks?.[month] ?? ''
+    setOverrideCell({
+      rowId: row.id,
+      month,
+      value: currentValue !== 0 ? fmt(currentValue) : '',
+      remark: currentRemark,
+    })
+  }
+  const saveOverride = () => {
+    if (!overrideCell || !entity) return
+    const v = parseNL(overrideCell.value)
+    if (!isFinite(v)) return
+    if (!overrideCell.remark.trim() || overrideCell.remark.trim().length < 3) return
+    updateRowValueStore('2026', entity, overrideCell.rowId, overrideCell.month, v)
+    updateRowRemarkStore('2026', entity, overrideCell.rowId, overrideCell.month, overrideCell.remark.trim())
+    setOverrideCell(null)
+  }
+  const cancelOverride = () => setOverrideCell(null)
+  const clearOverride = (rowId: string, month: string) => {
+    if (!entity) return
+    if (!confirm('Handmatige toelichting wissen voor deze cel? (Waarde blijft staan tot volgende upload)')) return
+    updateRowRemarkStore('2026', entity, rowId, month, '')
+  }
 
   const updateCell = useCallback((rowId: string, month: string, raw: string) => {
     const v = parseNL(raw)
@@ -173,32 +204,55 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
               <DescCell row={row} onSave={desc => updateDescription(row.id, desc)} />
               {months.map(m => {
                 const v = gv(row.values, m)
-                // Locked rows: alleen lezen, geen bewerking
+                const cellRemark = row.remarks?.[m]
+                // Locked rows: read-only maar met optionele handmatige override
                 if (row.locked) {
                   const clickable = !!row.sourceSlot && v !== 0
                   return (
-                    <td key={m} className="mono r" style={{ padding: '4px 8px', background: 'var(--bg2)', fontSize: 12, color: v !== 0 ? 'var(--t1)' : 'var(--t3)' }}>
-                      {clickable ? (
+                    <td key={m} className="mono r" style={{
+                      padding: '4px 8px',
+                      background: cellRemark ? 'rgba(245,166,35,0.07)' : 'var(--bg2)',
+                      fontSize: 12, color: v !== 0 ? 'var(--t1)' : 'var(--t3)',
+                      position: 'relative',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                        {cellRemark && (
+                          <span
+                            style={{ cursor: 'help', fontSize: 10 }}
+                            title={`Handmatige toelichting: ${cellRemark}\n(klik ✏ om te wijzigen, klik 💬 om toelichting te verwijderen)`}
+                            onClick={(e) => { e.stopPropagation(); clearOverride(row.id, m) }}
+                          >💬</span>
+                        )}
+                        {clickable ? (
+                          <button
+                            style={{
+                              background: 'none', border: 'none', cursor: 'pointer',
+                              color: 'var(--blue)', fontFamily: 'var(--mono)', fontSize: 12,
+                              fontWeight: 600, padding: 0, textDecoration: 'underline',
+                              textDecorationStyle: 'dotted', textUnderlineOffset: 3,
+                            }}
+                            title="Ga naar bestand in importoverzicht"
+                            onClick={() => navigateTo({
+                              tab: 'maand',
+                              section: 'import',
+                              month: m,
+                              slotId: row.sourceSlot!,
+                            })}
+                          >
+                            {fmt(v)}
+                          </button>
+                        ) : (
+                          <span style={{ fontFamily: 'var(--mono)' }}>{v !== 0 ? fmt(v) : '—'}</span>
+                        )}
                         <button
                           style={{
                             background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'var(--blue)', fontFamily: 'var(--mono)', fontSize: 12,
-                            fontWeight: 600, padding: 0, textDecoration: 'underline',
-                            textDecorationStyle: 'dotted', textUnderlineOffset: 3,
+                            color: 'var(--t3)', fontSize: 10, padding: '1px 3px',
                           }}
-                          title="Ga naar bestand in importoverzicht"
-                          onClick={() => navigateTo({
-                            tab: 'maand',
-                            section: 'import',
-                            month: m,
-                            slotId: row.sourceSlot!,
-                          })}
-                        >
-                          {fmt(v)}
-                        </button>
-                      ) : (
-                        v !== 0 ? fmt(v) : '—'
-                      )}
+                          title="Handmatig overschrijven (toelichting vereist)"
+                          onClick={() => startOverride(row, m)}
+                        >✏</button>
+                      </div>
                     </td>
                   )
                 }
@@ -301,6 +355,110 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
 
         </>
       )}
+
+      {/* Override modal — rendered buiten de tabel via portal-achtig fragment.
+          Niet een echte portal; React staat dit toe omdat de <> wrapper
+          meerdere root-children accepteert. De modal krijgt position:fixed. */}
+      {overrideCell && entity && (() => {
+        const row = section.rows.find(r => r.id === overrideCell.rowId)
+        const remarkValid = overrideCell.remark.trim().length >= 3
+        const valueParsed = parseNL(overrideCell.value)
+        const valueValid = isFinite(valueParsed)
+        return (
+          <tr style={{ position: 'relative' }}>
+            <td colSpan={months.length + 2} style={{ padding: 0, border: 0, background: 'transparent' }}>
+              <div
+                onClick={(e) => { if (e.target === e.currentTarget) cancelOverride() }}
+                style={{
+                  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  zIndex: 9999, padding: 20,
+                }}
+              >
+                <div style={{
+                  background: 'var(--bg2)', border: '1px solid var(--bd3)', borderRadius: 12,
+                  width: '100%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+                  padding: 20,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                    <span style={{ fontSize: 18 }}>✏</span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>Handmatige override</div>
+                      <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 2 }}>
+                        {entity} · {row?.description?.slice(0, 70) ?? overrideCell.rowId} · <strong>{overrideCell.month}</strong>
+                      </div>
+                    </div>
+                    <button
+                      onClick={cancelOverride}
+                      style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--t3)', fontSize: 18, cursor: 'pointer' }}
+                    >✕</button>
+                  </div>
+
+                  <div style={{
+                    background: 'var(--bd-amber)', border: '1px solid var(--amber)',
+                    borderRadius: 6, padding: '8px 12px', marginBottom: 12,
+                    fontSize: 11, color: 'var(--amber)',
+                  }}>
+                    ⚠ Dit is een <strong>locked rij</strong> die normaal wordt gevuld via {row?.sourceSlot ?? 'een upload'}.
+                    Een handmatige override vereist een toelichting. De volgende upload overschrijft deze waarde,
+                    maar de toelichting blijft als audit-trail staan.
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--t2)', marginBottom: 4 }}>
+                        Waarde (€)
+                      </label>
+                      <input
+                        type="text"
+                        value={overrideCell.value}
+                        onChange={e => setOverrideCell({ ...overrideCell, value: e.target.value })}
+                        placeholder="0"
+                        autoFocus
+                        className="ohw-inp"
+                        style={{ width: '100%', textAlign: 'right', fontSize: 14 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--t2)', marginBottom: 4 }}>
+                        Toelichting <span style={{ color: 'var(--red)' }}>*</span>
+                        <span style={{ color: 'var(--t3)', fontWeight: 400, marginLeft: 6 }}>
+                          (verplicht, min. 3 tekens — bijv. "Correctie per email X", "Handmatig i.v.m. openstaande inkooporder")
+                        </span>
+                      </label>
+                      <textarea
+                        value={overrideCell.remark}
+                        onChange={e => setOverrideCell({ ...overrideCell, remark: e.target.value })}
+                        placeholder="Waarom wordt deze waarde handmatig gezet?"
+                        rows={3}
+                        style={{
+                          width: '100%', background: 'var(--bg1)', border: `1px solid ${remarkValid ? 'var(--bd3)' : 'var(--red)'}`,
+                          borderRadius: 6, color: 'var(--t1)', fontSize: 12, padding: '8px 10px',
+                          fontFamily: 'var(--font)', outline: 'none', resize: 'vertical',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                    <button
+                      className="btn success"
+                      disabled={!valueValid || !remarkValid}
+                      onClick={saveOverride}
+                      style={{ flex: 1, justifyContent: 'center', opacity: (!valueValid || !remarkValid) ? 0.5 : 1 }}
+                    >
+                      ✓ Override opslaan
+                    </button>
+                    <button className="btn ghost" onClick={cancelOverride}>
+                      Annuleren
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        )
+      })()}
     </>
   )
 })

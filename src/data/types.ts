@@ -8,6 +8,9 @@ export interface OhwRow {
   locked?: boolean
   /** Welke import-slot vult deze rij (bijv. 'uren_lijst', 'd_lijst', 'ohw') */
   sourceSlot?: string
+  /** Per-maand toelichtingen bij handmatige override op een locked-rij.
+   *  Key = maand (bv. 'Mar-26'), value = reden-tekst ingevoerd door user. */
+  remarks?: Record<string, string>
 }
 
 export interface OhwSection {

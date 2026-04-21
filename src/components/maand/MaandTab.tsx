@@ -487,6 +487,61 @@ export function MaandTab({ filter: _filter }: Props) {
     showToast(`${record.slotLabel} afgekeurd`, 'r')
   }
 
+  /** Verwijder een import record — als het record goedgekeurd was, maak ook
+   *  de eventuele OHW-waarde / closing-entry-waarde die erdoor was gezet
+   *  ongedaan. Als er nog een ANDERE goedgekeurde upload bestaat voor
+   *  hetzelfde slot+maand, herstel die waarde i.p.v. op 0 te zetten. */
+  const handleRemoveRecord = (record: ImportRecord) => {
+    if (record.status === 'approved') {
+      const slot = UPLOAD_SLOTS.find(s => s.id === record.slotId)
+      // Zoek een andere goedgekeurde record voor hetzelfde slot+maand
+      const fallback = importRecords.find(r =>
+        r.id !== record.id &&
+        r.slotId === record.slotId &&
+        r.month === record.month &&
+        r.status === 'approved',
+      )
+
+      if (slot) {
+        // Multi-BV OHW target (bv. uren_lijst → c_ul/p1/s_ul)
+        if (slot.targetRowByBv) {
+          for (const bv of BVS) {
+            const rowId = slot.targetRowByBv[bv]
+            if (!rowId) continue
+            const restoreAmount = fallback ? (fallback.perBv[bv] ?? 0) : 0
+            updateRowValue('2026', bv, rowId, record.month, restoreAmount)
+          }
+        }
+        // Single-BV OHW target (d_lijst, conceptfacturen, missing_hours, ohw)
+        else if (slot.targetRowId && slot.targetEntity) {
+          const restoreAmount = fallback ? fallback.totalAmount : 0
+          updateRowValue('2026', slot.targetEntity, slot.targetRowId, record.month, restoreAmount)
+        }
+
+        // Closing entries factuurvolume (factuurvolume slot)
+        if (slot.appliesTo.length > 0) {
+          for (const bv of BVS) {
+            const e = entries.find(x => x.bv === bv && x.month === record.month)
+            if (!e) continue
+            const restoreAmount = fallback ? (fallback.perBv[bv] ?? 0) : 0
+            for (const field of slot.appliesTo) {
+              update(e.id, field, restoreAmount)
+            }
+          }
+        }
+      }
+
+      if (fallback) {
+        showToast(`${record.slotLabel} verwijderd — teruggevallen op andere goedgekeurde upload (${fallback.fileName})`, 'g')
+      } else {
+        showToast(`${record.slotLabel} verwijderd — OHW/closing waarde voor ${record.month} op 0 gezet`, 'r')
+      }
+    }
+
+    removeRecord(record.id)
+    rejectRawEntry(record.id)
+  }
+
   // ── Generic wizard callback: factuurvolume / geschreven_uren / etc ──
   const handleGenericWizardConfirm = (result: ParseResult) => {
     if (!genericWizardState) return
@@ -695,7 +750,7 @@ export function MaandTab({ filter: _filter }: Props) {
                           <button
                             className="btn sm ghost"
                             style={{ marginTop: 6, fontSize: 10, color: 'var(--red)' }}
-                            onClick={() => removeRecord(latest.id)}
+                            onClick={() => handleRemoveRecord(latest)}
                           >
                             ✕ Verwijderen
                           </button>
@@ -878,7 +933,7 @@ export function MaandTab({ filter: _filter }: Props) {
                         </td>
                         <td style={{ fontSize: 10, color: 'var(--t3)' }}>{r.uploadedAt}</td>
                         <td>
-                          <button className="btn sm ghost" style={{ fontSize: 10, color: 'var(--t3)' }} onClick={() => removeRecord(r.id)}>✕</button>
+                          <button className="btn sm ghost" style={{ fontSize: 10, color: 'var(--t3)' }} onClick={() => handleRemoveRecord(r)}>✕</button>
                         </td>
                       </tr>
                     ))}

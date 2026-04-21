@@ -17,6 +17,9 @@ interface OhwStore {
   loadFromDb: () => Promise<void>
   updateEntity: (year: '2025' | '2026', updated: OhwEntityData) => void
   updateRowValue: (year: '2025' | '2026', entityName: string, rowId: string, month: string, value: number) => void
+  /** Zet/wist een per-maand toelichting op een rij (voor handmatige override
+   *  op locked-rijen). Lege string wist de toelichting voor die maand. */
+  updateRowRemark: (year: '2025' | '2026', entityName: string, rowId: string, month: string, remark: string) => void
 }
 
 export const useOhwStore = create<OhwStore>((set, get) => ({
@@ -88,6 +91,32 @@ export const useOhwStore = create<OhwStore>((set, get) => ({
       return { [key]: { ...prev, entities } }
     })
     // Async sync naar Supabase
+    const state = get()
+    const yearData = year === '2025' ? state.data2025 : state.data2026
+    const entity = yearData.entities.find(e => e.entity === entityName)
+    if (entity) upsertOhwEntity(year, entity)
+  },
+
+  updateRowRemark: (year, entityName, rowId, month, remark) => {
+    set(state => {
+      const key = year === '2025' ? 'data2025' : 'data2026'
+      const prev = state[key]
+      const entities = prev.entities.map(entity => {
+        if (entity.entity !== entityName) return entity
+        const onderhanden = entity.onderhanden.map(sec => ({
+          ...sec,
+          rows: sec.rows.map(row => {
+            if (row.id !== rowId) return row
+            const remarks = { ...(row.remarks ?? {}) }
+            if (!remark || !remark.trim()) delete remarks[month]
+            else remarks[month] = remark.trim()
+            return { ...row, remarks }
+          }),
+        }))
+        return { ...entity, onderhanden }
+      })
+      return { [key]: { ...prev, entities } }
+    })
     const state = get()
     const yearData = year === '2025' ? state.data2025 : state.data2026
     const entity = yearData.entities.find(e => e.entity === entityName)
