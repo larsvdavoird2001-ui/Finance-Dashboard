@@ -84,7 +84,35 @@ CREATE TABLE IF NOT EXISTS ohw_entities (
   UNIQUE(year, entity)
 );
 
--- 6. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
+-- 6. Budget overrides — per BV per maand per P&L-key, voor Budgetten tab
+CREATE TABLE IF NOT EXISTS budget_overrides (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  entity text NOT NULL CHECK (entity IN ('Consultancy', 'Projects', 'Software', 'Holdings')),
+  month text NOT NULL,
+  pl_key text NOT NULL,
+  value numeric NOT NULL DEFAULT 0,
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE(entity, month, pl_key)
+);
+
+-- 7. Closing archives — snapshots van afgeronde maandafsluitingen
+--    Elke archive bevat een JSON-document met de volledige staat op moment
+--    van afsluiten: ClosingEntry, OHW data, goedgekeurde imports, metadata.
+--    Gebruikt voor ZIP-export + PowerPoint rapportage.
+CREATE TABLE IF NOT EXISTS closing_archives (
+  id text PRIMARY KEY,            -- bijv. "2026-03"
+  month text NOT NULL UNIQUE,     -- "Mar-26"
+  year text NOT NULL,             -- "2026"
+  closed_at timestamptz DEFAULT now(),
+  closed_by text,                 -- optioneel: email/naam van de gebruiker
+  snapshot jsonb NOT NULL DEFAULT '{}',  -- volledige maand-staat
+  summary_metrics jsonb DEFAULT '{}',    -- KPIs: omzet per BV, marge, EBITDA, OHW
+  remark text DEFAULT '',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- 8. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
 CREATE TABLE IF NOT EXISTS tariff_entries (
   id text PRIMARY KEY,                -- werknemer ID
   bedrijf text DEFAULT '',
@@ -111,6 +139,8 @@ ALTER TABLE import_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE import_raw_data ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ohw_entities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tariff_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE budget_overrides ENABLE ROW LEVEL SECURITY;
+ALTER TABLE closing_archives ENABLE ROW LEVEL SECURITY;
 
 -- Policies: volledige lees/schrijf-toegang voor iedereen (aanpassen als auth nodig is)
 CREATE POLICY "Allow all on closing_entries" ON closing_entries FOR ALL USING (true) WITH CHECK (true);
@@ -119,6 +149,8 @@ CREATE POLICY "Allow all on import_records" ON import_records FOR ALL USING (tru
 CREATE POLICY "Allow all on import_raw_data" ON import_raw_data FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on ohw_entities" ON ohw_entities FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on tariff_entries" ON tariff_entries FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on budget_overrides" ON budget_overrides FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on closing_archives" ON closing_archives FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================================
 -- Indexes voor snelle queries
@@ -130,6 +162,8 @@ CREATE INDEX IF NOT EXISTS idx_import_status ON import_records(status);
 CREATE INDEX IF NOT EXISTS idx_raw_record ON import_raw_data(record_id);
 CREATE INDEX IF NOT EXISTS idx_ohw_year_entity ON ohw_entities(year, entity);
 CREATE INDEX IF NOT EXISTS idx_tariff_bedrijf ON tariff_entries(bedrijf);
+CREATE INDEX IF NOT EXISTS idx_budget_entity_month ON budget_overrides(entity, month);
+CREATE INDEX IF NOT EXISTS idx_closing_archive_month ON closing_archives(month);
 
 -- ============================================================================
 -- updated_at trigger — automatisch bijwerken bij UPDATE
@@ -156,4 +190,12 @@ CREATE OR REPLACE TRIGGER trg_ohw_updated
 
 CREATE OR REPLACE TRIGGER trg_tariff_updated
   BEFORE UPDATE ON tariff_entries
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE OR REPLACE TRIGGER trg_budget_overrides_updated
+  BEFORE UPDATE ON budget_overrides
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE OR REPLACE TRIGGER trg_closing_archives_updated
+  BEFORE UPDATE ON closing_archives
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
