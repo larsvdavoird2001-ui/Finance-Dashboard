@@ -3,7 +3,7 @@ import type { ImportRecord, BvId } from '../../data/types'
 import { fmt } from '../../lib/format'
 
 const BV_COLORS: Record<string, string> = {
-  Consultancy: '#4d8ef8',
+  Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
 }
@@ -15,6 +15,7 @@ const SLOT_DESTINATION: Record<string, string> = {
   uren_lijst: 'OHW Overzicht → Projects → "U-Projecten (SAP-overzicht) met tarief"',
   d_lijst: 'OHW Overzicht → Consultancy → "D facturatie"',
   ohw: 'OHW Overzicht → Projects → "Onderhanden projecten (OHW Excel)"',
+  missing_hours: 'OHW Overzicht → Consultancy → "Missing hours (nog niet geboekte of goed gekeurde uren)"',
   factuurvolume: 'Maandafsluiting → Factuurvolume per BV',
   conceptfacturen: 'Maandafsluiting → Factuurvolume per BV',
 }
@@ -24,6 +25,22 @@ const SINGLE_BV_SLOTS: Record<string, BvId> = {
   uren_lijst: 'Projects',
   d_lijst: 'Consultancy',
   ohw: 'Projects',
+  missing_hours: 'Consultancy',
+}
+
+// Labels voor kolomselectie — missing_hours gebruikt de kolommen anders dan
+// de algemene parse (bedragcol = uren, bvcol = werknemer-ID).
+function colLabels(slotId: string) {
+  if (slotId === 'missing_hours') {
+    return {
+      amount: { label: 'Uren-kolom (Missing hours)', color: 'var(--green)' },
+      bv:     { label: 'Werknemer-kolom (ID/naam/alias)', color: 'var(--blue)' },
+    }
+  }
+  return {
+    amount: { label: 'Bedrag-kolom (netto excl. BTW)', color: 'var(--green)' },
+    bv:     { label: 'BV-kolom (business unit)',      color: 'var(--blue)' },
+  }
 }
 
 interface Props {
@@ -46,6 +63,7 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
   const singleBv = SINGLE_BV_SLOTS[record.slotId] ?? null
   const bvDetected = BVS.some(bv => (record.perBv[bv] ?? 0) > 0)
   const bvTotal = BVS.reduce((s, bv) => s + (record.perBv[bv] ?? 0), 0)
+  const labels = colLabels(record.slotId)
 
   const handleReparse = async () => {
     if (!onReparse) return
@@ -148,15 +166,15 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
             <div style={{ fontWeight: 600, color: 'var(--t1)', marginBottom: 6 }}>
               Analyse resultaat
             </div>
-            {!singleBv && (
+            {(record.slotId === 'missing_hours' || !singleBv) && (
               <div>
-                BV-kolom: <span style={{ fontFamily: 'var(--mono)', color: record.detectedBvCol ? 'var(--blue)' : 'var(--amber)', fontSize: 11 }}>
+                {record.slotId === 'missing_hours' ? 'Werknemer-kolom' : 'BV-kolom'}: <span style={{ fontFamily: 'var(--mono)', color: record.detectedBvCol ? 'var(--blue)' : 'var(--amber)', fontSize: 11 }}>
                   {record.detectedBvCol || '⚠ niet herkend'}
                 </span>
               </div>
             )}
             <div>
-              Bedrag-kolom: <span style={{ fontFamily: 'var(--mono)', color: record.detectedAmountCol ? 'var(--green)' : 'var(--amber)', fontSize: 11 }}>
+              {record.slotId === 'missing_hours' ? 'Uren-kolom' : 'Bedrag-kolom'}: <span style={{ fontFamily: 'var(--mono)', color: record.detectedAmountCol ? 'var(--green)' : 'var(--amber)', fontSize: 11 }}>
                 {record.detectedAmountCol || '⚠ niet herkend'}
               </span>
             </div>
@@ -277,7 +295,7 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
                     <div>
                       <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ color: 'var(--green)' }}>●</span> Bedrag-kolom (netto excl. BTW)
+                        <span style={{ color: labels.amount.color }}>●</span> {labels.amount.label}
                       </div>
                       <select
                         style={selectStyle}
@@ -292,7 +310,7 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
                     </div>
                     <div>
                       <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ color: 'var(--blue)' }}>●</span> BV-kolom (business unit)
+                        <span style={{ color: labels.bv.color }}>●</span> {labels.bv.label}
                       </div>
                       <select
                         style={selectStyle}
@@ -359,9 +377,34 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
           )}
 
           {/* Waarschuwingen */}
-          {!bvDetected && (
+          {!bvDetected && record.slotId !== 'missing_hours' && (
             <div style={{ background: 'var(--bd-amber)', border: '1px solid var(--amber)', borderRadius: 7, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: 'var(--amber)' }}>
               ⚠ Geen BV-verdeling gevonden. Gebruik "Aanpassen" om handmatig de juiste kolom te kiezen.
+            </div>
+          )}
+
+          {/* Parser-diagnostiek (altijd getoond als warnings aanwezig zijn) */}
+          {record.warnings && record.warnings.length > 0 && (
+            <div style={{
+              background: 'var(--bg3)', border: '1px solid var(--bd2)',
+              borderRadius: 7, padding: '10px 12px', marginBottom: 12,
+              fontSize: 11, color: 'var(--t2)',
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>
+                Parser-diagnostiek
+              </div>
+              {record.warnings.map((w, i) => {
+                const isErr = w.startsWith('⚠')
+                return (
+                  <div key={i} style={{
+                    fontSize: 11, lineHeight: 1.5,
+                    color: isErr ? 'var(--amber)' : 'var(--t2)',
+                    marginBottom: 3,
+                  }}>
+                    {isErr ? '' : '• '}{w}
+                  </div>
+                )
+              })}
             </div>
           )}
 

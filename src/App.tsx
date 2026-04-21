@@ -7,8 +7,8 @@ import { DashboardTab } from './components/dashboard/DashboardTab'
 import { HoursTab } from './components/hours/HoursTab'
 import { FinancialsTab } from './components/financials/FinancialsTab'
 import { OhwTab } from './components/ohw/OhwTab'
-import { PlTab } from './components/pl/PlTab'
 import { BudgetTab } from './components/budget/BudgetTab'
+import { BudgetsTab } from './components/budget/BudgetsTab'
 import { MaandTab } from './components/maand/MaandTab'
 import { Toast } from './components/common/Toast'
 import { AiChat } from './components/dashboard/AiChat'
@@ -66,9 +66,9 @@ export default function App() {
             showToast={showToast}
           />
         )}
-        {tab === 'pl'     && <PlTab filter={filter} />}
-        {tab === 'budget' && <BudgetTab filter={filter} />}
-        {tab === 'maand'  && <MaandTab filter={filter} />}
+        {tab === 'budget'  && <BudgetTab filter={filter} />}
+        {tab === 'budgets' && <BudgetsTab filter={filter} />}
+        {tab === 'maand'   && <MaandTab filter={filter} />}
       </div>
       <Toast toasts={toasts} />
       <AiChat />

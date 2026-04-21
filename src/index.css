@@ -21,8 +21,11 @@
   --t2: #8fa3c0;   /* secondary — readable muted */
   --t3: #52657e;   /* tertiary — hints & deemphasis only */
 
-  /* ── Brand colors ── */
-  --blue:   #4d8ef8; --blue2:  #2b6fd6; --bd-blue:   rgba(77,142,248,.16);
+  /* ── Brand colors — TPG cyan huisstijl ── */
+  --brand:       #00a9e0;    /* TPG logo cyan */
+  --brand-dark:  #0086b3;
+  --brand-soft:  rgba(0,169,224,.14);
+  --blue:   #00a9e0; --blue2:  #0086b3; --bd-blue:   rgba(0,169,224,.16);
   --green:  #26c997; --bd-green:  rgba(38,201,151,.15);
   --red:    #ef5350; --bd-red:    rgba(239,83,80,.15);
   --amber:  #f5a623; --bd-amber:  rgba(245,166,35,.15);
@@ -60,21 +63,26 @@ html, body, #root {
   height: 100vh; overflow-y: auto;
 }
 .sb-logo {
-  padding: 18px 14px;
+  padding: 16px 14px 14px;
   border-bottom: 1px solid var(--bd2);
-  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(180deg, rgba(0,169,224,.08) 0%, transparent 100%);
 }
-.logo-mark {
-  width: 36px; height: 36px;
-  background: linear-gradient(135deg, #4d8ef8, #8b5cf6);
-  border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; color: #fff;
-  flex-shrink: 0; letter-spacing: -.5px;
-  box-shadow: 0 2px 8px rgba(77,142,248,.35);
+.sb-logo-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 36px;
+  object-fit: contain;
+  object-position: left center;
 }
-.logo-name { font-size: 13px; font-weight: 700; color: var(--t1); }
-.logo-sub  { font-size: 10px; color: var(--t3); margin-top: 2px; }
+.sb-logo-sub {
+  font-size: 10px;
+  color: var(--t3);
+  margin-top: 6px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
 
 .sb-group { padding: 14px 8px 4px }
 .sb-grp-lbl {
@@ -273,7 +281,7 @@ html, body, #root {
 }
 .ohw-inp:focus {
   border-color: var(--blue);
-  box-shadow: 0 0 0 2px rgba(77,142,248,.18);
+  box-shadow: 0 0 0 2px rgba(0,169,224,.18);
 }
 
 /* ════════════════════════════════════════════════════════════

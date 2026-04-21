@@ -8,7 +8,7 @@ import type { BvId, GlobalFilter } from '../../data/types'
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
 const BV_COLORS: Record<BvId, string> = {
-  Consultancy: '#4d8ef8',
+  Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
 }

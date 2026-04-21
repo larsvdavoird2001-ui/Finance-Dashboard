@@ -13,7 +13,7 @@ import { useOhwStore } from '../../store/useOhwStore'
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
 const BV_COLORS: Record<BvId, string> = {
-  Consultancy: '#4d8ef8',
+  Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
 }
@@ -57,11 +57,15 @@ export function DashboardTab({ filter, onNav }: Props) {
   // Live-adjusted actuals (OHW + closing entries)
   const { getMonthly, getYtd } = useAdjustedActuals()
 
-  // Live OHW totaal per maand (all BVs summed)
+  // Live OHW totaal per maand — respecteert BV-filter zodat de widget alleen
+  // de geselecteerde BV(s) toont en niet altijd de geconsolideerde som.
   const ohwData2026 = useOhwStore(s => s.data2026)
   const wipByMonth: Record<string, number> = {}
+  const ohwEntitiesFiltered = filter.bv === 'all'
+    ? ohwData2026.entities
+    : ohwData2026.entities.filter(e => e.entity === filter.bv)
   for (const m of ohwData2026.allMonths) {
-    wipByMonth[m] = ohwData2026.entities.reduce((sum, e) => sum + (e.totaalOnderhanden[m] ?? 0), 0)
+    wipByMonth[m] = ohwEntitiesFiltered.reduce((sum, e) => sum + (e.totaalOnderhanden[m] ?? 0), 0)
   }
 
   // ── Data selection: monthly or YTD ──────────────────────────────────────
@@ -83,10 +87,14 @@ export function DashboardTab({ filter, onNav }: Props) {
   }
   const getPY = (bv: BvId, key: string): number => {
     if (is2025) return 0  // geen 2024 data beschikbaar
-    // Prior year (2025): YTD of monthly approximation
-    const fy = ytdActuals2025[bv as EntityName]?.[key] ?? 0
-    if (viewMode === 'ytd') return fy
-    return Math.round(fy / 12)
+    if (viewMode === 'ytd') {
+      // YTD vorig jaar = dezelfde maanden in 2025 (Jan-Mar 2025 voor YTD Mar-26)
+      const py25 = ACTUAL_PERIODS_2026.map(m => m.replace('-26', '-25'))
+      return py25.reduce((s, m) => s + (monthlyActuals2025[bv as EntityName]?.[m]?.[key] ?? 0), 0)
+    }
+    // Monthly: Mar-26 → Mar-25 (echte maandwaarde i.p.v. FY/12)
+    const py = period.replace('-26', '-25')
+    return monthlyActuals2025[bv as EntityName]?.[py]?.[key] ?? 0
   }
 
   // ── Revenue & margin ─────────────────────────────────────────────────────
@@ -263,7 +271,7 @@ export function DashboardTab({ filter, onNav }: Props) {
                 <th className="r">Netto-omzet</th>
                 <th className="r">Budget</th>
                 <th className="r">Δ Budget</th>
-                {!is2025 && <th className="r">VJ {viewMode === 'ytd' ? '2025 YTD' : '∅/mnd'}</th>}
+                {!is2025 && <th className="r">VJ {viewMode === 'ytd' ? 'YTD 2025' : period.replace('-26', '-25')}</th>}
                 {!is2025 && <th className="r">Δ VJ</th>}
                 <th className="r">Brutomarge</th>
                 <th className="r">Marge %</th>

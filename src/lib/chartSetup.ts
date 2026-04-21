@@ -26,7 +26,7 @@ ChartJS.register(
 )
 
 export const CHART_COLORS = {
-  Consultancy: '#4d8ef8',
+  Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
   grid:        'rgba(255,255,255,0.06)',

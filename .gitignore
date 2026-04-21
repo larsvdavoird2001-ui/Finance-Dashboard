@@ -28,6 +28,11 @@ dist-ssr
 *.xls
 *.csv
 
+# Reference/design assets (alleen lokaal)
+/TPG maandrapportage*.pptx
+/The people group.png
+/website.jpg
+
 # Environment variables
 .env
 .env.local

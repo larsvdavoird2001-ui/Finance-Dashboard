@@ -6,8 +6,16 @@ import { useFteStore, FTE_MONTHS } from '../../store/useFteStore'
 import { monthlyActuals2026 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
 import { fmt, parseNL } from '../../lib/format'
-import { parseImportFile } from '../../lib/parseImport'
-import type { ParseOverrides, TariffLookup } from '../../lib/parseImport'
+import { parseImportFile, buildTariffLookup, readWorkbookFromFile } from '../../lib/parseImport'
+import type { ParseOverrides, ParseResult } from '../../lib/parseImport'
+import type * as XLSX from 'xlsx'
+import { MissingHoursWizard } from './MissingHoursWizard'
+import { GenericImportWizard } from './GenericImportWizard'
+import { buildMonthBundleZip, downloadBlob } from '../../lib/exportMonthBundle'
+import { generateMonthPptx, monthLabelFromCode } from '../../lib/exportPptx'
+import { useRawDataStore as useRawDataStoreFull } from '../../store/useRawDataStore'
+
+const GENERIC_WIZARD_SLOTS = new Set(['factuurvolume', 'geschreven_uren', 'uren_lijst', 'd_lijst', 'conceptfacturen'])
 import { useTariffStore } from '../../store/useTariffStore'
 import { useRawDataStore } from '../../store/useRawDataStore'
 import type { BvId, ClosingEntry, ImportRecord, GlobalFilter } from '../../data/types'
@@ -20,7 +28,7 @@ import { TariffTable } from './TariffTable'
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
 const BV_COLORS: Record<BvId, string> = {
-  Consultancy: '#4d8ef8',
+  Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
 }
@@ -121,6 +129,10 @@ export function MaandTab({ filter: _filter }: Props) {
   const [uploadLoading, setUploadLoading] = useState<Record<string, boolean>>({})
   const [pendingRecord, setPendingRecord] = useState<ImportRecord | null>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
+  // Missing Hours wizard state (stap-voor-stap analyse van uploaded bestand)
+  const [wizardState, setWizardState] = useState<{ workbook: XLSX.WorkBook; fileName: string; file: File } | null>(null)
+  // Generic wizard state — voor factuurvolume / geschreven_uren / uren_lijst / d_lijst / conceptfacturen
+  const [genericWizardState, setGenericWizardState] = useState<{ workbook: XLSX.WorkBook; fileName: string; file: File; slotId: string } | null>(null)
   const [exportMonths, setExportMonths] = useState<string[]>(['Jan-26', 'Feb-26', 'Mar-26'])
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const [highlightSlot, setHighlightSlot] = useState<string | null>(null)
@@ -151,14 +163,12 @@ export function MaandTab({ filter: _filter }: Props) {
   const ohwData2026 = useOhwStore(s => s.data2026)
   const updateRowValue = useOhwStore(s => s.updateRowValue)
   const tariffEntries = useTariffStore(s => s.entries)
+  const updateTariffEntry = useTariffStore(s => s.updateEntry)
 
-  // Bouw tariff lookup voor missing hours parser — ALLEEN Consultancy medewerkers
-  const tariffLookup: TariffLookup = {}
-  for (const t of tariffEntries) {
-    if (t.bedrijf === 'Consultancy') {
-      tariffLookup[t.id] = { tarief: t.tarief, naam: t.naam }
-    }
-  }
+  // Bouw multi-key lookup voor missing hours parser — ALLEEN Consultancy
+  // medewerkers; werknemer kan worden gematcht op werknemernr, SAP alias
+  // (powerbiNaam2), "Achternaam, Voornaam" (powerbiNaam) of volledige naam.
+  const tariffLookup = buildTariffLookup(tariffEntries, 'Consultancy')
   const { entries: fteEntries, updateEntry: updateFte } = useFteStore()
   const fteEntry = (bv: BvId) => fteEntries.find(e => e.bv === bv && e.month === month)
 
@@ -287,6 +297,37 @@ export function MaandTab({ filter: _filter }: Props) {
 
   // ── File upload handler ─────────────────────────────────────────────────
   const handleFileUpload = async (slotId: string, file: File) => {
+    // Missing hours: open de wizard (sheet + header-rij + kolommen bevestigen)
+    // in plaats van direct parsen — zo worden bestanden met title-rijen,
+    // lege rijen boven de tabel, of afwijkende kolomnamen ook correct verwerkt.
+    if (slotId === 'missing_hours') {
+      setUploadLoading(prev => ({ ...prev, [slotId]: true }))
+      try {
+        const workbook = await readWorkbookFromFile(file)
+        setWizardState({ workbook, fileName: file.name, file })
+      } catch (err) {
+        showToast(`Kon bestand niet openen: ${err instanceof Error ? err.message : String(err)}`, 'r')
+      } finally {
+        setUploadLoading(prev => ({ ...prev, [slotId]: false }))
+      }
+      return
+    }
+
+    // Generic wizard: zelfde workflow (sheet/header/kolommen/verfijnen) voor
+    // factuurvolume, geschreven_uren, uren_lijst, d_lijst en conceptfacturen.
+    if (GENERIC_WIZARD_SLOTS.has(slotId)) {
+      setUploadLoading(prev => ({ ...prev, [slotId]: true }))
+      try {
+        const workbook = await readWorkbookFromFile(file)
+        setGenericWizardState({ workbook, fileName: file.name, file, slotId })
+      } catch (err) {
+        showToast(`Kon bestand niet openen: ${err instanceof Error ? err.message : String(err)}`, 'r')
+      } finally {
+        setUploadLoading(prev => ({ ...prev, [slotId]: false }))
+      }
+      return
+    }
+
     setUploadLoading(prev => ({ ...prev, [slotId]: true }))
     try {
       const result = await parseImportFile(file, slotId, undefined, slotId === 'missing_hours' ? tariffLookup : undefined)
@@ -308,6 +349,7 @@ export function MaandTab({ filter: _filter }: Props) {
         headers: result.headers,
         preview: result.preview,
         status: 'pending',
+        warnings: result.warnings,
       }
       addRecord(record)
       addRawEntry({
@@ -324,7 +366,11 @@ export function MaandTab({ filter: _filter }: Props) {
       })
       setPendingRecord(record)
       setPendingFile(file)
-      if (result.warnings.length > 0) {
+      // Voor missing_hours: waarschuw bij 0 matches zodat user direct ziet dat
+      // de kolomselectie aangepast moet worden.
+      if (slotId === 'missing_hours' && result.totalAmount === 0) {
+        showToast('Missing Hours: 0 matches — controleer de kolomselectie in de popup', 'r')
+      } else if (result.warnings.length > 0) {
         showToast(result.warnings[0], 'r')
       }
     } catch (err) {
@@ -351,6 +397,7 @@ export function MaandTab({ filter: _filter }: Props) {
         detectedBvCol: result.detectedBvCol,
         headers: result.headers,
         preview: result.preview,
+        warnings: result.warnings,
       }
       removeRecord(pendingRecord.id)
       addRecord(updated)
@@ -425,6 +472,88 @@ export function MaandTab({ filter: _filter }: Props) {
     showToast(`${record.slotLabel} afgekeurd`, 'r')
   }
 
+  // ── Generic wizard callback: factuurvolume / geschreven_uren / etc ──
+  const handleGenericWizardConfirm = (result: ParseResult) => {
+    if (!genericWizardState) return
+    const slot = UPLOAD_SLOTS.find(s => s.id === genericWizardState.slotId)!
+    const record: ImportRecord = {
+      id: `${genericWizardState.slotId}-${Date.now()}`,
+      slotId: genericWizardState.slotId,
+      slotLabel: slot.label,
+      month: uploadMonth,
+      fileName: genericWizardState.fileName,
+      uploadedAt: new Date().toLocaleString('nl-NL'),
+      perBv: result.perBv,
+      totalAmount: result.totalAmount,
+      rowCount: result.rowCount,
+      parsedCount: result.parsedCount,
+      skippedCount: result.skippedCount,
+      detectedAmountCol: result.detectedAmountCol,
+      detectedBvCol: result.detectedBvCol,
+      headers: result.headers,
+      preview: result.preview,
+      status: 'pending',
+      warnings: result.warnings,
+    }
+    addRecord(record)
+    addRawEntry({
+      recordId: record.id,
+      slotId: genericWizardState.slotId,
+      slotLabel: slot.label,
+      month: uploadMonth,
+      fileName: genericWizardState.fileName,
+      uploadedAt: record.uploadedAt,
+      rows: result.rawRows,
+      amountCol: result.detectedAmountCol,
+      bvCol: result.detectedBvCol,
+      status: 'pending',
+    })
+    setPendingFile(genericWizardState.file)
+    setPendingRecord(record)
+    setGenericWizardState(null)
+  }
+
+  // ── Wizard callback: gebruiker heeft bestand-config bevestigd ──
+  const handleWizardConfirm = (result: ParseResult) => {
+    if (!wizardState) return
+    const slot = UPLOAD_SLOTS.find(s => s.id === 'missing_hours')!
+    const record: ImportRecord = {
+      id: `missing_hours-${Date.now()}`,
+      slotId: 'missing_hours',
+      slotLabel: slot.label,
+      month: uploadMonth,
+      fileName: wizardState.fileName,
+      uploadedAt: new Date().toLocaleString('nl-NL'),
+      perBv: result.perBv,
+      totalAmount: result.totalAmount,
+      rowCount: result.rowCount,
+      parsedCount: result.parsedCount,
+      skippedCount: result.skippedCount,
+      detectedAmountCol: result.detectedAmountCol,
+      detectedBvCol: result.detectedBvCol,
+      headers: result.headers,
+      preview: result.preview,
+      status: 'pending',
+      warnings: result.warnings,
+    }
+    addRecord(record)
+    addRawEntry({
+      recordId: record.id,
+      slotId: 'missing_hours',
+      slotLabel: slot.label,
+      month: uploadMonth,
+      fileName: wizardState.fileName,
+      uploadedAt: record.uploadedAt,
+      rows: result.rawRows,
+      amountCol: result.detectedAmountCol,
+      bvCol: result.detectedBvCol,
+      status: 'pending',
+    })
+    setPendingFile(wizardState.file)
+    setPendingRecord(record)
+    setWizardState(null)
+  }
+
   // Imports for current upload month
   const monthImports = importRecords.filter(r => r.month === uploadMonth)
 
@@ -497,7 +626,7 @@ export function MaandTab({ filter: _filter }: Props) {
                     id={`import-slot-${slot.id}`}
                     style={{
                       border: `1px solid ${highlightSlot === slot.id ? 'var(--blue)' : latest ? 'var(--green)' : pending.length > 0 ? 'var(--amber)' : 'var(--bd)'}`,
-                      boxShadow: highlightSlot === slot.id ? '0 0 12px rgba(77,142,248,0.4)' : undefined,
+                      boxShadow: highlightSlot === slot.id ? '0 0 12px rgba(0,169,224,0.4)' : undefined,
                       transition: 'box-shadow 0.3s, border-color 0.3s',
                     }}
                   >
@@ -621,15 +750,68 @@ export function MaandTab({ filter: _filter }: Props) {
                 >{m}</button>
               ))}
               <button
-                className="btn sm success"
+                className="btn sm ghost"
                 style={{ marginLeft: 'auto' }}
                 onClick={() => {
                   if (exportMonths.length === 0) { showToast('Selecteer eerst een maand', 'r'); return }
                   exportPeriod(exportMonths)
-                  showToast(`Export aangemaakt voor ${exportMonths.join(', ')}`, 'g')
+                  showToast(`Import log geëxporteerd voor ${exportMonths.join(', ')}`, 'g')
                 }}
               >
-                ↓ Download Excel
+                ↓ Import log (Excel)
+              </button>
+
+              <button
+                className="btn sm primary"
+                onClick={async () => {
+                  if (exportMonths.length === 0) { showToast('Selecteer eerst een maand', 'r'); return }
+                  try {
+                    for (const m of exportMonths) {
+                      const mEntries   = entries.filter(e => e.month === m)
+                      const mImports   = importRecords.filter(r => r.month === m)
+                      const mRawData   = useRawDataStoreFull.getState().entries.filter(r => r.month === m)
+                      const blob = await buildMonthBundleZip({
+                        month: m,
+                        closingEntries: mEntries,
+                        importRecords: mImports,
+                        rawData: mRawData,
+                        ohwData2025: useOhwStore.getState().data2025,
+                        ohwData2026: useOhwStore.getState().data2026,
+                        generatedAt: new Date().toLocaleString('nl-NL'),
+                      })
+                      downloadBlob(blob, `TPG_Maand_${m.replace(/\s+/g, '_')}.zip`)
+                    }
+                    showToast(`ZIP-bundle gedownload voor ${exportMonths.join(', ')}`, 'g')
+                  } catch (err) {
+                    showToast(`ZIP-export mislukt: ${err instanceof Error ? err.message : String(err)}`, 'r')
+                  }
+                }}
+              >
+                📦 Maand-bundle (ZIP)
+              </button>
+
+              <button
+                className="btn sm success"
+                onClick={async () => {
+                  if (exportMonths.length === 0) { showToast('Selecteer eerst een maand', 'r'); return }
+                  try {
+                    for (const m of exportMonths) {
+                      const mEntries = entries.filter(e => e.month === m)
+                      await generateMonthPptx({
+                        month: m,
+                        monthLabel: monthLabelFromCode(m),
+                        ytdMonths: CLOSING_MONTHS.slice(0, CLOSING_MONTHS.indexOf(m) + 1),
+                        closingEntries: mEntries,
+                        ohwData2026: useOhwStore.getState().data2026,
+                      })
+                    }
+                    showToast(`Maandrapportage PPTX gegenereerd voor ${exportMonths.join(', ')}`, 'g')
+                  } catch (err) {
+                    showToast(`PPTX-export mislukt: ${err instanceof Error ? err.message : String(err)}`, 'r')
+                  }
+                }}
+              >
+                📊 Maandrapportage (PPTX)
               </button>
             </div>
 
@@ -698,7 +880,7 @@ export function MaandTab({ filter: _filter }: Props) {
           <>
             {/* ── Smart suggesties ───────────────────────────────────────── */}
             <div className="card" style={{ border: '1px solid var(--blue)' }}>
-              <div className="card-hdr" style={{ background: 'rgba(77,142,248,.07)' }}>
+              <div className="card-hdr" style={{ background: 'rgba(0,169,224,.07)' }}>
                 <span style={{ fontSize: 13, marginRight: 6 }}>💡</span>
                 <span className="card-title">Slimme suggesties — {month}</span>
                 <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--t3)' }}>
@@ -1259,7 +1441,7 @@ export function MaandTab({ filter: _filter }: Props) {
 
             {/* ── OHW Overzicht ─────────────────────────────────────────── */}
             {(() => {
-              const BV_COLORS: Record<BvId, string> = { Consultancy: '#4d8ef8', Projects: '#26c997', Software: '#8b5cf6' }
+              const BV_COLORS: Record<BvId, string> = { Consultancy: '#00a9e0', Projects: '#26c997', Software: '#8b5cf6' }
               const ohwMonthKey = month // 'Jan-26', 'Feb-26', 'Mar-26'
               const hasOhwData = ohwData2026.entities.some(e => e.nettoOmzet[ohwMonthKey] != null)
               return (
@@ -1435,6 +1617,32 @@ export function MaandTab({ filter: _filter }: Props) {
           </>
         )}
       </div>
+
+      {/* Missing Hours wizard (vóór de goedkeur-modal) */}
+      {wizardState && (
+        <MissingHoursWizard
+          workbook={wizardState.workbook}
+          fileName={wizardState.fileName}
+          tariffs={tariffLookup}
+          onConfirm={handleWizardConfirm}
+          onCancel={() => setWizardState(null)}
+          onSetTariff={(employeeId, tarief) => {
+            updateTariffEntry(employeeId, { tarief })
+            showToast(`IC tarief €${tarief} opgeslagen voor werknemer ${employeeId}`, 'g')
+          }}
+        />
+      )}
+
+      {/* Generic wizard — factuurvolume / geschreven_uren / uren_lijst / d_lijst / conceptfacturen */}
+      {genericWizardState && (
+        <GenericImportWizard
+          workbook={genericWizardState.workbook}
+          fileName={genericWizardState.fileName}
+          slotId={genericWizardState.slotId}
+          onConfirm={handleGenericWizardConfirm}
+          onCancel={() => setGenericWizardState(null)}
+        />
+      )}
 
       {/* Approval modal */}
       {pendingRecord && (

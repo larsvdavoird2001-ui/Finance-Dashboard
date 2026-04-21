@@ -5,7 +5,7 @@ import { useToast } from '../../hooks/useToast'
 import { Toast } from '../common/Toast'
 
 const BV_COLORS: Record<string, string> = {
-  Consultancy: '#4d8ef8',
+  Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
   Spanje:      '#f59e0b',

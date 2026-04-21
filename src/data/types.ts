@@ -42,7 +42,7 @@ export interface OhwYearData {
   entities: OhwEntityData[]
 }
 
-export type TabId = 'dashboard' | 'hours' | 'financials' | 'ohw' | 'pl' | 'budget' | 'maand'
+export type TabId = 'dashboard' | 'hours' | 'financials' | 'ohw' | 'budget' | 'budgets' | 'maand'
 
 export type BvId = 'Consultancy' | 'Projects' | 'Software'
 
@@ -74,6 +74,8 @@ export interface ImportRecord {
   preview: Record<string, unknown>[]
   status: 'pending' | 'approved' | 'rejected'
   rejectionReason?: string
+  /** Diagnostiek vanuit de parser — getoond in de goedkeur-modal */
+  warnings?: string[]
 }
 
 export interface ClosingEntry {

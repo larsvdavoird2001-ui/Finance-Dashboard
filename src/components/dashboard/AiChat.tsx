@@ -436,7 +436,7 @@ export function AiChat() {
             width: 48, height: 48, borderRadius: '50%',
             background: 'var(--blue)', border: 'none',
             color: '#fff', fontSize: 20, cursor: 'pointer',
-            boxShadow: '0 4px 16px rgba(77,142,248,.45)',
+            boxShadow: '0 4px 16px rgba(0,169,224,.45)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             transition: 'transform .15s',
           }}

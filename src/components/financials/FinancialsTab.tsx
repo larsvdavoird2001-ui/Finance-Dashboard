@@ -125,7 +125,7 @@ export function FinancialsTab({ filter }: Props) {
       {
         label: 'Actuals',
         data: activeBvs.map(bv => getActuals(period, bv)['netto_omzet'] ?? 0),
-        backgroundColor: activeBvs.map(bv => CHART_COLORS[bv as BvId] ?? '#4d8ef8'),
+        backgroundColor: activeBvs.map(bv => CHART_COLORS[bv as BvId] ?? '#00a9e0'),
         borderRadius: 4,
       },
       {
@@ -143,7 +143,7 @@ export function FinancialsTab({ filter }: Props) {
       {
         label: 'Brutomarge Actual',
         data: activeBvs.map(bv => getActuals(period, bv)['brutomarge'] ?? 0),
-        backgroundColor: activeBvs.map(bv => CHART_COLORS[bv as BvId] ?? '#4d8ef8'),
+        backgroundColor: activeBvs.map(bv => CHART_COLORS[bv as BvId] ?? '#00a9e0'),
         borderRadius: 4,
       },
       {
@@ -247,7 +247,7 @@ export function FinancialsTab({ filter }: Props) {
                     return (
                       <tr key={bv}>
                         <td style={{ position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 1 }}>
-                          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: CHART_COLORS[bv as BvId] ?? '#4d8ef8', marginRight: 6 }} />
+                          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: CHART_COLORS[bv as BvId] ?? '#00a9e0', marginRight: 6 }} />
                           {bv}
                         </td>
                         <td className="mono r">{fmt(revA)}</td>

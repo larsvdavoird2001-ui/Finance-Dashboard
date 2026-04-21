@@ -5,13 +5,13 @@ const TITLES: Record<TabId, string> = {
   hours:      'Uren Dashboard',
   financials: 'Financiële Prestatie',
   ohw:        'OHW Overzicht',
-  pl:         'P&L Dashboard',
   budget:     'Budget vs Actuals',
+  budgets:    'Budgetten',
   maand:      'Maandafsluiting',
 }
 
 export const BV_COLORS: Record<BvId, string> = {
-  Consultancy: '#4d8ef8',
+  Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
 }
@@ -30,7 +30,7 @@ const YEAR_OPTIONS: Array<{ id: GlobalFilter['year']; label: string }> = [
 ]
 
 // Only show global filters on dashboard tabs
-const FILTER_TABS: TabId[] = ['dashboard', 'hours', 'financials', 'ohw', 'pl', 'budget', 'maand']
+const FILTER_TABS: TabId[] = ['dashboard', 'hours', 'financials', 'ohw', 'budget', 'budgets', 'maand']
 
 interface Props {
   tab: TabId

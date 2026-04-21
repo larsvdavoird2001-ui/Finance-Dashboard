@@ -8,8 +8,8 @@ const items: { id: TabId; ic: string; label: string; group: string }[] = [
   { id: 'hours',      ic: '⏱',  label: 'Uren Dashboard',       group: 'CFO Dashboard' },
   { id: 'financials', ic: '📈', label: 'Financiële Prestatie', group: 'CFO Dashboard' },
   // Rapportage
-  { id: 'pl',     ic: '📊', label: 'P&L Dashboard',      group: 'Rapportage' },
-  { id: 'budget', ic: '🎯', label: 'Budget vs Actuals',  group: 'Rapportage' },
+  { id: 'budget',  ic: '🎯', label: 'Budget vs Actuals',  group: 'Rapportage' },
+  { id: 'budgets', ic: '💼', label: 'Budgetten',          group: 'Rapportage' },
   // Input
   { id: 'ohw',   ic: '📋', label: 'OHW Overzicht',   group: 'Input' },
   { id: 'maand', ic: '📅', label: 'Maandafsluiting',  group: 'Input' },
@@ -20,11 +20,8 @@ export function Sidebar({ active, onNav }: Props) {
   return (
     <nav className="sb">
       <div className="sb-logo">
-        <div className="logo-mark">TPG</div>
-        <div>
-          <div className="logo-name">Finance OS</div>
-          <div className="logo-sub">CFO Dashboard</div>
-        </div>
+        <img src="/tpg-logo.png" alt="The People Group" className="sb-logo-img" />
+        <div className="sb-logo-sub">Finance · CFO</div>
       </div>
       {groups.map(g => (
         <div key={g} className="sb-group">

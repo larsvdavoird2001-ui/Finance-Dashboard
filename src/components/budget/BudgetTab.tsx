@@ -1,22 +1,31 @@
 import { useState, useEffect } from 'react'
+import * as XLSX from 'xlsx'
 import {
   PL_STRUCTURE,
   monthlyActuals2026, monthlyBudget2026,
   ytdActuals2026, ytdBudget2026,
+  ytdActuals2025, ytdBudget2025,
 } from '../../data/plData'
+import { monthlyActuals2025, monthlyBudget2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import type { EntityName } from '../../data/plData'
 import { fmt } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 
-type PeriodId  = 'jan26' | 'feb26' | 'mar26' | 'ytd26'
-type ColType   = 'actual' | 'budget' | 'delta'
+type ColType = 'actual' | 'budget' | 'delta'
 
-const PERIODS: { id: PeriodId; label: string }[] = [
-  { id: 'jan26', label: 'Jan-26' },
-  { id: 'feb26', label: 'Feb-26' },
-  { id: 'mar26', label: 'Mar-26' },
-  { id: 'ytd26', label: 'YTD 2026' },
+interface Period { id: string; label: string; year: '2025' | '2026'; month?: string; ytdMonths?: string[] }
+
+const PERIODS_2026: Period[] = [
+  { id: 'jan26', label: 'Jan-26', year: '2026', month: 'Jan-26' },
+  { id: 'feb26', label: 'Feb-26', year: '2026', month: 'Feb-26' },
+  { id: 'mar26', label: 'Mar-26', year: '2026', month: 'Mar-26' },
+  { id: 'ytd26', label: 'YTD 2026', year: '2026', ytdMonths: ['Jan-26', 'Feb-26', 'Mar-26'] },
+]
+
+const PERIODS_2025: Period[] = [
+  ...MONTHS_2025_LABELS.map(m => ({ id: m.toLowerCase().replace('-', ''), label: m, year: '2025' as const, month: m })),
+  { id: 'ytd25', label: 'YTD 2025', year: '2025', ytdMonths: MONTHS_2025_LABELS },
 ]
 
 const ALL_ENTITIES: EntityName[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
@@ -42,45 +51,54 @@ function deltaColor(d: number, key: string): string {
 interface Props { filter: GlobalFilter }
 
 export function BudgetTab({ filter }: Props) {
-  const [period,    setPeriod]    = useState<PeriodId>('ytd26')
+  const periods: Period[] = filter.year === '2025' ? PERIODS_2025 : PERIODS_2026
+  const defaultPeriod = filter.year === '2025' ? 'ytd25' : 'ytd26'
+
+  const [period,    setPeriod]    = useState<string>(defaultPeriod)
   const [colTypes,  setColTypes]  = useState<Set<ColType>>(new Set(['actual', 'budget', 'delta']))
 
   const { getMonthly, getYtd } = useAdjustedActuals()
 
+  // When year changes, jump to that year's YTD period (prevents mismatch: 2026 periods shown while 2025 selected)
   useEffect(() => {
-    if (filter.year === '2025') setPeriod('ytd26')
+    setPeriod(filter.year === '2025' ? 'ytd25' : 'ytd26')
   }, [filter.year])
 
   const visibleEntities: EntityName[] = filter.bv === 'all'
     ? ALL_ENTITIES
     : [filter.bv as EntityName, 'Holdings'].filter(e => ALL_ENTITIES.includes(e as EntityName)) as EntityName[]
 
-  const getActuals = (p: PeriodId, e: EntityName): Record<string, number> => {
+  const currentPeriod = periods.find(p => p.id === period) ?? periods[periods.length - 1]
+
+  const getActuals = (p: Period, e: EntityName): Record<string, number> => {
+    if (p.year === '2025') {
+      if (p.month) return monthlyActuals2025[e]?.[p.month] ?? {}
+      return ytdActuals2025[e] ?? {}
+    }
+    // 2026
     if (e === 'Holdings') {
-      if (p === 'jan26') return monthlyActuals2026[e]?.['Jan-26'] ?? {}
-      if (p === 'feb26') return monthlyActuals2026[e]?.['Feb-26'] ?? {}
-      if (p === 'mar26') return monthlyActuals2026[e]?.['Mar-26'] ?? {}
+      if (p.month) return monthlyActuals2026[e]?.[p.month] ?? {}
       return ytdActuals2026[e] ?? {}
     }
-    if (p === 'jan26') return getMonthly(e as BvId, 'Jan-26')
-    if (p === 'feb26') return getMonthly(e as BvId, 'Feb-26')
-    if (p === 'mar26') return getMonthly(e as BvId, 'Mar-26')
-    return getYtd(e as BvId, ['Jan-26', 'Feb-26', 'Mar-26'])
+    if (p.month) return getMonthly(e as BvId, p.month)
+    return getYtd(e as BvId, p.ytdMonths ?? [])
   }
 
-  const getBudget = (p: PeriodId, e: EntityName): Record<string, number> => {
-    if (p === 'jan26') return monthlyBudget2026[e]?.['Jan-26'] ?? {}
-    if (p === 'feb26') return monthlyBudget2026[e]?.['Feb-26'] ?? {}
-    if (p === 'mar26') return monthlyBudget2026[e]?.['Mar-26'] ?? {}
+  const getBudget = (p: Period, e: EntityName): Record<string, number> => {
+    if (p.year === '2025') {
+      if (p.month) return monthlyBudget2025[e]?.[p.month] ?? {}
+      return ytdBudget2025[e] ?? {}
+    }
+    if (p.month) return monthlyBudget2026[e]?.[p.month] ?? {}
     return ytdBudget2026[e] ?? {}
   }
 
   const allActuals: Record<EntityName, Record<string, number>> = Object.fromEntries(
-    visibleEntities.map(e => [e, getActuals(period, e)])
+    visibleEntities.map(e => [e, getActuals(currentPeriod, e)])
   ) as Record<EntityName, Record<string, number>>
 
   const allBudgets: Record<EntityName, Record<string, number>> = Object.fromEntries(
-    visibleEntities.map(e => [e, getBudget(period, e)])
+    visibleEntities.map(e => [e, getBudget(currentPeriod, e)])
   ) as Record<EntityName, Record<string, number>>
 
   const totalActuals: Record<string, number> = {}
@@ -94,7 +112,7 @@ export function BudgetTab({ filter }: Props) {
     }
   }
 
-  const periodLabel = PERIODS.find(p => p.id === period)?.label ?? ''
+  const periodLabel = currentPeriod.label
   const activeCols  = (['actual', 'budget', 'delta'] as ColType[]).filter(c => colTypes.has(c))
   const toggleCol   = (c: ColType) => setColTypes(prev => {
     const next = new Set(prev)
@@ -105,6 +123,64 @@ export function BudgetTab({ filter }: Props) {
 
   // Column groups: per visible entity + total
   const entityGroups = [...visibleEntities, 'Totaal' as const]
+
+  // ── Excel export met huidige filters (periode, BV, kolomtypes) ──
+  const exportExcel = () => {
+    const header: (string | number)[] = [`${periodLabel} — Regel`]
+    for (const eg of entityGroups) {
+      for (const ct of activeCols) header.push(`${eg} — ${COL_LABELS[ct]}`)
+    }
+    const rows: (string | number)[][] = [header]
+
+    for (const item of PL_STRUCTURE) {
+      if (item.isSeparator) continue
+      const label = '  '.repeat(item.indent ?? 0) + item.label
+      const row: (string | number)[] = [label]
+      if (item.isPercentage) {
+        for (const eg of entityGroups) {
+          const a = eg === 'Totaal' ? totalActuals : allActuals[eg as EntityName]
+          const b = eg === 'Totaal' ? totalBudget  : allBudgets[eg as EntityName]
+          for (const ct of activeCols) {
+            const d = ct === 'budget' ? b : a
+            row.push(pctStr(item.key, d))
+          }
+        }
+      } else {
+        for (const eg of entityGroups) {
+          const a = eg === 'Totaal' ? (totalActuals[item.key] ?? 0) : (allActuals[eg as EntityName]?.[item.key] ?? 0)
+          const b = eg === 'Totaal' ? (totalBudget[item.key]  ?? 0) : (allBudgets[eg as EntityName]?.[item.key] ?? 0)
+          for (const ct of activeCols) {
+            if (ct === 'actual') row.push(a)
+            else if (ct === 'budget') row.push(b)
+            else row.push(a - b)
+          }
+        }
+      }
+      rows.push(row)
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    // Formatteer getallen: Nederlandse euro-notatie
+    const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
+    for (let r = range.s.r + 1; r <= range.e.r; r++) {
+      for (let c = range.s.c + 1; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c })
+        const cell = ws[addr]
+        if (cell && typeof cell.v === 'number') cell.z = '#,##0;-#,##0;-'
+      }
+    }
+    // Auto-width per kolom
+    ws['!cols'] = header.map((h, i) => ({
+      wch: i === 0 ? 32 : Math.max(12, String(h).length + 2),
+    }))
+
+    const bvSuffix = filter.bv === 'all' ? 'alle-BVs' : filter.bv
+    const fileName = `Budget-vs-Actuals_${periodLabel.replace(/\s+/g, '-')}_${bvSuffix}.xlsx`
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, `Budget vs Actuals`)
+    XLSX.writeFile(wb, fileName)
+  }
 
   const renderCell = (key: string, a: number, b: number, ct: ColType, bold: boolean) => {
     if (ct === 'actual') {
@@ -127,8 +203,8 @@ export function BudgetTab({ filter }: Props) {
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         {/* Period buttons */}
-        <div style={{ display: 'flex', gap: 4 }}>
-          {PERIODS.map(p => (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {periods.map(p => (
             <button
               key={p.id}
               className={`btn sm${period === p.id ? ' primary' : ' ghost'}`}
@@ -149,7 +225,7 @@ export function BudgetTab({ filter }: Props) {
               padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: colTypes.has(ct) ? 600 : 400,
               cursor: 'pointer', border: '1px solid', fontFamily: 'var(--font)', transition: 'all .12s',
               borderColor: colTypes.has(ct) ? (ct === 'delta' ? 'var(--amber)' : 'var(--blue)') : 'var(--bd2)',
-              background:  colTypes.has(ct) ? (ct === 'delta' ? 'rgba(251,191,36,.12)' : 'rgba(77,142,248,.12)') : 'transparent',
+              background:  colTypes.has(ct) ? (ct === 'delta' ? 'rgba(251,191,36,.12)' : 'rgba(0,169,224,.12)') : 'transparent',
               color: colTypes.has(ct) ? (ct === 'delta' ? 'var(--amber)' : 'var(--blue)') : 'var(--t3)',
             }}
           >{COL_LABELS[ct]}</button>
@@ -164,6 +240,15 @@ export function BudgetTab({ filter }: Props) {
         <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--green)', background: 'var(--bd-green)', padding: '2px 7px', borderRadius: 4 }}>
           ● Live OHW
         </span>
+
+        <button
+          className="btn sm success"
+          onClick={exportExcel}
+          title={`Exporteer huidige selectie (${periodLabel}${filter.bv !== 'all' ? ' · ' + filter.bv : ''}) naar Excel`}
+          style={{ fontSize: 11 }}
+        >
+          ↓ Excel export
+        </button>
       </div>
 
       <div className="card">
