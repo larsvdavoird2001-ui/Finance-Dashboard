@@ -11,7 +11,7 @@ export const projectsData2026: OhwEntityData = {
         { id: "p1", description: "U-Projecten (SAP-overzicht) met tarief - geschreven uren maar nog niet gefactureerd", values: { "Dec-25": 123448, "Jan-26": 126835, "Feb-26": 128096 }, locked: true, sourceSlot: 'uren_lijst' },
         { id: "p2", description: "Correctie fout af laten weglopen", values: {} },
         { id: "p3", description: "U-Projecten (SAP-overzicht) zonder tarief - klantorder in concept / in afwachting definitieve klantafspraken", values: { "Dec-25": 9376, "Jan-26": 15430, "Feb-26": 10095 } },
-        { id: "p4", description: "E-Projecten (SAP-overzicht concept facturen) - gereed gemelde projecten wachtend op inkooporder", values: { "Dec-25": 311120, "Jan-26": 318624, "Feb-26": 414165 } },
+        { id: "p4", description: "E-Projecten (SAP-overzicht concept facturen) - gereed gemelde projecten wachtend op inkooporder", values: { "Dec-25": 311120, "Jan-26": 318624, "Feb-26": 414165 }, locked: true, sourceSlot: 'conceptfacturen' },
         { id: "p5", description: "Missing hours toename", values: { "Jan-26": 12000, "Feb-26": 12000 } },
         { id: "p6", description: "Factuuraanvragen (nog te facturen)", values: { "Feb-26": 9352 } },
       ],
