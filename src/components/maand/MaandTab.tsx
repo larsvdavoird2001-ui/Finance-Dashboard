@@ -260,18 +260,6 @@ export function MaandTab({ filter: _filter }: Props) {
   const totEbitda      = BVS.reduce((a, bv) => a + ebitda(bv), 0)
   const totEbit        = BVS.reduce((a, bv) => a + ebit(bv), 0)
 
-  // ── Smart suggestions ───────────────────────────────────────────────────
-  const prevMonth = CLOSING_MONTHS[CLOSING_MONTHS.indexOf(month) - 1] as string | undefined
-  const suggestions = BVS.map(bv => {
-    const prevEntry = prevMonth ? entries.find(e => e.bv === bv && e.month === prevMonth) : undefined
-    const prevFv = prevEntry?.factuurvolume ?? 0
-    return {
-      bv,
-      suggestFv: prevFv,
-      fromPrev: !!prevEntry,
-    }
-  })
-
   // ── Validation ──────────────────────────────────────────────────────────
   const warnings: string[] = []
   if (BVS.some(bv => entry(bv)?.factuurvolume === 0))
@@ -916,76 +904,6 @@ export function MaandTab({ filter: _filter }: Props) {
         {/* ── AFSLUITING ──────────────────────────────────────────────────── */}
         {activeSection === 'afsluiting' && (
           <>
-            {/* ── Smart suggesties ───────────────────────────────────────── */}
-            <div className="card" style={{ border: '1px solid var(--blue)' }}>
-              <div className="card-hdr" style={{ background: 'rgba(0,169,224,.07)' }}>
-                <span style={{ fontSize: 13, marginRight: 6 }}>💡</span>
-                <span className="card-title">Slimme suggesties — {month}</span>
-                <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--t3)' }}>
-                  {prevMonth ? `Gebaseerd op ${prevMonth}` : 'Geen vorige maand beschikbaar'}
-                </span>
-                <button
-                  className="btn sm primary"
-                  style={{ marginLeft: 'auto', fontSize: 10 }}
-                  onClick={() => {
-                    let applied = 0
-                    for (const sug of suggestions) {
-                      const e = entry(sug.bv)
-                      if (!e) continue
-                      if (e.factuurvolume === 0 && sug.suggestFv !== 0) {
-                        updateEntry(e.id, { factuurvolume: sug.suggestFv })
-                        applied++
-                      }
-                    }
-                    showToast(applied > 0 ? `Factuurvolume suggesties toegepast op ${applied} BV(s)` : 'Factuurvolume al aanwezig — geen suggesties toegepast', applied > 0 ? 'g' : 'r')
-                  }}
-                >
-                  Pas alle toe
-                </button>
-              </div>
-              <div style={{ padding: '10px 14px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-                {suggestions.map(sug => {
-                  const ohwMut = getOhwMutatie(sug.bv)
-                  const hasOhw = ohwData2026.entities.some(e => e.entity === sug.bv && e.mutatieOhw[month] != null)
-                  return (
-                    <div key={sug.bv} style={{ background: 'var(--bg3)', borderRadius: 8, padding: '10px 12px', border: `1px solid ${BV_COLORS[sug.bv]}22` }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: BV_COLORS[sug.bv], marginBottom: 6 }}>{sug.bv}</div>
-                      <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 4 }}>
-                        {prevMonth ? `📅 Factuurvolume vorige maand (${prevMonth})` : '—'}
-                      </div>
-                      <div style={{ fontSize: 11, marginBottom: 2 }}>
-                        <span style={{ color: 'var(--t3)' }}>Factuurvolume: </span>
-                        <strong style={{ fontFamily: 'var(--mono)' }}>{sug.suggestFv !== 0 ? fmt(sug.suggestFv) : '—'}</strong>
-                      </div>
-                      <div style={{ fontSize: 11, marginBottom: 8 }}>
-                        <span style={{ color: 'var(--t3)' }}>OHW mutatie: </span>
-                        {hasOhw ? (
-                          <strong style={{ fontFamily: 'var(--mono)', color: ohwMut >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                            {fmt(ohwMut)}
-                          </strong>
-                        ) : (
-                          <span style={{ color: 'var(--t3)' }}>automatisch vanuit OHW</span>
-                        )}
-                        <span style={{ marginLeft: 4, fontSize: 9 }}>🔒</span>
-                      </div>
-                      <button
-                        className="btn sm ghost"
-                        style={{ fontSize: 10, width: '100%' }}
-                        onClick={() => {
-                          const e = entry(sug.bv)
-                          if (!e || sug.suggestFv === 0) return
-                          updateEntry(e.id, { factuurvolume: sug.suggestFv })
-                          showToast(`Factuurvolume suggestie toegepast voor ${sug.bv}`, 'g')
-                        }}
-                      >
-                        ↓ Pas factuurvolume toe
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
             {/* Onderbouwing status */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: 'var(--t3)' }}>Onderbouwing {month}:</span>
