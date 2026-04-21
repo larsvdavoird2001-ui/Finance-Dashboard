@@ -803,6 +803,7 @@ export function MaandTab({ filter: _filter }: Props) {
                         ytdMonths: CLOSING_MONTHS.slice(0, CLOSING_MONTHS.indexOf(m) + 1),
                         closingEntries: mEntries,
                         ohwData2026: useOhwStore.getState().data2026,
+                        importRecords: importRecords,
                       })
                     }
                     showToast(`Maandrapportage PPTX gegenereerd voor ${exportMonths.join(', ')}`, 'g')
