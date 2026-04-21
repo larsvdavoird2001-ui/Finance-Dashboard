@@ -468,6 +468,27 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                       ⚠ Totaal = 0 — controleer de kolomselectie.
                     </div>
                   )}
+
+                  {/* Expliciete totaalregel-diagnose */}
+                  {livePreview.missingHoursCounts && livePreview.missingHoursCounts.totalRowsSkipped > 0 && (
+                    <div style={{
+                      marginTop: 8, padding: '7px 10px', borderRadius: 5,
+                      background: 'rgba(245,166,35,0.10)', border: '1px solid rgba(245,166,35,0.3)',
+                      fontSize: 11, color: 'var(--amber)',
+                    }}>
+                      ⚠ <strong>{livePreview.missingHoursCounts.totalRowsSkipped}</strong> totaal-/subtotaalrij(en) automatisch overgeslagen (niet dubbel geteld).
+                      {livePreview.warnings
+                        .filter(w => w.includes('totaal-/subtotaalrij'))
+                        .map((w, i) => {
+                          const detected = w.match(/gedetecteerd:\s*(.+)$/)
+                          return detected ? (
+                            <div key={i} style={{ marginTop: 4, fontSize: 10, color: 'var(--t2)', fontFamily: 'var(--mono)' }}>
+                              Voorbeelden: {detected[1]}
+                            </div>
+                          ) : null
+                        })}
+                    </div>
+                  )}
                 </div>
               )}
             </>

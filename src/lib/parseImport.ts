@@ -170,13 +170,20 @@ export function parseDutchNumber(val: unknown): number | null {
 // ── Totaal-/resultaatregel-detectie ─────────────────────────────────────
 // SAP-exports bevatten vaak subtotaal-/totaal-/eindtotaal-rijen die niet bij
 // de detail-data horen. Deze moeten uit de som gehouden worden, anders worden
-// totalen dubbel geteld. Strict regex matching op EXACTE label-patterns
-// minimaliseert false positives (bv. "Totaal project Glaspoort" wordt NIET
-// als totaalregel gezien omdat het een project-naam is, geen totaal-label).
-const TOTAL_LABEL_PATTERNS = [
+// totalen dubbel geteld. We combineren twee signalen:
+//  1. Strict regex matching op eind-van-string total-labels ("Totaal",
+//     "Subtotaal", enz.)
+//  2. Ruimere "starts-with" patterns voor labels zoals "Totaal Consultancy",
+//     "Subtotaal Projects AK", gecombineerd met een structurele check
+//     (rij heeft ≤ 4 niet-lege cellen — typisch voor subtotaal-regels).
+// Dit voorkomt false positives op detail-rijen die toevallig met "Totaal"
+// beginnen (zoals project-beschrijving "Totaal Glaspoort fase 1").
+
+/** Strikte patterns: cel is EXACT een totaal-label (hele string). */
+const TOTAL_LABEL_STRICT_PATTERNS = [
   /^(sub|eind|grand\s?)?totaal\s*[:.-]?\s*$/i,                  // "Totaal", "Subtotaal", "Eindtotaal", "Totaal:"
   /^(sub|eind|grand\s?)?total\s*[:.-]?\s*$/i,                   // "Total", "Grand total"
-  /^(sub|eind)?totaal[\s\-]+generaal\s*[:.-]?\s*$/i,            // "Totaal generaal", "Totaal-generaal"
+  /^(sub|eind)?totaal[\s\-]+generaal\s*[:.-]?\s*$/i,            // "Totaal generaal"
   /^(sub|eind)?totaal[\s\-]+per[\s\-]+\w+\s*[:.-]?\s*$/i,       // "Totaal per BV", "Totaal per maand"
   /^(sub|eind)?totaal[\s\-]+(alle|all)\b.*$/i,                  // "Totaal alle BVs"
   /^\s*\*+\s*(eind|sub)?totaal.*\*+\s*$/i,                      // "** Totaal **"
@@ -184,25 +191,74 @@ const TOTAL_LABEL_PATTERNS = [
   /^generaal\s*[:.-]?\s*$/i,                                    // "Generaal"
   /^resultaat\s*[:.-]?\s*$/i,                                   // "Resultaat"
   /^eindresultaat\s*[:.-]?\s*$/i,                               // "Eindresultaat"
-  /^(netto|bruto)\s+resultaat\s*[:.-]?\s*$/i,                   // "Netto resultaat", "Bruto resultaat"
-  /^samenvatting\s*[:.-]?\s*$/i,                                // "Samenvatting"
+  /^(netto|bruto)\s+resultaat\s*[:.-]?\s*$/i,
+  /^samenvatting\s*[:.-]?\s*$/i,
   /^grand\s+total\s*[:.-]?\s*$/i,
+  /^eindstand\s*[:.-]?\s*$/i,                                   // "Eindstand"
+  /^afsluitstand\s*[:.-]?\s*$/i,
+  /^(tussen|deel)totaal\s*[:.-]?\s*$/i,                         // "Tussentotaal", "Deeltotaal"
 ]
 
-/** Is een cel-waarde een totaal-/resultaat-label? */
+/** Startsmatch: cel BEGINT met een totaal-keyword + whitespace, gevolgd door
+ *  BV-namen of korte labels. Wordt gecombineerd met een "rij is klein"-check
+ *  om project-beschrijvingen uit te sluiten. */
+const TOTAL_LABEL_STARTSWITH_PATTERNS = [
+  /^(sub|eind|grand\s?)?totaal\s+(alle|all|per|generaal|bv|consultancy|projects?|software|holdings?)\b/i,
+  /^(sub|eind|grand\s?)?total\s+(all|per|consultancy|projects?|software|holdings?)\b/i,
+  /^subtotaal\s+/i,                                             // "Subtotaal <iets>"
+  /^eindtotaal\s+/i,
+  /^eindresultaat\s+/i,
+  /^netto\s+resultaat\s+/i,
+  /^bruto\s+resultaat\s+/i,
+]
+
+/** Is een cel-waarde een totaal-/resultaat-label (strict)? */
 export function looksLikeTotalLabel(val: unknown): boolean {
   if (val === null || val === undefined) return false
   const s = String(val).trim()
   if (!s) return false
-  return TOTAL_LABEL_PATTERNS.some(p => p.test(s))
+  return TOTAL_LABEL_STRICT_PATTERNS.some(p => p.test(s))
 }
 
 /** Is deze rij vermoedelijk een totaal-/subtotaal-/resultaatregel?
- *  Checkt ALLE cellen; één match is genoeg. */
+ *
+ *  Combineert signalen:
+ *   A. Een cel matcht EXACT een strict total-label pattern → direct total
+ *   B. Een cel begint met "Totaal BV" / "Subtotaal X" etc EN de rij heeft
+ *      ≤ 4 niet-lege cellen → total (kleine rij = samenvatting, niet detail)
+ *   C. Alle niet-numerieke cellen zijn leeg behalve één die met "totaal"
+ *      begint (klassieke SAP bold subtotaal-rij)
+ */
 export function isLikelyTotalRow(row: Record<string, unknown>): boolean {
-  for (const val of Object.values(row)) {
+  const values = Object.values(row)
+
+  // Signaal A: strict match op een exact total-label
+  for (const val of values) {
     if (looksLikeTotalLabel(val)) return true
   }
+
+  // Tellen: aantal niet-lege cellen + cellen met totaal-keyword prefix
+  let nonEmpty = 0
+  let numericOnlyCount = 0
+  let hasStartsWithTotal = false
+  for (const val of values) {
+    if (val === null || val === undefined) continue
+    const s = String(val).trim()
+    if (!s) continue
+    nonEmpty++
+    if (parseDutchNumber(s) !== null) numericOnlyCount++
+    if (TOTAL_LABEL_STARTSWITH_PATTERNS.some(p => p.test(s))) {
+      hasStartsWithTotal = true
+    }
+  }
+
+  // Signaal B: startsWith-match + kleine rij (≤ 4 non-empty cellen)
+  if (hasStartsWithTotal && nonEmpty <= 4) return true
+
+  // Signaal C: "sparse" rij — <= 3 non-empty cellen, waarvan ≥ 1 numeriek en
+  // een andere begint met totaal/subtotaal/...
+  if (nonEmpty <= 3 && numericOnlyCount >= 1 && hasStartsWithTotal) return true
+
   return false
 }
 
@@ -1745,6 +1801,7 @@ export function computeGenericImport(
   let bvUndetected = 0        // kan niet aan BV toewijzen (multi-BV slot)
   let bvFilteredOut = 0       // bvFilter niet match
   let totalRowsSkipped = 0    // "Totaal"/"Subtotaal"/"Eindtotaal" rijen
+  const totalRowLabels: string[] = []  // eerste paar gedetecteerde total labels (voor diagnostiek)
 
   warnings.push(
     `Configuratie slot "${slotId}": bedrag="${cfg.amountCol}"` +
@@ -1759,7 +1816,20 @@ export function computeGenericImport(
 
     // Totaal-/resultaatregels overslaan — voorkomt dubbel tellen van SAP-
     // subtotalen die vaak onderaan of tussen BV-groepen staan
-    if (isLikelyTotalRow(row)) { totalRowsSkipped++; continue }
+    if (isLikelyTotalRow(row)) {
+      totalRowsSkipped++
+      // Verzamel eerste paar gedetecteerde labels voor diagnostiek
+      if (totalRowLabels.length < 5) {
+        for (const v of Object.values(row)) {
+          const s = String(v ?? '').trim()
+          if (s && /totaal|total|resultaat|som|generaal|eindstand|samenvatting/i.test(s)) {
+            totalRowLabels.push(s.slice(0, 40))
+            break
+          }
+        }
+      }
+      continue
+    }
 
     const rawAmountVal = row[cfg.amountCol]
     const amount = parseAmountCell(rawAmountVal)
@@ -1833,9 +1903,15 @@ export function computeGenericImport(
   total = isHoursSlot ? Math.round(total * 10) / 10 : Math.round(total)
 
   if (skippedCount > 0) warnings.push(`${skippedCount} rij(en) overgeslagen (leeg / 0 / niet-parseerbaar)`)
-  if (totalRowsSkipped > 0) warnings.push(`${totalRowsSkipped} totaal-/subtotaalrij(en) overgeslagen (niet dubbel geteld)`)
+  if (totalRowsSkipped > 0) {
+    const sample = totalRowLabels.length > 0 ? ` · gedetecteerd: ${totalRowLabels.map(l => `"${l}"`).join(', ')}` : ''
+    warnings.push(`${totalRowsSkipped} totaal-/subtotaalrij(en) overgeslagen (niet dubbel geteld)${sample}`)
+  }
   if (bvUndetected > 0) warnings.push(`${bvUndetected} rij(en) zonder herkende BV-waarde in "${cfg.bvCol}"`)
-  if (bvFilteredOut > 0) warnings.push(`${bvFilteredOut} rij(en) weggefilterd door BV-filter (${cfg.bvFilter})`)
+  if (bvFilteredOut > 0) {
+    const bvLabel = cfg.bvFilter ?? (slotConfig.targetBv ? `alleen ${slotConfig.targetBv}` : 'BV-filter')
+    warnings.push(`${bvFilteredOut} rij(en) weggefilterd door BV-filter (${bvLabel})`)
+  }
   if (manualExclusions > 0) warnings.push(`${manualExclusions} handmatig uitgesloten`)
 
   warnings.push(
