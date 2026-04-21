@@ -665,10 +665,14 @@ export function MaandTab({ filter: _filter }: Props) {
           )}
 
           {activeSection === 'afsluiting' && (
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-              <button className="btn sm success" onClick={() => showToast(`Maandafsluiting ${month} opgeslagen`, 'g')}>
-                ✓ Afsluiting opslaan
-              </button>
+            <div style={{
+              marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 11, color: 'var(--green)',
+              background: 'var(--bd-green)', padding: '3px 10px', borderRadius: 5,
+              border: '1px solid var(--green)',
+            }} title="Alle wijzigingen worden direct opgeslagen">
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', animation: 'pulse 2s infinite' }} />
+              Auto-opslaan actief
             </div>
           )}
         </div>

@@ -1,6 +1,11 @@
 import type { TabId } from '../../data/types'
 
-interface Props { active: TabId; onNav: (t: TabId) => void }
+interface Props {
+  active: TabId
+  onNav: (t: TabId) => void
+  userEmail?: string | null
+  onSignOut?: () => void | Promise<void>
+}
 
 const items: { id: TabId; ic: string; label: string; group: string }[] = [
   // CFO Dashboards
@@ -15,7 +20,7 @@ const items: { id: TabId; ic: string; label: string; group: string }[] = [
   { id: 'maand', ic: '📅', label: 'Maandafsluiting',  group: 'Input' },
 ]
 
-export function Sidebar({ active, onNav }: Props) {
+export function Sidebar({ active, onNav, userEmail, onSignOut }: Props) {
   const groups = [...new Set(items.map(i => i.group))]
   return (
     <nav className="sb">
@@ -37,8 +42,45 @@ export function Sidebar({ active, onNav }: Props) {
           ))}
         </div>
       ))}
+
       <div className="sb-foot">
-        <div style={{ fontSize: 10, color: 'var(--t3)', padding: '4px 6px' }}>v9.0 · React 19</div>
+        {userEmail && (
+          <div style={{
+            padding: '8px 10px', marginBottom: 6,
+            background: 'var(--bg3)', borderRadius: 7,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 26, height: 26, borderRadius: '50%',
+              background: 'var(--brand)', color: '#fff',
+              fontSize: 11, fontWeight: 700, flexShrink: 0,
+            }}>
+              {userEmail.slice(0, 2).toUpperCase()}
+            </span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>
+                Admin
+              </div>
+              <div style={{
+                fontSize: 10, color: 'var(--t2)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }} title={userEmail}>
+                {userEmail}
+              </div>
+            </div>
+          </div>
+        )}
+        {onSignOut && userEmail && (
+          <button
+            className="btn sm ghost"
+            style={{ fontSize: 10, width: '100%', justifyContent: 'center', color: 'var(--red)', marginBottom: 4 }}
+            onClick={() => onSignOut()}
+          >
+            ↩ Uitloggen
+          </button>
+        )}
+        <div style={{ fontSize: 9, color: 'var(--t3)', padding: '4px 6px', textAlign: 'center' }}>v10.0 · React 19</div>
       </div>
     </nav>
   )

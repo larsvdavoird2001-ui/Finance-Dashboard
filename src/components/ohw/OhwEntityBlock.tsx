@@ -9,7 +9,8 @@ interface Props {
   entity: OhwEntityData
   displayMonths: string[]
   onChange: (updated: OhwEntityData) => void
-  onSave: () => void
+  /** @deprecated auto-opslaan is nu actief; dit is kosmetisch */
+  onSave?: () => void
 }
 
 const STICKY: React.CSSProperties = {
@@ -19,7 +20,7 @@ const STICKY: React.CSSProperties = {
   boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.08)',
 }
 
-export const OhwEntityBlock = memo(function OhwEntityBlock({ entity, displayMonths, onChange, onSave }: Props) {
+export const OhwEntityBlock = memo(function OhwEntityBlock({ entity, displayMonths, onChange, onSave: _onSave }: Props) {
   const [open, setOpen] = useState(true)
   const isSoftware = entity.entity === 'Software'
   const nc = displayMonths.length
@@ -69,9 +70,20 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({ entity, displayMont
           </strong>
           &nbsp;&nbsp;OHW: <strong style={{ color: 'var(--t1)' }}>{fmt(lastTot)}</strong>
         </span>
-        <div style={{ marginLeft: 12, display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+        <div style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
           <button className="btn sm ghost" style={{ fontSize: 10 }} onClick={addSection}>+ Rubriek</button>
-          <button className="btn sm success" onClick={onSave}>Opslaan</button>
+          <span
+            style={{
+              fontSize: 10, color: 'var(--green)',
+              background: 'var(--bd-green)', padding: '2px 8px', borderRadius: 4,
+              border: '1px solid var(--green)', fontWeight: 600,
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}
+            title="Elke wijziging wordt direct opgeslagen"
+          >
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', animation: 'pulse 2s infinite' }} />
+            Auto-opslaan
+          </span>
         </div>
       </div>
 
