@@ -439,6 +439,7 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                       <BucketTag label="In totaal" value={livePreview.missingHoursCounts.matched} color="var(--green)" />
                       <BucketTag label="Geen BV" value={livePreview.missingHoursCounts.unmatched} color="var(--amber)" />
                       <BucketTag label="Leeg / 0" value={livePreview.missingHoursCounts.emptyOrZero} color="var(--t3)" />
+                      <BucketTag label="Totaalregels" value={livePreview.missingHoursCounts.totalRowsSkipped} color="var(--t3)" />
                       {bvFilter && <BucketTag label={`Filter "${bvFilter}"`} value={livePreview.missingHoursCounts.bedrijfFiltered} color="var(--amber)" />}
                     </div>
                   )}

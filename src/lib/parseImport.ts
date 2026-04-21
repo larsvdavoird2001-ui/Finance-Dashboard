@@ -146,6 +146,45 @@ export function parseDutchNumber(val: unknown): number | null {
   return null
 }
 
+// ── Totaal-/resultaatregel-detectie ─────────────────────────────────────
+// SAP-exports bevatten vaak subtotaal-/totaal-/eindtotaal-rijen die niet bij
+// de detail-data horen. Deze moeten uit de som gehouden worden, anders worden
+// totalen dubbel geteld. Strict regex matching op EXACTE label-patterns
+// minimaliseert false positives (bv. "Totaal project Glaspoort" wordt NIET
+// als totaalregel gezien omdat het een project-naam is, geen totaal-label).
+const TOTAL_LABEL_PATTERNS = [
+  /^(sub|eind|grand\s?)?totaal\s*[:.-]?\s*$/i,                  // "Totaal", "Subtotaal", "Eindtotaal", "Totaal:"
+  /^(sub|eind|grand\s?)?total\s*[:.-]?\s*$/i,                   // "Total", "Grand total"
+  /^(sub|eind)?totaal[\s\-]+generaal\s*[:.-]?\s*$/i,            // "Totaal generaal", "Totaal-generaal"
+  /^(sub|eind)?totaal[\s\-]+per[\s\-]+\w+\s*[:.-]?\s*$/i,       // "Totaal per BV", "Totaal per maand"
+  /^(sub|eind)?totaal[\s\-]+(alle|all)\b.*$/i,                  // "Totaal alle BVs"
+  /^\s*\*+\s*(eind|sub)?totaal.*\*+\s*$/i,                      // "** Totaal **"
+  /^som\s*[:.-]?\s*$/i,                                         // "Som", "Som:"
+  /^generaal\s*[:.-]?\s*$/i,                                    // "Generaal"
+  /^resultaat\s*[:.-]?\s*$/i,                                   // "Resultaat"
+  /^eindresultaat\s*[:.-]?\s*$/i,                               // "Eindresultaat"
+  /^(netto|bruto)\s+resultaat\s*[:.-]?\s*$/i,                   // "Netto resultaat", "Bruto resultaat"
+  /^samenvatting\s*[:.-]?\s*$/i,                                // "Samenvatting"
+  /^grand\s+total\s*[:.-]?\s*$/i,
+]
+
+/** Is een cel-waarde een totaal-/resultaat-label? */
+export function looksLikeTotalLabel(val: unknown): boolean {
+  if (val === null || val === undefined) return false
+  const s = String(val).trim()
+  if (!s) return false
+  return TOTAL_LABEL_PATTERNS.some(p => p.test(s))
+}
+
+/** Is deze rij vermoedelijk een totaal-/subtotaal-/resultaatregel?
+ *  Checkt ALLE cellen; één match is genoeg. */
+export function isLikelyTotalRow(row: Record<string, unknown>): boolean {
+  for (const val of Object.values(row)) {
+    if (looksLikeTotalLabel(val)) return true
+  }
+  return false
+}
+
 /** Parse een cel met bedrag/uren die SAP soms met units exporteert:
  *  "1.234 EUR", "1.234,56 EUR,-", "40 u", "8 uur", "12,5 hrs", "40%".
  *  Strip alle Latijnse letters (ook accenten), euro/dollar/pond symbolen,
@@ -376,6 +415,7 @@ export interface ParseResult {
     negative: number          // negatieve uren (correcties)
     bedrijfFiltered: number   // weggefilterd door bedrijfskolom-filter
     manuallyExcluded: number  // handmatig uitgevinkt in Verfijnen-stap
+    totalRowsSkipped: number  // "Totaal"/"Subtotaal"/"Eindtotaal" rijen overgeslagen
   }
 }
 
@@ -828,10 +868,14 @@ function parseMissingHours(
   let skippedCount = 0
   let matchedCount = 0
   let negativeSkipped = 0
+  let totalRowsSkipped = 0
   const unmatchedIds: string[] = []
   const details: Array<{ id: string; naam: string; uren: number; tarief: number; bedrag: number }> = []
 
   for (const row of rows) {
+    // Totaal-/resultaatregels overslaan (niet dubbel tellen met detail-rijen)
+    if (isLikelyTotalRow(row)) { totalRowsSkipped++; continue }
+
     const rawVal = row[idCol]
     const hours = parseHoursCell(row[hoursCol])
     const hasId = rawVal !== null && rawVal !== undefined && String(rawVal).trim() !== ''
@@ -861,6 +905,9 @@ function parseMissingHours(
 
   if (negativeSkipped > 0) {
     warnings.push(`${negativeSkipped} rij(en) met negatieve uren overgeslagen`)
+  }
+  if (totalRowsSkipped > 0) {
+    warnings.push(`${totalRowsSkipped} totaal-/subtotaalrij(en) overgeslagen (niet dubbel geteld)`)
   }
 
   // Afronden op hele euro
@@ -975,8 +1022,12 @@ export async function parseImportFile(
         let parsedCount = 0
         let skippedCount = 0
         let unmatchedCount = 0
+        let totalRowsSkipped = 0
 
         for (const row of rows) {
+          // Totaal-/subtotaalrijen overslaan (nooit dubbel tellen)
+          if (isLikelyTotalRow(row)) { totalRowsSkipped++; continue }
+
           // ── Bedrag bepalen ─────────────────────────────────────────────
           let amount: number | null = null
 
@@ -1035,6 +1086,11 @@ export async function parseImportFile(
           warnings.push(
             `${skippedCount} van ${rows.length} rijen overgeslagen (leeg/onparseerbaar). ` +
             `Controleer of de juiste bedrag-kolom is geselecteerd.`,
+          )
+        }
+        if (totalRowsSkipped > 0) {
+          warnings.push(
+            `${totalRowsSkipped} totaal-/subtotaalrij(en) overgeslagen (niet dubbel geteld).`,
           )
         }
 
@@ -1384,11 +1440,16 @@ export function computeMissingHours(
   let manualExclusions = 0
   let negativeSkipped = 0
   let zeroTariefCount = 0
+  let totalRowsSkipped = 0
   const unmatchedIds: string[] = []
   const details: MissingHoursDetail[] = []
 
   for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx++) {
     const row = dataRows[rowIdx]
+
+    // Totaal-/resultaatregels overslaan
+    if (isLikelyTotalRow(row)) { totalRowsSkipped++; continue }
+
     const rawIdVal = row[cfg.werknemerCol]
     const rawIdStr = String(rawIdVal ?? '').trim()
     const hours = parseHoursCell(row[cfg.urenCol])
@@ -1458,6 +1519,9 @@ export function computeMissingHours(
   if (negativeSkipped > 0) {
     warnings.push(`${negativeSkipped} rij(en) met negatieve uren overgeslagen (correcties tellen niet mee)`)
   }
+  if (totalRowsSkipped > 0) {
+    warnings.push(`${totalRowsSkipped} totaal-/subtotaalrij(en) overgeslagen (niet dubbel geteld)`)
+  }
   if (zeroTariefCount > 0) {
     warnings.push(
       `⚠ ${zeroTariefCount} werknemer(s) wel in tarieventabel maar zonder IC tarief — ` +
@@ -1516,6 +1580,7 @@ export function computeMissingHours(
       negative: negativeSkipped,
       bedrijfFiltered: bedrijfFilteredOut,
       manuallyExcluded: manualExclusions,
+      totalRowsSkipped,
     },
   }
 }
@@ -1653,6 +1718,7 @@ export function computeGenericImport(
   let manualExclusions = 0
   let bvUndetected = 0        // kan niet aan BV toewijzen (multi-BV slot)
   let bvFilteredOut = 0       // bvFilter niet match
+  let totalRowsSkipped = 0    // "Totaal"/"Subtotaal"/"Eindtotaal" rijen
 
   warnings.push(
     `Configuratie slot "${slotId}": bedrag="${cfg.amountCol}"` +
@@ -1664,6 +1730,11 @@ export function computeGenericImport(
 
   for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx++) {
     const row = dataRows[rowIdx]
+
+    // Totaal-/resultaatregels overslaan — voorkomt dubbel tellen van SAP-
+    // subtotalen die vaak onderaan of tussen BV-groepen staan
+    if (isLikelyTotalRow(row)) { totalRowsSkipped++; continue }
+
     const rawAmountVal = row[cfg.amountCol]
     const amount = parseAmountCell(rawAmountVal)
 
@@ -1722,6 +1793,7 @@ export function computeGenericImport(
   total = isHoursSlot ? Math.round(total * 10) / 10 : Math.round(total)
 
   if (skippedCount > 0) warnings.push(`${skippedCount} rij(en) overgeslagen (leeg / 0 / niet-parseerbaar)`)
+  if (totalRowsSkipped > 0) warnings.push(`${totalRowsSkipped} totaal-/subtotaalrij(en) overgeslagen (niet dubbel geteld)`)
   if (bvUndetected > 0) warnings.push(`${bvUndetected} rij(en) zonder herkende BV-waarde in "${cfg.bvCol}"`)
   if (bvFilteredOut > 0) warnings.push(`${bvFilteredOut} rij(en) weggefilterd door BV-filter (${cfg.bvFilter})`)
   if (manualExclusions > 0) warnings.push(`${manualExclusions} handmatig uitgesloten`)
@@ -1769,6 +1841,7 @@ export function computeGenericImport(
       negative: 0,
       bedrijfFiltered: bvFilteredOut,
       manuallyExcluded: manualExclusions,
+      totalRowsSkipped,
     },
   }
 }

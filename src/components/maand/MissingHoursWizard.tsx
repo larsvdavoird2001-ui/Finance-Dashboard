@@ -512,6 +512,7 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
                       <RowAccountingTag label="Onbekend" value={livePreview.missingHoursCounts.unmatched} color="var(--amber)" />
                       <RowAccountingTag label="Leeg / 0 uren" value={livePreview.missingHoursCounts.emptyOrZero} color="var(--t3)" />
                       <RowAccountingTag label="Negatief" value={livePreview.missingHoursCounts.negative} color="var(--t3)" />
+                      <RowAccountingTag label="Totaalregels" value={livePreview.missingHoursCounts.totalRowsSkipped} color="var(--t3)" />
                       {bedrijfCol && bedrijfFilter && (
                         <RowAccountingTag
                           label={`Bedrijfsfilter "${bedrijfFilter}"`}
