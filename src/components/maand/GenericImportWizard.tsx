@@ -127,7 +127,9 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
     try {
       const cfg: GenericImportConfig = {
         amountCol,
-        bvCol: isSingleBv ? undefined : bvCol,
+        // bvCol wordt altijd meegegeven; voor single-BV slots fungeert-ie als
+        // filter (niet-matching rijen worden uitgesloten i.p.v. meegeteld)
+        bvCol: bvCol || undefined,
         bvFilter: bvFilter || undefined,
         excludedRowIndices: step === 4 ? excludedRows : undefined,
       }
@@ -144,7 +146,9 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
     try {
       const cfg: GenericImportConfig = {
         amountCol,
-        bvCol: isSingleBv ? undefined : bvCol,
+        // bvCol wordt altijd meegegeven; voor single-BV slots fungeert-ie als
+        // filter (niet-matching rijen worden uitgesloten i.p.v. meegeteld)
+        bvCol: bvCol || undefined,
         bvFilter: bvFilter || undefined,
       }
       const r = computeGenericImport(headers, dataRows, slotId, cfg)
@@ -362,6 +366,21 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                     suggestion={suggested.bvCol}
                     previewValues={dataRows.slice(0, 3).map(r => String(r[bvCol] ?? ''))}
                     bvStats={bvStats}
+                  />
+                )}
+
+                {isSingleBv && (
+                  <BvColumnPicker
+                    label={`Kolom: BV-filter (optioneel — houdt alleen ${slotConfig!.targetBv} rijen)`}
+                    helpText={`Single-BV slot: totaal gaat naar ${slotConfig!.targetBv}. Als het bestand ook andere BVs bevat, selecteer hier de BV-kolom; niet-${slotConfig!.targetBv} rijen worden dan uitgefilterd i.p.v. meegeteld.`}
+                    color="var(--amber)"
+                    value={bvCol}
+                    onChange={setBvCol}
+                    headers={headers}
+                    suggestion={suggested.bvCol}
+                    previewValues={dataRows.slice(0, 3).map(r => String(r[bvCol] ?? ''))}
+                    bvStats={bvStats}
+                    allowNone
                   />
                 )}
 
@@ -711,8 +730,11 @@ interface BvPickerProps {
   suggestion: string
   previewValues: string[]
   bvStats: Record<string, { matches: number; total: number; bvs: Record<string, number> }>
+  /** Als true: toont een expliciete "— geen BV-filter —" optie bovenaan de
+   *  dropdown. Gebruikt door single-BV slots zodat user filter kan uitzetten. */
+  allowNone?: boolean
 }
-function BvColumnPicker({ label, helpText, color, value, onChange, headers, suggestion, previewValues, bvStats }: BvPickerProps) {
+function BvColumnPicker({ label, helpText, color, value, onChange, headers, suggestion, previewValues, bvStats, allowNone }: BvPickerProps) {
   const stat = value ? bvStats[value] : null
   return (
     <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: '10px 12px', border: '1px solid var(--bd2)', borderLeftWidth: 3, borderLeftColor: color }}>
@@ -737,7 +759,8 @@ function BvColumnPicker({ label, helpText, color, value, onChange, headers, sugg
         onChange={e => onChange(e.target.value)}
         style={{ background: 'var(--bg1)', border: '1px solid var(--bd3)', borderRadius: 5, color: 'var(--t1)', fontSize: 11, padding: '5px 8px', width: '100%', outline: 'none', cursor: 'pointer' }}
       >
-        {!value && <option value="">— kies een kolom —</option>}
+        {allowNone && <option value="">— geen BV-filter (alle rijen meetellen) —</option>}
+        {!allowNone && !value && <option value="">— kies een kolom —</option>}
         {headers.map(h => {
           const s = bvStats[h]
           const suffix = suggestion === h ? '   (voorstel)' : s && s.matches > 0 ? `   [${s.matches} BV-match]` : ''

@@ -63,9 +63,30 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     // Geen targetBv/targetRowId meer — multi-BV
   },
   d_lijst: {
-    amountCols: ['declarabel', 'billable', 'declarabele uren', 'billable hours', 'faktureerbaar', 'bedrag', 'amount', 'waarde', 'totaal'],
-    bvCols: ['winstcentrum', 'bv', 'vennootschap', 'afdeling'],
-    positiveOnly: true,
+    // D-lijst = declarabele uren Consultancy met tarief. We sommeren de
+    // NETTO WAARDE (€), niet de uren zelf. BV-kolom is optioneel — als ingesteld
+    // filtert de compute-logica naar alleen rijen waarvan de BV Consultancy is
+    // (voor gemengde SAP-exports).
+    amountCols: [
+      'netto waarde', 'nettowaarde', 'netto bedrag', 'nettobedrag',
+      'netto excl btw', 'netto excl. btw', 'netto',
+      'declarabele waarde', 'declarabel bedrag', 'billable amount', 'billable value',
+      'factuurwaarde', 'totale waarde',
+      'bedrag', 'waarde', 'amount', 'totaal',
+      // Legacy fallbacks voor files zonder € kolom — worden alleen als
+      // laatste gekozen (wizard toont match-count zodat gebruiker ziet of
+      // dit een uren-kolom is en handmatig kan bijsturen)
+      'declarabel', 'billable', 'declarabele uren', 'billable hours', 'faktureerbaar',
+    ],
+    bvCols: [
+      'verantwoordelijke eenheid', 'verantw. eenheid', 'verantw eenheid',
+      'winstcentrum', 'winst centrum', 'profit center', 'profitcenter',
+      'vennootschap', 'bv naam', 'entiteit', 'organisatorische eenheid',
+      'afdeling', 'department', 'bedrijfstak', 'business unit', 'businessunit',
+      'bv', 'bedrijf', 'entity', 'company', 'organisatie', 'eenheid',
+    ],
+    absoluteValue: false,
+    positiveOnly: false,    // credit-regels (negatief) tellen mee voor correcte saldo
     targetBv: 'Consultancy',
     targetRowId: 'c1',
     targetEntity: 'Consultancy',
@@ -1619,8 +1640,12 @@ export function perColumnTariffMatches(
 
 export interface GenericImportConfig {
   amountCol: string
-  bvCol?: string           // Alleen voor multi-BV slots (factuurvolume etc)
-  bvFilter?: BvId          // Optioneel: alleen één BV opnemen
+  /** BV-kolom. Voor multi-BV slots verplicht (bepaalt distributie). Voor
+   *  single-BV slots optioneel — als ingesteld wordt de kolom gebruikt om
+   *  niet-matching rijen uit te filteren (i.p.v. ze blind toe te wijzen). */
+  bvCol?: string
+  /** Alleen relevant voor multi-BV slots: beperk output tot één BV */
+  bvFilter?: BvId
   excludedRowIndices?: Set<number>
 }
 
@@ -1646,12 +1671,13 @@ export function suggestGenericImportColumns(
   // Amount column via bestaande scoring
   const amountCol = findBestAmountColumn(headers, sample, slotConfig.amountCols, slotConfig)
 
-  // BV column alleen voor multi-BV slots
-  let bvCol = ''
+  // BV column: voor multi-BV slots nodig voor distributie; voor single-BV
+  // slots optioneel als filter (gemengde SAP exports). We suggereren 'm
+  // altijd zodat de user 'm kan gebruiken of leeg laten.
+  const bvCol = findBestBvColumn(headers, sample, slotConfig.bvCols)
+
   let bvFilterSuggestion: BvId | '' = ''
-  if (!slotConfig.targetBv) {
-    bvCol = findBestBvColumn(headers, sample, slotConfig.bvCols)
-  } else {
+  if (slotConfig.targetBv) {
     bvFilterSuggestion = slotConfig.targetBv
   }
 
@@ -1748,6 +1774,20 @@ export function computeGenericImport(
     let bv: BvId | null = null
     let rawBv = ''
     if (slotConfig.targetBv) {
+      // Single-BV slot (bv. D-lijst → Consultancy). Als de gebruiker ook een
+      // BV-kolom heeft gekozen, gebruiken we die als FILTER: rijen waar de
+      // cel-waarde een ANDERE BV aangeeft worden uitgefilterd (niet blind
+      // toegewezen aan de target). Dat voorkomt dat gemengde SAP-exports
+      // Projects-/Software-rijen ten onrechte meetellen.
+      if (cfg.bvCol) {
+        rawBv = String(row[cfg.bvCol] ?? '').trim()
+        const detected = detectBvFromValue(rawBv)
+        if (detected && detected !== slotConfig.targetBv) {
+          bvFilteredOut++
+          continue
+        }
+        // Als detected === null: cel is ambiguous, dan valt-ie onder de target-BV
+      }
       bv = slotConfig.targetBv
     } else if (cfg.bvCol) {
       rawBv = String(row[cfg.bvCol] ?? '').trim()
