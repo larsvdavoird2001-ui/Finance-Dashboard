@@ -137,6 +137,15 @@ export function parseDutchNumber(val: unknown): number | null {
     return inner !== null ? -Math.abs(inner) : null
   }
 
+  // SAP-notatie: "1.234,56-" (trailing minus) betekent negatief. Dit is een
+  // standaard SAP/DATEV formaat voor credit-regels. Belangrijk: anders worden
+  // creditregels ten onrechte als positief geparsed (4287,71- telt dan +4287,71
+  // ipv -4287,71 → totaal klopt 2× het verschil niet).
+  if (s.endsWith('-') && !s.startsWith('-') && s.length > 1) {
+    const inner = parseDutchNumber(s.slice(0, -1))
+    return inner !== null ? -Math.abs(inner) : null
+  }
+
   const negative = s.startsWith('-')
   const abs = negative ? s.slice(1) : s
 
@@ -200,16 +209,20 @@ const TOTAL_LABEL_STRICT_PATTERNS = [
 ]
 
 /** Startsmatch: cel BEGINT met een totaal-keyword + whitespace, gevolgd door
- *  BV-namen of korte labels. Wordt gecombineerd met een "rij is klein"-check
- *  om project-beschrijvingen uit te sluiten. */
+ *  iets (BV-naam, stroming, werknemer, client, maand, etc.). Wordt
+ *  gecombineerd met een "rij is klein"-check om project-beschrijvingen uit
+ *  te sluiten. */
 const TOTAL_LABEL_STARTSWITH_PATTERNS = [
-  /^(sub|eind|grand\s?)?totaal\s+(alle|all|per|generaal|bv|consultancy|projects?|software|holdings?)\b/i,
-  /^(sub|eind|grand\s?)?total\s+(all|per|consultancy|projects?|software|holdings?)\b/i,
-  /^subtotaal\s+/i,                                             // "Subtotaal <iets>"
-  /^eindtotaal\s+/i,
-  /^eindresultaat\s+/i,
-  /^netto\s+resultaat\s+/i,
-  /^bruto\s+resultaat\s+/i,
+  // Elke variant van "Totaal <iets>" — zolang er een spatie na komt en
+  // daarna iets niet-leeg volgt. Vangt: "Totaal Consultancy", "Totaal per
+  // maand", "Totaal Kevin Janzen", "Totaal stroming C1", "Totaal Telecom",
+  // "Subtotaal Projects AK", "Eindtotaal", "Tussentotaal per BV", etc.
+  /^(sub|eind|grand\s?|tussen|deel)?totaal\s+\S/i,
+  /^(sub|eind|grand\s?)?total\s+\S/i,
+  /^(eind)?resultaat\s+\S/i,
+  /^(netto|bruto)\s+resultaat\s+\S/i,
+  /^samenvatting\s+\S/i,
+  /^saldo\s+/i,                                                 // "Saldo" of "Saldo per BV"
 ]
 
 /** Is een cel-waarde een totaal-/resultaat-label (strict)? */
@@ -252,10 +265,14 @@ export function isLikelyTotalRow(row: Record<string, unknown>): boolean {
     }
   }
 
-  // Signaal B: startsWith-match + kleine rij (≤ 4 non-empty cellen)
-  if (hasStartsWithTotal && nonEmpty <= 4) return true
+  // Signaal B: startsWith-match + rij heeft niet heel veel niet-lege cellen
+  // (detail-rijen in SAP exports hebben typisch 8+ kolommen gevuld;
+  // subtotaal-rijen hebben slechts label + enkele getallen). Drempel van 7
+  // laat typische SAP subtotaal-rijen (met datum/maand/referentie cellen)
+  // vallen zonder detail-rijen te raken.
+  if (hasStartsWithTotal && nonEmpty <= 7) return true
 
-  // Signaal C: "sparse" rij — <= 3 non-empty cellen, waarvan ≥ 1 numeriek en
+  // Signaal C: "sparse" rij — ≤ 3 non-empty cellen, waarvan ≥ 1 numeriek en
   // een andere begint met totaal/subtotaal/...
   if (nonEmpty <= 3 && numericOnlyCount >= 1 && hasStartsWithTotal) return true
 
