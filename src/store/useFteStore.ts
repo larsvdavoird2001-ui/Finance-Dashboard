@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { FteEntry, BvId } from '../data/types'
 import { fetchFteEntries, upsertFteEntry, upsertAllFteEntries } from '../lib/db'
 
@@ -35,28 +36,44 @@ interface FteStore {
   getEntry:    (bv: BvId, month: string) => FteEntry | undefined
 }
 
-export const useFteStore = create<FteStore>((set, get) => ({
-  entries: makeEntries(),
-  loaded: false,
+export const useFteStore = create<FteStore>()(
+  persist(
+    (set, get) => ({
+      entries: makeEntries(),
+      loaded: false,
 
-  loadFromDb: async () => {
-    const rows = await fetchFteEntries()
-    if (rows.length > 0) {
-      set({ entries: rows, loaded: true })
-    } else {
-      const initial = makeEntries()
-      await upsertAllFteEntries(initial)
-      set({ loaded: true })
-    }
-  },
+      loadFromDb: async () => {
+        try {
+          const rows = await fetchFteEntries()
+          if (rows.length > 0) {
+            set({ entries: rows, loaded: true })
+          } else {
+            const current = get().entries
+            const initial = makeEntries()
+            const isPristine = current.length === initial.length &&
+              current.every((e, i) => e.fte === initial[i].fte && e.headcount === initial[i].headcount)
+            if (isPristine) await upsertAllFteEntries(initial)
+            set({ loaded: true })
+          }
+        } catch (err) {
+          console.warn('[useFteStore] Supabase load failed, keeping local state:', err)
+          set({ loaded: true })
+        }
+      },
 
-  updateEntry: (id, patch) => {
-    set(s => ({ entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e) }))
-    const entry = get().entries.find(e => e.id === id)
-    if (entry) upsertFteEntry(entry)
-  },
+      updateEntry: (id, patch) => {
+        set(s => ({ entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e) }))
+        const entry = get().entries.find(e => e.id === id)
+        if (entry) upsertFteEntry(entry)
+      },
 
-  getEntry: (bv, month) => get().entries.find(e => e.bv === bv && e.month === month),
-}))
+      getEntry: (bv, month) => get().entries.find(e => e.bv === bv && e.month === month),
+    }),
+    {
+      name: 'tpg-fte-entries',
+      partialize: (state) => ({ entries: state.entries }) as unknown as FteStore,
+    },
+  ),
+)
 
 export const FTE_MONTHS = MONTHS

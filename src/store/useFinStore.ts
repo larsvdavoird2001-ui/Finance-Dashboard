@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { ClosingEntry, BvId } from '../data/types'
 import { fetchClosingEntries, upsertClosingEntry, upsertAllClosingEntries } from '../lib/db'
 
@@ -72,35 +73,57 @@ interface FinStore {
   getMonthEntries: (month: string) => ClosingEntry[]
 }
 
-export const useFinStore = create<FinStore>((set, get) => ({
-  entries: INITIAL_ENTRIES,
-  loaded: false,
+export const useFinStore = create<FinStore>()(
+  persist(
+    (set, get) => ({
+      entries: INITIAL_ENTRIES,
+      loaded: false,
 
-  loadFromDb: async () => {
-    const rows = await fetchClosingEntries()
-    if (rows.length > 0) {
-      set({ entries: rows, loaded: true })
-    } else {
-      // Eerste keer: seed initial data naar Supabase
-      await upsertAllClosingEntries(INITIAL_ENTRIES)
-      set({ loaded: true })
-    }
-  },
+      loadFromDb: async () => {
+        // Non-destructieve laad: overschrijf lokale staat ALLEEN als Supabase
+        // daadwerkelijk data teruggeeft. Bij fout of leeg antwoord blijft de
+        // localStorage-gehydreerde staat behouden — voorkomt data-verlies
+        // wanneer Supabase tijdelijk onbereikbaar is of RLS strict is.
+        try {
+          const rows = await fetchClosingEntries()
+          if (rows.length > 0) {
+            set({ entries: rows, loaded: true })
+          } else {
+            // Alleen seeden als er lokaal ook niks aangepast is (initial set)
+            const current = get().entries
+            const looksLikeDefaults = current.length === INITIAL_ENTRIES.length &&
+              current.every(e => e.remark === '' && e.debiteuren === 0)
+            if (looksLikeDefaults) {
+              await upsertAllClosingEntries(INITIAL_ENTRIES)
+            }
+            set({ loaded: true })
+          }
+        } catch (err) {
+          console.warn('[useFinStore] Supabase load failed, keeping local state:', err)
+          set({ loaded: true })
+        }
+      },
 
-  updateEntry: (id, patch) => {
-    set(s => ({
-      entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e),
-    }))
-    // Async sync naar Supabase
-    const entry = get().entries.find(e => e.id === id)
-    if (entry) upsertClosingEntry(entry)
-  },
+      updateEntry: (id, patch) => {
+        set(s => ({
+          entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e),
+        }))
+        const entry = get().entries.find(e => e.id === id)
+        if (entry) upsertClosingEntry(entry)
+      },
 
-  getEntry: (bv, month) =>
-    get().entries.find(e => e.bv === bv && e.month === month),
+      getEntry: (bv, month) =>
+        get().entries.find(e => e.bv === bv && e.month === month),
 
-  getMonthEntries: (month) =>
-    get().entries.filter(e => e.month === month),
-}))
+      getMonthEntries: (month) =>
+        get().entries.filter(e => e.month === month),
+    }),
+    {
+      name: 'tpg-closing-entries',
+      // Alleen entries persisten; `loaded` blijft lokaal bij elke reload false
+      partialize: (state) => ({ entries: state.entries }) as unknown as FinStore,
+    },
+  ),
+)
 
 export const CLOSING_MONTHS = ['Jan-26', 'Feb-26', 'Mar-26']

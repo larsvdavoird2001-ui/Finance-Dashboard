@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { TariffEntry } from '../data/types'
 import { supabase, supabaseEnabled } from '../lib/supabase'
 import initialData from '../data/tariffData.json'
@@ -79,40 +80,56 @@ async function deleteTariff(id: string): Promise<void> {
   if (error) console.error('deleteTariff:', error)
 }
 
-export const useTariffStore = create<TariffStore>((set, get) => ({
-  entries: initialData as TariffEntry[],
-  loaded: false,
+export const useTariffStore = create<TariffStore>()(
+  persist(
+    (set, get) => ({
+      entries: initialData as TariffEntry[],
+      loaded: false,
 
-  loadFromDb: async () => {
-    const rows = await fetchTariffs()
-    if (rows.length > 0) {
-      set({ entries: rows, loaded: true })
-    } else {
-      // Seed initial data
-      const seed = initialData as TariffEntry[]
-      await upsertAllTariffs(seed)
-      set({ loaded: true })
-    }
-  },
+      loadFromDb: async () => {
+        try {
+          const rows = await fetchTariffs()
+          if (rows.length > 0) {
+            set({ entries: rows, loaded: true })
+          } else {
+            // Supabase leeg: seed met initial data alleen als lokaal óók nog
+            // de defaults zijn (user heeft geen entries toegevoegd/gewijzigd)
+            const current = get().entries
+            const initial = initialData as TariffEntry[]
+            const isPristine = current.length === initial.length
+            if (isPristine) await upsertAllTariffs(initial)
+            set({ loaded: true })
+          }
+        } catch (err) {
+          console.warn('[useTariffStore] Supabase load failed, keeping local state:', err)
+          set({ loaded: true })
+        }
+      },
 
-  updateEntry: (id, patch) => {
-    set(s => ({
-      entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e),
-    }))
-    const entry = get().entries.find(e => e.id === id)
-    if (entry) upsertTariff(entry)
-  },
+      updateEntry: (id, patch) => {
+        set(s => ({
+          entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e),
+        }))
+        const entry = get().entries.find(e => e.id === id)
+        if (entry) upsertTariff(entry)
+      },
 
-  addEntry: (entry) => {
-    set(s => ({ entries: [...s.entries, entry] }))
-    upsertTariff(entry)
-  },
+      addEntry: (entry) => {
+        set(s => ({ entries: [...s.entries, entry] }))
+        upsertTariff(entry)
+      },
 
-  removeEntry: (id) => {
-    set(s => ({ entries: s.entries.filter(e => e.id !== id) }))
-    deleteTariff(id)
-  },
+      removeEntry: (id) => {
+        set(s => ({ entries: s.entries.filter(e => e.id !== id) }))
+        deleteTariff(id)
+      },
 
-  getByEmployeeId: (employeeId) =>
-    get().entries.find(e => e.id === employeeId),
-}))
+      getByEmployeeId: (employeeId) =>
+        get().entries.find(e => e.id === employeeId),
+    }),
+    {
+      name: 'tpg-tariff-entries',
+      partialize: (state) => ({ entries: state.entries }) as unknown as TariffStore,
+    },
+  ),
+)

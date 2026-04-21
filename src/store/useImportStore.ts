@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { ImportRecord } from '../data/types'
 import * as XLSX from 'xlsx'
 import {
@@ -21,14 +22,26 @@ interface ImportStore {
   exportPeriod: (months: string[]) => void
 }
 
-export const useImportStore = create<ImportStore>()((set, get) => ({
-  records: [],
-  loaded: false,
+export const useImportStore = create<ImportStore>()(
+  persist(
+    (set, get) => ({
+      records: [],
+      loaded: false,
 
-  loadFromDb: async () => {
-    const rows = await fetchImportRecords()
-    set({ records: rows, loaded: true })
-  },
+      loadFromDb: async () => {
+        try {
+          const rows = await fetchImportRecords()
+          if (rows.length > 0) {
+            set({ records: rows, loaded: true })
+          } else {
+            // Supabase leeg: behoud lokale cache (kan user edits bevatten)
+            set({ loaded: true })
+          }
+        } catch (err) {
+          console.warn('[useImportStore] Supabase load failed, keeping local state:', err)
+          set({ loaded: true })
+        }
+      },
 
   addRecord: (record) => {
     set(s => ({ records: [...s.records, record] }))
@@ -84,4 +97,10 @@ export const useImportStore = create<ImportStore>()((set, get) => ({
     XLSX.utils.book_append_sheet(wb, ws, 'Import log')
     XLSX.writeFile(wb, `TPG_import_log_${months.join('-')}.xlsx`)
   },
-}))
+    }),
+    {
+      name: 'tpg-import-records',
+      partialize: (state) => ({ records: state.records }) as unknown as ImportStore,
+    },
+  ),
+)

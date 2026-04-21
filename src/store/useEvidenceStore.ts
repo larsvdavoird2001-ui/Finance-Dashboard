@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import {
   fetchEvidence,
   insertEvidence,
@@ -19,14 +20,25 @@ interface EvidenceStore {
   countByOhwRow: (entity: string, rowId: string) => number
 }
 
-export const useEvidenceStore = create<EvidenceStore>()((set, get) => ({
-  entries: [],
-  loaded: false,
+export const useEvidenceStore = create<EvidenceStore>()(
+  persist(
+    (set, get) => ({
+      entries: [],
+      loaded: false,
 
-  loadFromDb: async () => {
-    const rows = await fetchEvidence()
-    set({ entries: rows, loaded: true })
-  },
+      loadFromDb: async () => {
+        try {
+          const rows = await fetchEvidence()
+          if (rows.length > 0) {
+            set({ entries: rows, loaded: true })
+          } else {
+            set({ loaded: true })
+          }
+        } catch (err) {
+          console.warn('[useEvidenceStore] Supabase load failed, keeping local state:', err)
+          set({ loaded: true })
+        }
+      },
 
   addEntry: (entry) => {
     set(s => ({ entries: [entry, ...s.entries.filter(e => e.id !== entry.id)] }))
@@ -48,7 +60,13 @@ export const useEvidenceStore = create<EvidenceStore>()((set, get) => ({
 
   countByOhwRow: (entity, rowId) =>
     get().entries.filter(e => e.entity === entity && e.ohwRowId === rowId).length,
-}))
+    }),
+    {
+      name: 'tpg-evidence',
+      partialize: (state) => ({ entries: state.entries }) as unknown as EvidenceStore,
+    },
+  ),
+)
 
 /** Convert File → base64 string (prefix "data:mime/type;base64," stripped) */
 export function fileToBase64(file: File): Promise<string> {

@@ -1,6 +1,7 @@
 // useRawDataStore.ts
 // Slaat alle ruwe rijen van geüploade bestanden op — nu met Supabase persistentie.
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import {
   fetchRawData,
   insertRawData,
@@ -35,14 +36,25 @@ interface RawDataStore {
   getRows: (slotId?: string, month?: string) => RawRow[]
 }
 
-export const useRawDataStore = create<RawDataStore>()((set, get) => ({
-  entries: [],
-  loaded: false,
+export const useRawDataStore = create<RawDataStore>()(
+  persist(
+    (set, get) => ({
+      entries: [],
+      loaded: false,
 
-  loadFromDb: async () => {
-    const rows = await fetchRawData()
-    set({ entries: rows as RawDataEntry[], loaded: true })
-  },
+      loadFromDb: async () => {
+        try {
+          const rows = await fetchRawData()
+          if (rows.length > 0) {
+            set({ entries: rows as RawDataEntry[], loaded: true })
+          } else {
+            set({ loaded: true })
+          }
+        } catch (err) {
+          console.warn('[useRawDataStore] Supabase load failed, keeping local state:', err)
+          set({ loaded: true })
+        }
+      },
 
   addEntry: (entry) => {
     set(s => ({
@@ -84,4 +96,10 @@ export const useRawDataStore = create<RawDataStore>()((set, get) => ({
     const entries = get().getApproved(slotId, month)
     return entries.flatMap(e => e.rows)
   },
-}))
+    }),
+    {
+      name: 'tpg-raw-data',
+      partialize: (state) => ({ entries: state.entries }) as unknown as RawDataStore,
+    },
+  ),
+)
