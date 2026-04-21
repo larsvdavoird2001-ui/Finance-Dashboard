@@ -1861,19 +1861,19 @@ export function computeGenericImport(
     let bv: BvId | null = null
     let rawBv = ''
     if (slotConfig.targetBv) {
-      // Single-BV slot (bv. D-lijst → Consultancy). Als de gebruiker ook een
-      // BV-kolom heeft gekozen, gebruiken we die als FILTER: rijen waar de
-      // cel-waarde een ANDERE BV aangeeft worden uitgefilterd (niet blind
-      // toegewezen aan de target). Dat voorkomt dat gemengde SAP-exports
-      // Projects-/Software-rijen ten onrechte meetellen.
+      // Single-BV slot (bv. D-lijst → Consultancy). Als de gebruiker een
+      // BV-kolom heeft gekozen, gebruiken we die als STRICT FILTER: alleen
+      // rijen waarvan de cel-waarde expliciet de target-BV aangeeft tellen
+      // mee. Rijen met een ANDERE BV (Projects/Software) én rijen met een
+      // ambigue/lege BV-cel worden uitgefilterd. Zo komen onbedoelde BVs
+      // nooit in het totaal terecht bij een gemengde SAP-export.
       if (cfg.bvCol) {
         rawBv = String(row[cfg.bvCol] ?? '').trim()
         const detected = detectBvFromValue(rawBv)
-        if (detected && detected !== slotConfig.targetBv) {
+        if (detected !== slotConfig.targetBv) {
           bvFilteredOut++
           continue
         }
-        // Als detected === null: cel is ambiguous, dan valt-ie onder de target-BV
       }
       bv = slotConfig.targetBv
     } else if (cfg.bvCol) {
