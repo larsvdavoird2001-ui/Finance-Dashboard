@@ -56,7 +56,7 @@ const UPLOAD_SLOTS: UploadSlot[] = [
   { id: 'geschreven_uren', label: 'Geschreven uren',  icon: '⏱', description: 'SAP urenregistratie — totaal geschreven uren per BV (alle BVs)', appliesTo: [] },
   { id: 'uren_lijst',      label: 'Uren lijst',       icon: '📋', description: 'Alle BVs — nettowaarde per BV → OHW-regel "U-Projecten met tarief" per BV', appliesTo: [], targetRowByBv: { Consultancy: 'c_ul', Projects: 'p1', Software: 's_ul' } },
   { id: 'd_lijst',         label: 'D Lijst',          icon: '📊', description: 'Alleen Consultancy — vult OHW-regel "D facturatie"', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c1', targetEntity: 'Consultancy' },
-  { id: 'conceptfacturen', label: 'Conceptfacturen',  icon: '📄', description: 'SAP conceptfacturen — bijdrage aan factuurvolume (alle BVs)', appliesTo: ['factuurvolume'] },
+  { id: 'conceptfacturen', label: 'Conceptfacturen',  icon: '📄', description: 'Alleen Projects — vult OHW-regel "E-Projecten (concept facturen) wachtend op inkooporder"', appliesTo: [], targetBv: 'Projects', targetRowId: 'p4', targetEntity: 'Projects' },
   { id: 'missing_hours',   label: 'Missing Hours',    icon: '⚠', description: 'Alleen Consultancy — berekent missing hours × tarief × 0,9 → OHW', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c4', targetEntity: 'Consultancy' },
   { id: 'ohw',             label: 'OHW Excel',        icon: '🏗', description: 'Alleen Projects — vult OHW-regel "Onderhanden projecten (OHW Excel)"', appliesTo: [], targetBv: 'Projects', targetRowId: 'p10', targetEntity: 'Projects' },
 ]

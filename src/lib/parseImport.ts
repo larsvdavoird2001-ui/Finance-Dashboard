@@ -92,9 +92,28 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     targetEntity: 'Consultancy',
   },
   conceptfacturen: {
-    amountCols: ['concept bedrag', 'netto', 'bedrag', 'amount', 'waarde', 'totaal'],
-    bvCols: ['winstcentrum', 'bv', 'vennootschap', 'profit center'],
-    absoluteValue: true,
+    // Conceptfacturen = E-Projecten (SAP-overzicht concept facturen) —
+    // gereed gemelde projecten wachtend op inkooporder. Landt in OHW
+    // Projects rij p4. Net als D-lijst: sommeren op netto waarde (€),
+    // optionele BV-filter voor gemengde exports.
+    amountCols: [
+      'netto waarde', 'nettowaarde', 'netto bedrag', 'nettobedrag',
+      'netto excl btw', 'netto excl. btw', 'netto',
+      'concept bedrag', 'conceptbedrag', 'factuurwaarde', 'totale waarde',
+      'bedrag', 'waarde', 'amount', 'totaal',
+    ],
+    bvCols: [
+      'verantwoordelijke eenheid', 'verantw. eenheid', 'verantw eenheid',
+      'winstcentrum', 'winst centrum', 'profit center', 'profitcenter',
+      'vennootschap', 'bv naam', 'entiteit', 'organisatorische eenheid',
+      'afdeling', 'department', 'bedrijfstak', 'business unit', 'businessunit',
+      'bv', 'bedrijf', 'entity', 'company', 'organisatie', 'eenheid',
+    ],
+    absoluteValue: false,
+    positiveOnly: false,
+    targetBv: 'Projects',
+    targetRowId: 'p4',
+    targetEntity: 'Projects',
   },
   missing_hours: {
     amountCols: ['ontbrekende uren', 'missing', 'uren', 'hours', 'missing hours', 'totaal uren'],
