@@ -54,11 +54,16 @@ interface Props {
    *  stap 4. Moet de IC Tarieven tabel updaten zodat de live berekening
    *  opnieuw draait met het nieuwe tarief. */
   onSetTariff: (employeeId: string, tarief: number) => void
+  /** Wordt aangeroepen als user een onbekende identifier wil toevoegen aan
+   *  de IC Tarieven tabel. Krijgt de ruwe identifier-waarde zoals in de Excel
+   *  stond. De handler maakt een Consultancy entry aan met een slim gekozen
+   *  veld (naam/powerbiNaam/powerbiNaam2/id) op basis van de vorm. */
+  onAddEmployee: (rawIdentifier: string) => void
 }
 
 type Step = 1 | 2 | 3 | 4
 
-export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onCancel, onSetTariff }: Props) {
+export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onCancel, onSetTariff, onAddEmployee }: Props) {
   const [step, setStep] = useState<Step>(1)
 
   // Stap 4: handmatig uitgesloten werknemers (keys = tariff-ID)
@@ -414,13 +419,29 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
                         </div>
                       )}
                       {unmatchedSamples.length > 0 && (
-                        <details>
+                        <details open>
                           <summary style={{ color: 'var(--t2)', cursor: 'pointer', fontSize: 10 }}>
-                            Voorbeelden van niet-gematchte waarden ({unmatchedSamples.length})
+                            Voorbeelden van niet-gematchte waarden ({unmatchedSamples.length}) —
+                            klik "+ Voeg toe" om als Consultancy medewerker aan IC Tarieven toe te voegen
                           </summary>
-                          <div style={{ fontFamily: 'var(--mono)', marginTop: 4, fontSize: 10, color: 'var(--t3)' }}>
+                          <div style={{ marginTop: 6, fontSize: 10 }}>
                             {unmatchedSamples.map((v, i) => (
-                              <div key={i}>"{v.slice(0, 60)}"</div>
+                              <div key={i} style={{
+                                display: 'flex', alignItems: 'center', gap: 8,
+                                padding: '3px 0', borderBottom: '1px solid var(--bd)',
+                              }}>
+                                <span style={{ fontFamily: 'var(--mono)', color: 'var(--t2)', flex: 1 }}>
+                                  "{v.slice(0, 60)}"
+                                </span>
+                                <button
+                                  className="btn sm success"
+                                  onClick={() => onAddEmployee(v)}
+                                  style={{ fontSize: 9, padding: '2px 7px' }}
+                                  title="Toevoegen aan IC Tarieven als nieuwe Consultancy medewerker (tarief vul je daarna aan)"
+                                >
+                                  + Voeg toe aan IC Tarieven
+                                </button>
+                              </div>
                             ))}
                           </div>
                         </details>

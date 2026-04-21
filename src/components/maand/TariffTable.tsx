@@ -24,6 +24,7 @@ export function TariffTable() {
   const { toasts, showToast } = useToast()
   const [search, setSearch] = useState('')
   const [filterBv, setFilterBv] = useState<string>('all')
+  const [onlyMissing, setOnlyMissing] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<TariffEntry | null>(null)
   /** Entry IDs die brand-new zijn (voor cancel-to-delete gedrag) */
@@ -31,8 +32,11 @@ export function TariffTable() {
 
   const bvs = [...new Set(entries.map(e => e.bedrijf))].filter(Boolean).sort()
 
+  const hasMissingTariff = (e: TariffEntry) => !e.tarief || e.tarief <= 0
+
   const filtered = entries.filter(e => {
     if (filterBv !== 'all' && e.bedrijf !== filterBv) return false
+    if (onlyMissing && !hasMissingTariff(e)) return false
     if (search) {
       const s = search.toLowerCase()
       return (e.naam?.toLowerCase() ?? '').includes(s) ||
@@ -44,6 +48,14 @@ export function TariffTable() {
     }
     return true
   })
+
+  const missingCount = entries.filter(hasMissingTariff).length
+  const missingByBv: Record<string, number> = {}
+  for (const e of entries) {
+    if (hasMissingTariff(e)) {
+      missingByBv[e.bedrijf || '(geen BV)'] = (missingByBv[e.bedrijf || '(geen BV)'] ?? 0) + 1
+    }
+  }
 
   const startEdit = (entry: TariffEntry) => {
     setEditingId(entry.id)
@@ -231,9 +243,19 @@ export function TariffTable() {
     )
   }
 
-  const renderDisplayRow = (entry: TariffEntry) => (
-    <tr key={entry.id} id={`tariff-row-${entry.id}`} className="sub">
-      <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t3)' }}>{entry.id}</td>
+  const renderDisplayRow = (entry: TariffEntry) => {
+    const missing = hasMissingTariff(entry)
+    return (
+    <tr
+      key={entry.id}
+      id={`tariff-row-${entry.id}`}
+      className="sub"
+      style={missing ? { background: 'rgba(239,83,80,0.05)' } : undefined}
+    >
+      <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t3)' }}>
+        {missing && <span style={{ color: 'var(--red)', marginRight: 4 }}>⚠</span>}
+        {entry.id}
+      </td>
       <td>
         <span style={{
           fontSize: 10, padding: '2px 6px', borderRadius: 3, fontWeight: 600,
@@ -281,6 +303,7 @@ export function TariffTable() {
       </td>
     </tr>
   )
+  }
 
   return (
     <>
@@ -309,6 +332,20 @@ export function TariffTable() {
         </select>
         <span style={{ fontSize: 11, color: 'var(--t3)' }}>{filtered.length} medewerker{filtered.length === 1 ? '' : 's'}</span>
         <button
+          onClick={() => setOnlyMissing(v => !v)}
+          style={{
+            padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            border: '1px solid',
+            fontFamily: 'var(--font)',
+            borderColor: onlyMissing ? 'var(--red)' : missingCount > 0 ? 'var(--amber)' : 'var(--bd2)',
+            background:  onlyMissing ? 'var(--bd-red)' : missingCount > 0 ? 'var(--bd-amber)' : 'transparent',
+            color:       onlyMissing ? 'var(--red)' : missingCount > 0 ? 'var(--amber)' : 'var(--t3)',
+          }}
+          title={missingCount > 0 ? `${missingCount} medewerker(s) zonder IC tarief — klik om alleen deze te tonen` : 'Alle medewerkers hebben een tarief'}
+        >
+          ⚠ {missingCount} zonder tarief {onlyMissing && '· FILTER AAN'}
+        </button>
+        <button
           className="btn sm primary"
           style={{ marginLeft: 'auto', fontSize: 11 }}
           onClick={handleAdd}
@@ -318,6 +355,32 @@ export function TariffTable() {
           + Medewerker toevoegen
         </button>
       </div>
+
+      {/* Per-BV breakdown van medewerkers zonder tarief */}
+      {missingCount > 0 && !onlyMissing && (
+        <div style={{
+          display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+          marginBottom: 8, padding: '6px 10px',
+          background: 'rgba(245,166,35,0.08)',
+          border: '1px solid rgba(245,166,35,0.3)',
+          borderRadius: 6, fontSize: 10, color: 'var(--amber)',
+        }}>
+          <span style={{ fontWeight: 700 }}>⚠ Ontbrekende tarieven per BV:</span>
+          {Object.entries(missingByBv).map(([bv, count]) => (
+            <span key={bv} style={{
+              padding: '2px 8px', borderRadius: 3,
+              background: `${BV_COLORS[bv] ?? 'var(--amber)'}22`,
+              color: BV_COLORS[bv] ?? 'var(--amber)',
+              fontWeight: 600,
+            }}>
+              {bv}: {count}
+            </span>
+          ))}
+          <span style={{ color: 'var(--t3)', fontSize: 10, marginLeft: 6 }}>
+            → klik op de ⚠ knop hierboven om alleen deze te tonen
+          </span>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-hdr">

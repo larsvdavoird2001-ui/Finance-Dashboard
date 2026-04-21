@@ -167,6 +167,7 @@ export function MaandTab({ filter: _filter }: Props) {
   const updateRowValue = useOhwStore(s => s.updateRowValue)
   const tariffEntries = useTariffStore(s => s.entries)
   const updateTariffEntry = useTariffStore(s => s.updateEntry)
+  const addTariffEntry = useTariffStore(s => s.addEntry)
 
   // Bouw multi-key lookup voor missing hours parser — ALLEEN Consultancy
   // medewerkers; werknemer kan worden gematcht op werknemernr, SAP alias
@@ -1655,6 +1656,46 @@ export function MaandTab({ filter: _filter }: Props) {
           onSetTariff={(employeeId, tarief) => {
             updateTariffEntry(employeeId, { tarief })
             showToast(`IC tarief €${tarief} opgeslagen voor werknemer ${employeeId}`, 'g')
+          }}
+          onAddEmployee={(rawIdentifier) => {
+            // Formaat-heuristiek: kies het juiste veld op basis van de vorm
+            //   - Pure cijfers (≥ 3 digits)       → id (werknemer-nummer)
+            //   - Bevat komma                     → powerbiNaam ("Achternaam, Voornaam")
+            //   - All-caps, geen spaties, ≥ 3     → powerbiNaam2 (SAP alias)
+            //   - Anders                          → naam (volledige naam)
+            const s = rawIdentifier.trim()
+            const draft = {
+              id: `new-${Date.now()}`,
+              bedrijf: 'Consultancy',
+              naam: '',
+              powerbiNaam: '',
+              powerbiNaam2: '',
+              stroming: '',
+              tarief: 0,
+              fte: null,
+              functie: '',
+              leidingGevende: '',
+              manager: '',
+              team: '',
+            }
+            if (/^\d{3,}$/.test(s)) {
+              draft.id = s
+              draft.naam = '(onbekende medewerker — vul aan)'
+            } else if (s.includes(',')) {
+              draft.powerbiNaam = s
+              const parts = s.split(',').map(p => p.trim()).filter(Boolean)
+              if (parts.length === 2) draft.naam = `${parts[1]} ${parts[0]}`
+            } else if (/^[A-Z0-9]{3,}$/.test(s) && !s.includes(' ')) {
+              draft.powerbiNaam2 = s
+              draft.naam = s
+            } else {
+              draft.naam = s
+            }
+            addTariffEntry(draft)
+            showToast(
+              `"${s.slice(0, 40)}" toegevoegd als Consultancy medewerker — vul het tarief aan in het IC Tarieven tabblad`,
+              'g',
+            )
           }}
         />
       )}
