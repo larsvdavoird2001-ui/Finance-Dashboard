@@ -4,7 +4,7 @@ import type { Session, User } from '@supabase/supabase-js'
 
 /** ALLEEN dit e-mailadres kan inloggen. Past bij de TPG Finance admin
  *  account. Pas aan als er meerdere admins toegevoegd worden. */
-export const ADMIN_EMAIL = 'finance@thepeoplegroup.nl'
+export const ADMIN_EMAIL = 'lvanderavoird@thepeoplegroup.nl'
 
 export interface AuthState {
   user: User | null
