@@ -1,10 +1,12 @@
-import { memo, useState, useCallback } from 'react'
+import { Fragment, memo, useState, useCallback } from 'react'
 import type { OhwSection as OhwSectionType, OhwRow } from '../../data/types'
 import { fmt, parseNL, gv } from '../../lib/format'
 import { useNavStore } from '../../store/useNavStore'
+import { useEvidenceStore, downloadEvidence, fileIcon, formatFileSize } from '../../store/useEvidenceStore'
 
 interface Props {
   section: OhwSectionType
+  entity?: string  // BV (Consultancy / Projects / Software) — voor bijlagen-lookup
   months: string[]
   onChange: (updated: OhwSectionType) => void
 }
@@ -102,9 +104,11 @@ function DescCell({ row, onSave }: { row: OhwRow; onSave: (desc: string) => void
   )
 }
 
-export const OhwSection = memo(function OhwSection({ section, months, onChange }: Props) {
+export const OhwSection = memo(function OhwSection({ section, entity, months, onChange }: Props) {
   const [open, setOpen] = useState(true)
   const navigateTo = useNavStore(s => s.navigateTo)
+  const evidenceEntries = useEvidenceStore(s => s.entries)
+  const [expandedEvidenceRow, setExpandedEvidenceRow] = useState<string | null>(null)
 
   const updateCell = useCallback((rowId: string, month: string, raw: string) => {
     const v = parseNL(raw)
@@ -157,8 +161,14 @@ export const OhwSection = memo(function OhwSection({ section, months, onChange }
       {open && (
         <>
           {/* ── Data rows ──────────────────────────────────────────── */}
-          {section.rows.map(row => (
-            <tr key={row.id} className="sub">
+          {section.rows.map(row => {
+            const rowEvidence = entity
+              ? evidenceEntries.filter(e => e.entity === entity && e.ohwRowId === row.id)
+              : []
+            const isEvidenceOpen = expandedEvidenceRow === row.id
+            return (
+          <Fragment key={row.id}>
+          <tr className="sub">
               <DescCell row={row} onSave={desc => updateDescription(row.id, desc)} />
               {months.map(m => {
                 const v = gv(row.values, m)
@@ -204,14 +214,61 @@ export const OhwSection = memo(function OhwSection({ section, months, onChange }
                   </td>
                 )
               })}
-              {/* ✕ helemaal rechts — niet tonen voor locked rows */}
-              <td style={{ background: 'var(--bg2)', width: 40, textAlign: 'center' }}>
-                {!row.locked && (
-                  <button className="btn sm ghost" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removeRow(row.id)}>✕</button>
-                )}
+              {/* ✕ helemaal rechts + bijlagen-badge */}
+              <td style={{ background: 'var(--bg2)', width: 60, textAlign: 'center' }}>
+                <div style={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                  {rowEvidence.length > 0 && (
+                    <button
+                      className="btn sm ghost"
+                      style={{ color: 'var(--amber)', padding: '2px 5px', fontSize: 10, fontWeight: 700 }}
+                      onClick={() => setExpandedEvidenceRow(isEvidenceOpen ? null : row.id)}
+                      title={`${rowEvidence.length} bijlage(n) — klik om te bekijken`}
+                    >
+                      📎 {rowEvidence.length}
+                    </button>
+                  )}
+                  {!row.locked && (
+                    <button className="btn sm ghost" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removeRow(row.id)}>✕</button>
+                  )}
+                </div>
               </td>
             </tr>
-          ))}
+            {isEvidenceOpen && rowEvidence.length > 0 && (
+              <tr>
+                <td colSpan={months.length + 2} style={{ background: 'rgba(245,166,35,0.05)', padding: '6px 26px' }}>
+                  <div style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 700, marginBottom: 4 }}>
+                    📎 Onderbouwing ({rowEvidence.length})
+                  </div>
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    {rowEvidence.map(ev => (
+                      <div
+                        key={ev.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '4px 8px', background: 'var(--bg3)', borderRadius: 5,
+                          fontSize: 10,
+                        }}
+                      >
+                        <span style={{ fontSize: 14 }}>{fileIcon(ev.mimeType, ev.fileName)}</span>
+                        <span style={{ fontWeight: 600, color: 'var(--t1)', flex: 1 }}>{ev.fileName}</span>
+                        {ev.description && (
+                          <span style={{ color: 'var(--t3)', fontStyle: 'italic' }}>{ev.description.slice(0, 40)}</span>
+                        )}
+                        <span style={{ color: 'var(--t3)' }}>{ev.month} · {formatFileSize(ev.fileSize)}</span>
+                        <button
+                          className="btn sm ghost"
+                          style={{ fontSize: 9, color: 'var(--blue)', padding: '1px 5px' }}
+                          onClick={() => downloadEvidence(ev)}
+                        >↓</button>
+                      </div>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            )}
+            </Fragment>
+            )
+          })}
 
           {/* ── + Regel toevoegen ───────────────────────────────────── */}
           <tr>

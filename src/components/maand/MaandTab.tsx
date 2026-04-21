@@ -11,6 +11,7 @@ import type { ParseOverrides, ParseResult } from '../../lib/parseImport'
 import type * as XLSX from 'xlsx'
 import { MissingHoursWizard } from './MissingHoursWizard'
 import { GenericImportWizard } from './GenericImportWizard'
+import { BijlagenSection } from './BijlagenSection'
 import { buildMonthBundleZip, downloadBlob } from '../../lib/exportMonthBundle'
 import { generateMonthPptx, monthLabelFromCode } from '../../lib/exportPptx'
 import { useRawDataStore as useRawDataStoreFull } from '../../store/useRawDataStore'
@@ -124,7 +125,7 @@ const AMORTISATIE_SUBS = [
 
 export function MaandTab({ filter: _filter }: Props) {
   const [month, setMonth] = useState<string>('Mar-26')
-  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven'>('afsluiting')
+  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'bijlagen'>('afsluiting')
   const [expandedCosts, setExpandedCosts] = useState<Set<CostSectionId>>(new Set())
   const toggleCostSection = (id: CostSectionId) =>
     setExpandedCosts(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
@@ -600,6 +601,7 @@ export function MaandTab({ filter: _filter }: Props) {
             </button>
             <button className={`tab${activeSection === 'export' ? ' active' : ''}`} onClick={() => setActiveSection('export')}>Export & Log</button>
             <button className={`tab${activeSection === 'tarieven' ? ' active' : ''}`} onClick={() => setActiveSection('tarieven')}>IC Tarieven</button>
+            <button className={`tab${activeSection === 'bijlagen' ? ' active' : ''}`} onClick={() => setActiveSection('bijlagen')}>📎 Bijlagen</button>
           </div>
 
           {activeSection === 'afsluiting' && (
@@ -901,6 +903,15 @@ export function MaandTab({ filter: _filter }: Props) {
 
         {/* ── IC TARIEVEN ─────────────────────────────────────────────────── */}
         {activeSection === 'tarieven' && <TariffTable />}
+
+        {/* ── BIJLAGEN / ONDERBOUWING ─────────────────────────────────────── */}
+        {activeSection === 'bijlagen' && (
+          <BijlagenSection
+            month={uploadMonth}
+            closingMonths={CLOSING_MONTHS}
+            onMonthChange={setUploadMonth}
+          />
+        )}
 
         {/* ── AFSLUITING ──────────────────────────────────────────────────── */}
         {activeSection === 'afsluiting' && (

@@ -207,3 +207,48 @@ export async function upsertAllOhwEntities(year: string, entities: OhwEntityData
     .upsert(rows, { onConflict: 'year,entity' })
   if (error) console.error('upsertAllOhwEntities:', error)
 }
+
+// ── OHW Evidence (bijlages / onderbouwing bestanden) ────────────────────────
+export interface EvidenceEntry {
+  id: string
+  month: string
+  entity: string          // BV
+  ohwRowId: string        // ID van de OHW-rij (bv. 'c1', 'p10', 'c_ul')
+  fileName: string
+  mimeType: string
+  fileSize: number        // bytes
+  fileData: string        // base64 encoded content
+  description: string
+  uploadedAt: string
+}
+
+export async function fetchEvidence(): Promise<EvidenceEntry[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('ohw_evidence').select('*').order('created_at', { ascending: false })
+  if (error) { console.error('fetchEvidence:', error); return [] }
+  return (data ?? []).map(row => snakeToCamel(row) as unknown as EvidenceEntry)
+}
+
+export async function insertEvidence(entry: EvidenceEntry): Promise<void> {
+  if (!supabaseEnabled) return
+  const row = {
+    id: entry.id,
+    month: entry.month,
+    entity: entry.entity,
+    ohw_row_id: entry.ohwRowId,
+    file_name: entry.fileName,
+    mime_type: entry.mimeType,
+    file_size: entry.fileSize,
+    file_data: entry.fileData,
+    description: entry.description,
+    uploaded_at: entry.uploadedAt,
+  }
+  const { error } = await supabase.from('ohw_evidence').upsert(row, { onConflict: 'id' })
+  if (error) console.error('insertEvidence:', error)
+}
+
+export async function deleteEvidence(id: string): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('ohw_evidence').delete().eq('id', id)
+  if (error) console.error('deleteEvidence:', error)
+}

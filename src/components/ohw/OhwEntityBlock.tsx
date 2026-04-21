@@ -94,7 +94,7 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({ entity, displayMont
             <tbody>
               {/* ── Onderhanden sections ────────────────────────── */}
               {entity.onderhanden.map((sec, i) => (
-                <OhwSection key={sec.id} section={sec} months={displayMonths} onChange={u => handleSectionChange(i, u)} />
+                <OhwSection key={sec.id} section={sec} entity={entity.entity} months={displayMonths} onChange={u => handleSectionChange(i, u)} />
               ))}
 
               {/* ── Totaal Onderhanden ─────────────────────────── */}

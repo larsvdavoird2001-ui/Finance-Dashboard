@@ -112,7 +112,24 @@ CREATE TABLE IF NOT EXISTS closing_archives (
   updated_at timestamptz DEFAULT now()
 );
 
--- 8. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
+-- 8. OHW-bijlages — uploaded onderbouwings-bestanden gekoppeld aan een
+--    OHW-rij (voor audit-trail van saldi en handmatige correcties).
+--    file_data bevat de base64-encoded inhoud; limit ~ 10MB per bestand.
+CREATE TABLE IF NOT EXISTS ohw_evidence (
+  id text PRIMARY KEY,
+  month text NOT NULL,
+  entity text NOT NULL CHECK (entity IN ('Consultancy', 'Projects', 'Software', 'Holdings')),
+  ohw_row_id text NOT NULL,
+  file_name text NOT NULL,
+  mime_type text DEFAULT 'application/octet-stream',
+  file_size integer DEFAULT 0,
+  file_data text NOT NULL DEFAULT '',   -- base64 encoded
+  description text DEFAULT '',
+  uploaded_at text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 9. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
 CREATE TABLE IF NOT EXISTS tariff_entries (
   id text PRIMARY KEY,                -- werknemer ID
   bedrijf text DEFAULT '',
@@ -141,6 +158,7 @@ ALTER TABLE ohw_entities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tariff_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE budget_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE closing_archives ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ohw_evidence ENABLE ROW LEVEL SECURITY;
 
 -- Policies: volledige lees/schrijf-toegang voor iedereen (aanpassen als auth nodig is)
 CREATE POLICY "Allow all on closing_entries" ON closing_entries FOR ALL USING (true) WITH CHECK (true);
@@ -151,6 +169,7 @@ CREATE POLICY "Allow all on ohw_entities" ON ohw_entities FOR ALL USING (true) W
 CREATE POLICY "Allow all on tariff_entries" ON tariff_entries FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on budget_overrides" ON budget_overrides FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on closing_archives" ON closing_archives FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on ohw_evidence" ON ohw_evidence FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================================
 -- Indexes voor snelle queries
@@ -164,6 +183,8 @@ CREATE INDEX IF NOT EXISTS idx_ohw_year_entity ON ohw_entities(year, entity);
 CREATE INDEX IF NOT EXISTS idx_tariff_bedrijf ON tariff_entries(bedrijf);
 CREATE INDEX IF NOT EXISTS idx_budget_entity_month ON budget_overrides(entity, month);
 CREATE INDEX IF NOT EXISTS idx_closing_archive_month ON closing_archives(month);
+CREATE INDEX IF NOT EXISTS idx_ohw_evidence_row ON ohw_evidence(entity, ohw_row_id);
+CREATE INDEX IF NOT EXISTS idx_ohw_evidence_month ON ohw_evidence(month);
 
 -- ============================================================================
 -- updated_at trigger — automatisch bijwerken bij UPDATE
