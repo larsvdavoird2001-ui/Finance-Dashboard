@@ -1981,21 +1981,36 @@ export function computeGenericImport(
 
 /** Voor een specifieke kolom: lijst van cel-waarden die NIET matchen met
  *  de tarieftabel. Helpt de gebruiker inzien waarom bepaalde rijen worden
- *  overgeslagen. */
+ *  overgeslagen. Als een bedrijfsfilter is opgegeven worden rijen waarvan
+ *  de BV-cel NIET bij het gevraagde bedrijf past overgeslagen — zodat de
+ *  lijst alleen relevante (bijv. Consultancy) onbekende identifiers toont. */
 export function getUnmatchedSamplesForColumn(
   column: string,
   dataRows: Record<string, unknown>[],
   tariffs: TariffLookup,
   limit: number = 10,
+  filter?: { bedrijfCol?: string; bedrijfFilter?: string },
 ): string[] {
   const seen = new Set<string>()
   const out: string[] = []
   for (const row of dataRows) {
+    // Totaal-/resultaatregels tellen niet als "onbekende medewerkers"
+    if (isLikelyTotalRow(row)) continue
+
     const raw = row[column]
     if (raw === null || raw === undefined) continue
     const s = String(raw).trim()
     if (!s) continue
     if (matchRowValue(raw, tariffs)) continue
+
+    // Als een bedrijfs-kolom + filter zijn opgegeven: sla rijen over
+    // waarvan de BV niet matcht (bv. Projects/Software rijen in een
+    // Consultancy missing-hours file)
+    if (filter?.bedrijfCol && filter?.bedrijfFilter) {
+      const bvCell = row[filter.bedrijfCol]
+      if (!matchesBedrijf(bvCell, filter.bedrijfFilter)) continue
+    }
+
     if (!seen.has(s)) {
       seen.add(s)
       out.push(s)
