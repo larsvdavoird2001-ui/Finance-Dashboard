@@ -118,15 +118,15 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
   // Voor de geselecteerde werknemerCol: lijst onbekende waarden
   const unmatchedSamples = useMemo(() => {
     if (!werknemerCol) return []
-    // Alleen onbekende identifiers tonen die bij het gevraagde bedrijf
-    // (meestal Consultancy) horen. Rijen met een andere BV worden
-    // overgeslagen zodat de "+ Voeg toe aan IC Tarieven" knop niet
-    // verschijnt voor Projects/Software medewerkers.
+    // Alleen onbekende identifiers tonen die ook RELEVANT zijn (positieve
+    // uren, binnen BV-filter). Anders verschijnt "+ Voeg toe" voor rijen
+    // die toch nooit zouden meetellen (0 uren, credits, andere BV).
     return getUnmatchedSamplesForColumn(werknemerCol, dataRows, tariffs, 10, {
       bedrijfCol: bedrijfCol || undefined,
       bedrijfFilter: bedrijfCol && bedrijfFilter ? bedrijfFilter : undefined,
+      urenCol: urenCol || undefined,
     })
-  }, [werknemerCol, dataRows, tariffs, bedrijfCol, bedrijfFilter])
+  }, [werknemerCol, urenCol, dataRows, tariffs, bedrijfCol, bedrijfFilter])
 
   // Wanneer headers/suggested wijzigt, reset naar suggesties
   useEffect(() => {

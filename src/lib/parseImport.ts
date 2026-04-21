@@ -1980,16 +1980,26 @@ export function computeGenericImport(
 }
 
 /** Voor een specifieke kolom: lijst van cel-waarden die NIET matchen met
- *  de tarieftabel. Helpt de gebruiker inzien waarom bepaalde rijen worden
- *  overgeslagen. Als een bedrijfsfilter is opgegeven worden rijen waarvan
- *  de BV-cel NIET bij het gevraagde bedrijf past overgeslagen — zodat de
- *  lijst alleen relevante (bijv. Consultancy) onbekende identifiers toont. */
+ *  de tarieftabel, maar WEL relevante data hebben (positieve uren, binnen
+ *  het BV-filter). Zodat de UI alleen onbekende medewerkers toont die
+ *  daadwerkelijk meegerekend zouden worden als ze een tarief hadden.
+ *
+ *  Filters die worden toegepast (in volgorde):
+ *   1. Skip totaal-/subtotaalrijen (isLikelyTotalRow)
+ *   2. Skip rijen waarvan de werknemer-cel leeg is
+ *   3. Skip rijen die WEL in de tarieven zitten (zijn dus geen "onbekend")
+ *   4. Skip rijen zonder relevante uren (null, 0, of negatief) — deze zouden
+ *      sowieso niet meetellen in het totaal
+ *   5. Skip rijen met een andere BV dan bedrijfFilter
+ *  De samples die OVERBLIJVEN zijn de werknemers voor wie een tarief-entry
+ *  zou moeten worden aangemaakt om de Missing Hours compleet te kunnen
+ *  berekenen. */
 export function getUnmatchedSamplesForColumn(
   column: string,
   dataRows: Record<string, unknown>[],
   tariffs: TariffLookup,
   limit: number = 10,
-  filter?: { bedrijfCol?: string; bedrijfFilter?: string },
+  filter?: { bedrijfCol?: string; bedrijfFilter?: string; urenCol?: string },
 ): string[] {
   const seen = new Set<string>()
   const out: string[] = []
@@ -2002,6 +2012,16 @@ export function getUnmatchedSamplesForColumn(
     const s = String(raw).trim()
     if (!s) continue
     if (matchRowValue(raw, tariffs)) continue
+
+    // Alleen rijen met relevante uren — als urenCol is opgegeven. Dezelfde
+    // regels als computeMissingHours: geen lege cellen, geen 0, geen negatief
+    // (correcties worden sowieso niet in totaal opgenomen). Zo blijven alleen
+    // werknemers over die daadwerkelijk iets bijdragen aan het totaal als ze
+    // een tarief hadden.
+    if (filter?.urenCol) {
+      const hours = parseHoursCell(row[filter.urenCol])
+      if (hours === null || hours === 0 || hours < 0) continue
+    }
 
     // Als een bedrijfs-kolom + filter zijn opgegeven: sla rijen over
     // waarvan de BV niet matcht (bv. Projects/Software rijen in een
