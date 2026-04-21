@@ -43,12 +43,24 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     positiveOnly: true,
   },
   uren_lijst: {
-    amountCols: ['uren', 'hours', 'totaal uren', 'werkuren', 'arbeid', 'bedrag', 'amount', 'waarde', 'totaal'],
-    bvCols: ['winstcentrum', 'bv', 'vennootschap', 'afdeling', 'department'],
-    positiveOnly: true,
-    targetBv: 'Projects',
-    targetRowId: 'p1',
-    targetEntity: 'Projects',
+    // Uren-lijst is nu een multi-BV slot: per rij de BV uit de BV-kolom, en de
+    // NETTO WAARDE (in €) als bedrag. De totalen per BV landen in een OHW-rij
+    // per BV (zie UPLOAD_SLOTS.targetRowByBv in MaandTab).
+    amountCols: [
+      'netto waarde', 'nettowaarde', 'netto bedrag', 'nettobedrag',
+      'netto excl btw', 'netto excl. btw', 'netto',
+      'waarde', 'bedrag', 'amount', 'totaal', 'totale waarde', 'factuurwaarde',
+    ],
+    bvCols: [
+      'verantwoordelijke eenheid', 'verantw. eenheid', 'verantw eenheid',
+      'winstcentrum', 'winst centrum', 'profit center', 'profitcenter',
+      'vennootschap', 'bv naam', 'entiteit', 'organisatorische eenheid',
+      'afdeling', 'department', 'bedrijfstak', 'business unit', 'businessunit',
+      'bv', 'bedrijf', 'entity', 'company', 'organisatie', 'eenheid',
+    ],
+    absoluteValue: false,   // credits kunnen negatief zijn, respecteer teken
+    positiveOnly: false,
+    // Geen targetBv/targetRowId meer — multi-BV
   },
   d_lijst: {
     amountCols: ['declarabel', 'billable', 'declarabele uren', 'billable hours', 'faktureerbaar', 'bedrag', 'amount', 'waarde', 'totaal'],

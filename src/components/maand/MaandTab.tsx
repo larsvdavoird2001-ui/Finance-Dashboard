@@ -41,16 +41,19 @@ interface UploadSlot {
   appliesTo: Array<'factuurvolume' | 'ohwMutatie'>
   /** Als dit slot voor één BV is, toon dit in de UI */
   targetBv?: BvId
-  /** OHW-rij die gevuld wordt bij goedkeuring */
+  /** OHW-rij die gevuld wordt bij goedkeuring (single-BV slot) */
   targetRowId?: string
-  /** Entity (BV) waar de OHW-rij in zit */
+  /** Entity (BV) waar de OHW-rij in zit (single-BV slot) */
   targetEntity?: string
+  /** Multi-BV mapping: per BV een OHW-rij. Gebruikt i.p.v. targetRowId/Entity
+   *  voor slots zoals uren_lijst waar de ruwe data per BV verdeeld wordt. */
+  targetRowByBv?: Partial<Record<BvId, string>>
 }
 
 const UPLOAD_SLOTS: UploadSlot[] = [
   { id: 'factuurvolume',   label: 'Factuurvolume',    icon: '🧾', description: 'SAP facturenlijst — gefactureerde omzet per BV (alle BVs)', appliesTo: ['factuurvolume'] },
   { id: 'geschreven_uren', label: 'Geschreven uren',  icon: '⏱', description: 'SAP urenregistratie — totaal geschreven uren per BV (alle BVs)', appliesTo: [] },
-  { id: 'uren_lijst',      label: 'Uren lijst',       icon: '📋', description: 'Alleen Projects — vult OHW-regel "U-Projecten met tarief"', appliesTo: [], targetBv: 'Projects', targetRowId: 'p1', targetEntity: 'Projects' },
+  { id: 'uren_lijst',      label: 'Uren lijst',       icon: '📋', description: 'Alle BVs — nettowaarde per BV → OHW-regel "U-Projecten met tarief" per BV', appliesTo: [], targetRowByBv: { Consultancy: 'c_ul', Projects: 'p1', Software: 's_ul' } },
   { id: 'd_lijst',         label: 'D Lijst',          icon: '📊', description: 'Alleen Consultancy — vult OHW-regel "D facturatie"', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c1', targetEntity: 'Consultancy' },
   { id: 'conceptfacturen', label: 'Conceptfacturen',  icon: '📄', description: 'SAP conceptfacturen — bijdrage aan factuurvolume (alle BVs)', appliesTo: ['factuurvolume'] },
   { id: 'missing_hours',   label: 'Missing Hours',    icon: '⚠', description: 'Alleen Consultancy — berekent missing hours × tarief × 0,9 → OHW', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c4', targetEntity: 'Consultancy' },
@@ -428,7 +431,29 @@ export function MaandTab({ filter: _filter }: Props) {
 
     let applied = 0
 
-    // Als het slot een OHW-rij target, schrijf daarheen
+    // Multi-BV OHW target: per BV een eigen rij (bijv. uren_lijst)
+    if (slot.targetRowByBv) {
+      let total = 0
+      const bvLabels: string[] = []
+      for (const bv of BVS) {
+        const rowId = slot.targetRowByBv[bv]
+        if (!rowId) continue
+        const amount = record.perBv[bv] ?? 0
+        if (amount === 0) continue
+        updateRowValue('2026', bv, rowId, record.month, amount)
+        total += amount
+        applied++
+        bvLabels.push(`${bv}: ${fmt(amount)}`)
+      }
+      if (applied > 0) {
+        showToast(`${record.slotLabel} verdeeld over ${applied} BV(s) — ${bvLabels.join(' · ')}`, 'g')
+      } else {
+        showToast(`${record.slotLabel}: geen BV-verdeling gevonden — controleer de BV-kolom`, 'r')
+      }
+      return
+    }
+
+    // Single-BV OHW target: een specifieke rij in één BV
     if (slot.targetRowId && slot.targetEntity) {
       const amount = record.totalAmount
       if (amount !== 0) {

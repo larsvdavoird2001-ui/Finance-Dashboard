@@ -35,7 +35,9 @@ interface SlotMeta {
 const SLOT_META: Record<string, SlotMeta> = {
   factuurvolume:   { id: 'factuurvolume',   label: 'Factuurvolume',    icon: '🧾', unit: 'eur' },
   geschreven_uren: { id: 'geschreven_uren', label: 'Geschreven uren',  icon: '⏱',  unit: 'hours' },
-  uren_lijst:      { id: 'uren_lijst',      label: 'Uren lijst',       icon: '📋', unit: 'hours' },
+  // uren-lijst: de waarde die we willen sommeren is de NETTO WAARDE (€) per BV,
+  // niet de uren zelf. Output gaat naar een OHW-rij per BV.
+  uren_lijst:      { id: 'uren_lijst',      label: 'Uren lijst',       icon: '📋', unit: 'eur' },
   d_lijst:         { id: 'd_lijst',         label: 'D Lijst',          icon: '📊', unit: 'eur' },
   conceptfacturen: { id: 'conceptfacturen', label: 'Conceptfacturen',  icon: '📄', unit: 'eur' },
 }

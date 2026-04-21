@@ -105,6 +105,7 @@ export const consultancyData2026: OhwEntityData = {
       title: "Onderhanden werken",
       rows: [
         { id: "c1", description: "D facturatie", values: { "Dec-25": 182463, "Jan-26": 367303, "Feb-26": 561492 }, locked: true, sourceSlot: 'd_lijst' },
+        { id: "c_ul", description: "U-Projecten (SAP-overzicht) met tarief — nettowaarde uren-lijst", values: {}, locked: true, sourceSlot: 'uren_lijst' },
         { id: "c2", description: "Factuurdocumenten", values: { "Dec-25": 18350 } },
         { id: "c3", description: "Uren zonder tarief", values: { "Jan-26": 1553 } },
         { id: "c4", description: "Missing hours (nog niet geboekte of goed gekeurde uren)", values: { "Dec-25": 39569, "Jan-26": 64256, "Feb-26": 76090 }, locked: true, sourceSlot: 'missing_hours' },
@@ -176,6 +177,7 @@ export const softwareData2026: OhwEntityData = {
       id: "sw-ohw",
       title: "Onderhanden werken",
       rows: [
+        { id: "s_ul", description: "U-Projecten (SAP-overzicht) met tarief — nettowaarde uren-lijst", values: {}, locked: true, sourceSlot: 'uren_lijst' },
         { id: "s1", responsible: "***", description: "Lidar to Go 2024", values: { "Dec-25": 64600, "Jan-26": 64600, "Feb-26": 64600 } },
         { id: "s2", description: "Lidar to Go Jan 2025 (VWT en VGT)", values: { "Dec-25": 6000, "Jan-26": 6000, "Feb-26": 6000 } },
         { id: "s3", description: "Lidar to Go Feb 2025 (VWT en VGT)", values: { "Dec-25": 6000, "Jan-26": 6000, "Feb-26": 6000 } },

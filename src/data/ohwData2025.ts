@@ -100,6 +100,7 @@ export const consultancyData2025: OhwEntityData = {
       title: "Onderhanden werken",
       rows: [
         { id: "c25-1", description: "D facturatie", values: { "Dec-24": 276345, "Jan-25": 478675, "Feb-25": 477712, "Mar-25": 430728, "Apr-25": 485631, "May-25": 319966, "Jun-25": 303142, "Jul-25": 337727, "Aug-25": 282533, "Sep-25": 293704, "Oct-25": 163888, "Nov-25": 258696, "Dec-25": 182463 }, locked: true, sourceSlot: 'd_lijst' },
+        { id: "c25-ul", description: "U-Projecten (SAP-overzicht) met tarief — nettowaarde uren-lijst", values: {}, locked: true, sourceSlot: 'uren_lijst' },
         { id: "c25-2", description: "Factuurdocumenten", values: { "Dec-24": -790, "Apr-25": 5491, "Sep-25": 4736, "Dec-25": 18350 } },
         { id: "c25-3", description: "Uren zonder tarief", values: { "Dec-24": 700, "Mar-25": 18200, "Apr-25": 27720, "May-25": 23240, "Oct-25": 3505 } },
         { id: "c25-4", description: "Missing hours (nog niet geboekte of goed gekeurde uren)", values: { "Mar-25": 18200, "Apr-25": 18984, "May-25": 34606, "Jun-25": 34905, "Jul-25": 22057, "Aug-25": 35669, "Sep-25": 51023, "Oct-25": 57673, "Nov-25": 131117, "Dec-25": 39569 }, remark: "Correctie missing hours error Peter Burghouts", locked: true, sourceSlot: 'missing_hours' },
@@ -169,6 +170,7 @@ export const softwareData2025: OhwEntityData = {
       id: "s25-ohw",
       title: "Onderhanden werken",
       rows: [
+        { id: "s25-ul", description: "U-Projecten (SAP-overzicht) met tarief — nettowaarde uren-lijst", values: {}, locked: true, sourceSlot: 'uren_lijst' },
         { id: "s25-1", responsible: "***", description: "Beheerskosten 2023 GeoFiber - Liquidatie boekingen TO DO", values: { "Dec-24": 159800, "Jan-25": 159800, "Feb-25": 159800, "Mar-25": 159800, "Apr-25": 159800, "May-25": 159800, "Jun-25": 159800, "Jul-25": 159800, "Aug-25": 159800, "Sep-25": 159800, "Oct-25": 159800, "Nov-25": 159800, "Dec-25": 159800 } },
         { id: "s25-2", responsible: "***", description: "GeoFiber (project blown fiber) - Liquidatie boekingen TO DO", values: { "Dec-24": 25200, "Jan-25": 25200, "Feb-25": 25200, "Mar-25": 25200, "Apr-25": 25200, "May-25": 25200, "Jun-25": 25200, "Jul-25": 25200, "Aug-25": 25200, "Sep-25": 25200, "Oct-25": 25200, "Nov-25": 25200, "Dec-25": 25200 } },
         { id: "s25-3", responsible: "***", description: "2024 P1-12 - Geofiber support 12K pm - Liquidatie boekingen TO DO", values: { "Dec-24": 144000, "Jan-25": 144000, "Feb-25": 144000, "Mar-25": 144000, "Apr-25": 144000, "May-25": 144000, "Jun-25": 144000, "Jul-25": 144000, "Aug-25": 144000, "Sep-25": 144000, "Oct-25": 144000, "Nov-25": 144000, "Dec-25": 144000 } },
