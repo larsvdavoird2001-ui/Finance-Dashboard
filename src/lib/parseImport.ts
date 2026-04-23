@@ -248,12 +248,26 @@ const TOTAL_LABEL_STARTSWITH_PATTERNS = [
   /^afsluitstand\s+\S/i,
 ]
 
-/** Is een cel-waarde een totaal-/resultaat-label (strict)? */
+/** Is een cel-waarde een totaal-/resultaat-label?
+ *
+ *  Drie varianten worden herkend:
+ *   1. Strict: de cel matcht exact een total-pattern ("Totaal", "Resultaat").
+ *   2. Starts-with + kort: de cel begint met "Totaal …" / "Resultaat …" en
+ *      is korter dan 40 tekens (vangt "Resultaat Consultancy B.V.",
+ *      "Totaal per BV", "Subtotaal Q1 2026"), maar laat lange project-
+ *      beschrijvingen als "Totaal Glaspoort fase 1 — uit te zoeken…" wel door.
+ *   3. BV-suffix: de cel eindigt op " Resultaat" of " Totaal" (bv.
+ *      "Consultancy Resultaat", "Projects Totaal").
+ */
 export function looksLikeTotalLabel(val: unknown): boolean {
   if (val === null || val === undefined) return false
   const s = String(val).trim()
   if (!s) return false
-  return TOTAL_LABEL_STRICT_PATTERNS.some(p => p.test(s))
+  if (TOTAL_LABEL_STRICT_PATTERNS.some(p => p.test(s))) return true
+  if (s.length <= 40 && TOTAL_LABEL_STARTSWITH_PATTERNS.some(p => p.test(s))) return true
+  // Suffix-varianten: "Consultancy Resultaat", "Projects Totaal"
+  if (s.length <= 40 && /\s+(resultaat|totaal|subtotaal|eindtotaal|eindresultaat|som|generaal|saldo|samenvatting|eindstand)\s*[:.-]?\s*$/i.test(s)) return true
+  return false
 }
 
 /** Is deze rij vermoedelijk een totaal-/subtotaal-/resultaatregel?
