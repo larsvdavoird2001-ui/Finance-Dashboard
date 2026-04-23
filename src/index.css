@@ -284,6 +284,15 @@ html, body, #root {
   box-shadow: 0 0 0 2px rgba(0,169,224,.18);
 }
 
+/* ── Cel-opmerking: indicator in hoek (Excel-style) ───────────
+   - Zonder opmerking: onzichtbaar tenzij je over de cel hovert.
+   - Met opmerking: altijd zichtbaar oranje corner-driehoekje. */
+.cell-comment-trigger { opacity: 0; transition: opacity 0.1s ease }
+.cell-comment-trigger.has-remark { opacity: 1 }
+.ohw-cell-hoverable:hover .cell-comment-trigger { opacity: 0.55 }
+.ohw-cell-hoverable:hover .cell-comment-trigger:hover { opacity: 1 }
+.ohw-cell-hoverable:hover .cell-comment-trigger.has-remark { opacity: 1 }
+
 /* ════════════════════════════════════════════════════════════
    OHW BLOCKS
 ════════════════════════════════════════════════════════════ */

@@ -1,9 +1,10 @@
 import { memo, useState, useCallback, useEffect, useRef } from 'react'
 import type { OhwEntityData } from '../../data/types'
-import { fmt, gv } from '../../lib/format'
+import { fmt, gv, parseNL } from '../../lib/format'
 import { OhwSection } from './OhwSection'
 import { IcSection } from './IcSection'
 import { MetricRow } from './MetricRow'
+import { useOhwStore } from '../../store/useOhwStore'
 
 interface Props {
   entity: OhwEntityData
@@ -41,11 +42,15 @@ function saveWidth(v: number) {
   try { localStorage.setItem(WIDTH_KEY, String(v)) } catch { /* ignore */ }
 }
 
+const CONTACT_COL_WIDTH = 150
+
 export const OhwEntityBlock = memo(function OhwEntityBlock({
   entity, displayMonths, onChange, year, onSave: _onSave, highlightRowId,
 }: Props) {
   const [open, setOpen] = useState(true)
   const isSoftware = entity.entity === 'Software'
+  const updateRowValueStore = useOhwStore(s => s.updateRowValue)
+  const updateRowContact = useOhwStore(s => s.updateRowContact)
   const nc = displayMonths.length
   const lastTot = gv(entity.totaalOnderhanden, displayMonths[nc - 1])
   const firstTot = gv(entity.totaalOnderhanden, displayMonths[0])
@@ -188,6 +193,12 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                     </div>
                   </div>
                 </th>
+                <th style={{
+                  minWidth: CONTACT_COL_WIDTH, width: CONTACT_COL_WIDTH,
+                  background: 'var(--bg3)', top: 0, zIndex: 3,
+                  padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)',
+                  position: 'sticky', whiteSpace: 'nowrap',
+                }}>Contactpersoon</th>
                 {displayMonths.map(m => (
                   <th
                     key={m}
@@ -215,16 +226,18 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                   key={sec.id}
                   section={sec}
                   entity={entity.entity}
+                  year={year}
                   months={displayMonths}
                   onChange={u => handleSectionChange(i, u)}
                   descColWidth={descColMinWidth}
+                  contactColWidth={CONTACT_COL_WIDTH}
                   flashRowId={flashRowId}
                 />
               ))}
 
               {/* ── Totaal Onderhanden ─────────────────────────── */}
               <tr style={{ background: 'var(--bg3)' }}>
-                <td style={{ ...STICKY_LEFT, background: 'var(--bg3)', padding: '7px 12px', fontWeight: 700, width: descColMinWidth }}>Totaal Onderhanden</td>
+                <td colSpan={2} style={{ ...STICKY_LEFT, background: 'var(--bg3)', padding: '7px 12px', fontWeight: 700 }}>Totaal Onderhanden</td>
                 {displayMonths.map(m => (
                   <td key={m} className="mono r" style={{ padding: '5px 8px', fontWeight: 700, background: 'var(--bg3)' }}>
                     {fmt(gv(entity.totaalOnderhanden, m))}
@@ -233,20 +246,46 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                 <td style={{ background: 'var(--bg3)', width: 40 }} />
               </tr>
 
-              {/* ── Software: Vooruitgefactureerd ─────────────── */}
+              {/* ── Software: Vooruitgefactureerd (editable) ──── */}
               {isSoftware && entity.vooruitgefactureerd && (
                 <>
                   <tr>
-                    <td colSpan={nc + 2} style={{ padding: '5px 12px', fontSize: 10, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.07em', background: 'var(--bg3)' }}>
+                    <td colSpan={nc + 3} style={{ padding: '5px 12px', fontSize: 10, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.07em', background: 'var(--bg3)' }}>
                       Vooruitgefactureerd
                     </td>
                   </tr>
                   {entity.vooruitgefactureerd.map(row => (
                     <tr key={row.id}>
-                      <td style={{ paddingLeft: 26, ...STICKY_LEFT, background: 'var(--bg2)', fontSize: 12, width: descColMinWidth }}>{row.description}</td>
-                      {displayMonths.map(m => (
-                        <td key={m} className="mono r" style={{ padding: '4px 8px', background: 'var(--bg2)' }}>{fmt(gv(row.values, m))}</td>
-                      ))}
+                      <td style={{ paddingLeft: 26, ...STICKY_LEFT, background: 'var(--bg2)', fontSize: 12, width: descColMinWidth }}>
+                        {row.description}
+                      </td>
+                      <td style={{ background: 'var(--bg2)', padding: '2px 8px', width: CONTACT_COL_WIDTH }}>
+                        <input
+                          className="ohw-inp"
+                          style={{ width: '100%', fontSize: 11, textAlign: 'left', background: 'transparent', border: 'none' }}
+                          defaultValue={row.contactPerson ?? ''}
+                          placeholder="—"
+                          onBlur={e => updateRowContact(year, entity.entity, row.id, e.target.value)}
+                        />
+                      </td>
+                      {displayMonths.map(m => {
+                        const v = gv(row.values, m)
+                        return (
+                          <td key={m} style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)' }}>
+                            <input
+                              key={`${row.id}-${m}`}
+                              className="ohw-inp"
+                              defaultValue={v !== 0 ? fmt(v) : ''}
+                              placeholder="—"
+                              onBlur={e => {
+                                const next = parseNL(e.target.value || '0')
+                                updateRowValueStore(year, entity.entity, row.id, m, isNaN(next) ? 0 : next)
+                              }}
+                              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                            />
+                          </td>
+                        )
+                      })}
                       <td style={{ background: 'var(--bg2)', width: 40 }} />
                     </tr>
                   ))}
@@ -260,7 +299,7 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                 id={`ohw-row-${entity.entity}-mutatieOhw`}
                 style={mutatieRowFlash ? { outline: '2px solid var(--blue)', outlineOffset: '-2px', background: 'rgba(0,169,224,0.08)', transition: 'background 0.3s' } : undefined}
               >
-                <td style={{ ...STICKY_LEFT, background: mutatieRowFlash ? 'rgba(0,169,224,0.12)' : 'var(--bg2)', padding: '5px 12px', width: descColMinWidth }}>Mutatie OHW</td>
+                <td colSpan={2} style={{ ...STICKY_LEFT, background: mutatieRowFlash ? 'rgba(0,169,224,0.12)' : 'var(--bg2)', padding: '5px 12px' }}>Mutatie OHW</td>
                 {displayMonths.map(m => {
                   const v = gv(entity.mutatieOhw, m)
                   return (

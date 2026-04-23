@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { OhwEntityData, OhwYearData } from '../data/types'
+import type { OhwEntityData, OhwYearData, OhwRow } from '../data/types'
 import { recomputeEntity } from '../lib/calc'
 import { ohwYearData2025 } from '../data/ohwData2025'
 import { ohwYearData2026 } from '../data/ohwData2026'
@@ -17,12 +17,22 @@ interface OhwStore {
   data2025: OhwYearData
   data2026: OhwYearData
   loaded: boolean
+  /** Tombstone-lijst van handmatig verwijderde rij-ids. Wordt gepersist
+   *  in localStorage én gebruikt om bij een Supabase-reload de rij niet
+   *  terug te laten komen (Supabase kan nog de oude staat bevatten). */
+  deletedRowIds: string[]
   loadFromDb: () => Promise<void>
   updateEntity: (year: '2025' | '2026', updated: OhwEntityData) => void
   updateRowValue: (year: '2025' | '2026', entityName: string, rowId: string, month: string, value: number) => void
   /** Zet/wist een per-maand toelichting op een rij (voor handmatige override
-   *  op locked-rijen). Lege string wist de toelichting voor die maand. */
+   *  op locked-rijen EN als Excel-style cel-opmerking). Lege string wist. */
   updateRowRemark: (year: '2025' | '2026', entityName: string, rowId: string, month: string, remark: string) => void
+  /** Zet de contactpersoon op een rij (één persoon per rij). Lege string wist. */
+  updateRowContact: (year: '2025' | '2026', entityName: string, rowId: string, contact: string) => void
+  /** Verwijder een rij permanent (met tombstone zodat hij niet terugkomt
+   *  via Supabase-reload). Mag niet gebruikt worden voor locked rows of
+   *  rijen met ingevulde waardes — caller checkt dat. */
+  deleteRow: (year: '2025' | '2026', entityName: string, rowId: string) => void
   /** IC-pair: voegt TWEE gekoppelde IC-rijen toe (één in fromBv, één in toBv)
    *  met gedeelde icPairId. Waardes blijven leeg; user vult ze later in. */
   addIcPair: (year: '2025' | '2026', fromBv: BvName, toBv: BvName, description: string, responsible?: string) => void
@@ -41,6 +51,7 @@ export const useOhwStore = create<OhwStore>()(
       data2025: initYear(ohwYearData2025),
       data2026: initYear(ohwYearData2026),
       loaded: false,
+      deletedRowIds: [],
 
       loadFromDb: async () => {
         // Non-destructieve load: Supabase data wint ALS er iets opgehaald wordt,
@@ -54,9 +65,25 @@ export const useOhwStore = create<OhwStore>()(
           const state = get()
           let d2025 = state.data2025
           let d2026 = state.data2026
+          const tombstones = new Set(state.deletedRowIds)
+
+          // Filter-helper: verwijder rijen uit onderhanden-secties én uit
+          // icVerrekening én uit vooruitgefactureerd wanneer hun id in de
+          // tombstone-lijst zit. Zo kunnen Supabase-rijen die lokaal al
+          // verwijderd waren, niet terugkeren.
+          const stripTombstones = (e: OhwEntityData): OhwEntityData => ({
+            ...e,
+            onderhanden: e.onderhanden.map(s => ({
+              ...s,
+              rows: s.rows.filter(r => !tombstones.has(r.id)),
+            })),
+            icVerrekening: e.icVerrekening.filter(r => !tombstones.has(r.id)),
+            vooruitgefactureerd: e.vooruitgefactureerd?.filter(r => !tombstones.has(r.id)),
+          })
 
           if (entities2025.length > 0) {
-            const recomputed = entities2025.map(e => recomputeEntity(e, d2025.allMonths))
+            const filtered = entities2025.map(stripTombstones)
+            const recomputed = filtered.map(e => recomputeEntity(e, d2025.allMonths))
             d2025 = { ...d2025, entities: recomputed }
           } else {
             // Supabase leeg: alleen seeden als lokaal óók nog de defaults zijn
@@ -69,7 +96,8 @@ export const useOhwStore = create<OhwStore>()(
           }
 
           if (entities2026.length > 0) {
-            const recomputed = entities2026.map(e => recomputeEntity(e, d2026.allMonths))
+            const filtered = entities2026.map(stripTombstones)
+            const recomputed = filtered.map(e => recomputeEntity(e, d2026.allMonths))
             d2026 = { ...d2026, entities: recomputed }
           } else {
             const hasLocalEdits = d2026.entities.some(e =>
@@ -116,7 +144,15 @@ export const useOhwStore = create<OhwStore>()(
             row.id === rowId ? { ...row, values: { ...row.values, [month]: value } } : row
           ),
         }))
-        return recomputeEntity({ ...entity, onderhanden }, prev.allMonths)
+        // Ook in vooruitgefactureerd en icVerrekening updaten — zelfde rowId
+        // kan daar staan (Software heeft bv. vf1/vf2 rows die bewerkbaar zijn).
+        const icVerrekening = entity.icVerrekening.map(row =>
+          row.id === rowId ? { ...row, values: { ...row.values, [month]: value } } : row
+        )
+        const vooruitgefactureerd = entity.vooruitgefactureerd?.map(row =>
+          row.id === rowId ? { ...row, values: { ...row.values, [month]: value } } : row
+        )
+        return recomputeEntity({ ...entity, onderhanden, icVerrekening, vooruitgefactureerd }, prev.allMonths)
       })
       return { [key]: { ...prev, entities } }
     })
@@ -127,7 +163,45 @@ export const useOhwStore = create<OhwStore>()(
     if (entity) upsertOhwEntity(year, entity)
   },
 
-  updateRowRemark: (year, entityName, rowId, month, remark) => {
+  updateRowContact: (year, entityName, rowId, contact) => {
+    let touched: OhwEntityData | undefined
+    set(state => {
+      const key = year === '2025' ? 'data2025' : 'data2026'
+      const prev = state[key]
+      const entities = prev.entities.map(entity => {
+        if (entity.entity !== entityName) return entity
+        // Probeer in onderhanden én icVerrekening én vooruitgefactureerd
+        let hit = false
+        const onderhanden = entity.onderhanden.map(sec => ({
+          ...sec,
+          rows: sec.rows.map(r => {
+            if (r.id !== rowId) return r
+            hit = true
+            return contact.trim() ? { ...r, contactPerson: contact.trim() } : (() => { const c = { ...r }; delete c.contactPerson; return c })()
+          }),
+        }))
+        const icVerrekening = entity.icVerrekening.map(r => {
+          if (r.id !== rowId) return r
+          hit = true
+          return contact.trim() ? { ...r, contactPerson: contact.trim() } : (() => { const c = { ...r }; delete c.contactPerson; return c })()
+        })
+        const vooruitgefactureerd = entity.vooruitgefactureerd?.map(r => {
+          if (r.id !== rowId) return r
+          hit = true
+          return contact.trim() ? { ...r, contactPerson: contact.trim() } : (() => { const c = { ...r }; delete c.contactPerson; return c })()
+        })
+        if (!hit) return entity
+        const updated = { ...entity, onderhanden, icVerrekening, vooruitgefactureerd }
+        touched = updated
+        return updated
+      })
+      return { [key]: { ...prev, entities } }
+    })
+    if (touched) upsertOhwEntity(year, touched)
+  },
+
+  deleteRow: (year, entityName, rowId) => {
+    let touched: OhwEntityData | undefined
     set(state => {
       const key = year === '2025' ? 'data2025' : 'data2026'
       const prev = state[key]
@@ -135,15 +209,42 @@ export const useOhwStore = create<OhwStore>()(
         if (entity.entity !== entityName) return entity
         const onderhanden = entity.onderhanden.map(sec => ({
           ...sec,
-          rows: sec.rows.map(row => {
-            if (row.id !== rowId) return row
-            const remarks = { ...(row.remarks ?? {}) }
-            if (!remark || !remark.trim()) delete remarks[month]
-            else remarks[month] = remark.trim()
-            return { ...row, remarks }
-          }),
+          rows: sec.rows.filter(r => r.id !== rowId),
         }))
-        return { ...entity, onderhanden }
+        const icVerrekening = entity.icVerrekening.filter(r => r.id !== rowId)
+        const vooruitgefactureerd = entity.vooruitgefactureerd?.filter(r => r.id !== rowId)
+        const updated = recomputeEntity({ ...entity, onderhanden, icVerrekening, vooruitgefactureerd }, prev.allMonths)
+        touched = updated
+        return updated
+      })
+      // Tombstone — voorkom dat de rij via Supabase-reload terugkomt
+      const deletedRowIds = state.deletedRowIds.includes(rowId)
+        ? state.deletedRowIds
+        : [...state.deletedRowIds, rowId]
+      return { [key]: { ...prev, entities }, deletedRowIds }
+    })
+    if (touched) upsertOhwEntity(year, touched)
+  },
+
+  updateRowRemark: (year, entityName, rowId, month, remark) => {
+    const patchRow = (row: OhwRow): OhwRow => {
+      if (row.id !== rowId) return row
+      const remarks = { ...(row.remarks ?? {}) }
+      if (!remark || !remark.trim()) delete remarks[month]
+      else remarks[month] = remark.trim()
+      return { ...row, remarks }
+    }
+    set(state => {
+      const key = year === '2025' ? 'data2025' : 'data2026'
+      const prev = state[key]
+      const entities = prev.entities.map(entity => {
+        if (entity.entity !== entityName) return entity
+        return {
+          ...entity,
+          onderhanden: entity.onderhanden.map(sec => ({ ...sec, rows: sec.rows.map(patchRow) })),
+          icVerrekening: entity.icVerrekening.map(patchRow),
+          vooruitgefactureerd: entity.vooruitgefactureerd?.map(patchRow),
+        }
       })
       return { [key]: { ...prev, entities } }
     })
@@ -281,7 +382,11 @@ export const useOhwStore = create<OhwStore>()(
     }),
     {
       name: 'tpg-ohw-data',
-      partialize: (state) => ({ data2025: state.data2025, data2026: state.data2026 }) as unknown as OhwStore,
+      partialize: (state) => ({
+        data2025: state.data2025,
+        data2026: state.data2026,
+        deletedRowIds: state.deletedRowIds,
+      }) as unknown as OhwStore,
     },
   ),
 )

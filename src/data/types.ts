@@ -8,9 +8,14 @@ export interface OhwRow {
   locked?: boolean
   /** Welke import-slot vult deze rij (bijv. 'uren_lijst', 'd_lijst', 'ohw') */
   sourceSlot?: string
-  /** Per-maand toelichtingen bij handmatige override op een locked-rij.
-   *  Key = maand (bv. 'Mar-26'), value = reden-tekst ingevoerd door user. */
+  /** Per-cel toelichtingen — voor zowel handmatige override-redenen op
+   *  locked-rijen als vrije Excel-style comments op editable cellen.
+   *  Key = maand (bv. 'Mar-26'), value = tekst ingevoerd door user. */
   remarks?: Record<string, string>
+  /** Vrij in te vullen contactpersoon bij deze rij (wie weet meer / bij
+   *  wie je terecht kunt voor context). Getoond als extra kolom in de
+   *  OHW Overzicht naast de omschrijving. */
+  contactPerson?: string
   /** IC-pair link: gedeeld tussen de twee gekoppelde rijen (één per BV).
    *  Wijzigingen aan de ene rij worden automatisch gespiegeld naar de
    *  rij met dezelfde icPairId in de andere BV (met omgekeerd teken). */

@@ -4,14 +4,18 @@ import { fmt, parseNL, gv } from '../../lib/format'
 import { useNavStore } from '../../store/useNavStore'
 import { useEvidenceStore, downloadEvidence, fileIcon, formatFileSize } from '../../store/useEvidenceStore'
 import { useOhwStore } from '../../store/useOhwStore'
+import { CellCommentPopover } from './CellCommentPopover'
 
 interface Props {
   section: OhwSectionType
   entity?: string  // BV (Consultancy / Projects / Software) — voor bijlagen-lookup
+  year?: '2025' | '2026'   // voor store-acties (deleteRow, updateRowContact)
   months: string[]
   onChange: (updated: OhwSectionType) => void
   /** Breedte van de omschrijving-kolom (resizable via drag-handle in header) */
   descColWidth?: number
+  /** Breedte van de Contactpersoon-kolom */
+  contactColWidth?: number
   /** Row-id die tijdelijk gehighlight moet worden (voor nav-deep-link) */
   flashRowId?: string | null
 }
@@ -126,7 +130,7 @@ function DescCell({
   )
 }
 
-export const OhwSection = memo(function OhwSection({ section, entity, months, onChange, descColWidth = 340, flashRowId }: Props) {
+export const OhwSection = memo(function OhwSection({ section, entity, year = '2026', months, onChange, descColWidth = 340, contactColWidth = 150, flashRowId }: Props) {
   const [open, setOpen] = useState(true)
   const navigateTo = useNavStore(s => s.navigateTo)
   const evidenceEntries = useEvidenceStore(s => s.entries)
@@ -135,6 +139,8 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
   const [overrideCell, setOverrideCell] = useState<null | { rowId: string; month: string; value: string; remark: string }>(null)
   const updateRowValueStore = useOhwStore(s => s.updateRowValue)
   const updateRowRemarkStore = useOhwStore(s => s.updateRowRemark)
+  const updateRowContactStore = useOhwStore(s => s.updateRowContact)
+  const deleteRowStore = useOhwStore(s => s.deleteRow)
 
   const startOverride = (row: OhwRow, month: string) => {
     const currentValue = gv(row.values, month)
@@ -180,8 +186,11 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
     const row = section.rows.find(r => r.id === id)
     if (!row || row.locked) return
     if (rowHasAnyValue(row)) return
-    onChange({ ...section, rows: section.rows.filter(r => r.id !== id) })
-  }, [section, onChange])
+    // Gebruik store.deleteRow zodat de verwijdering via tombstone persisted
+    // wordt — voorkomt dat de rij terugkeert na een Supabase-reload.
+    if (entity) deleteRowStore(year, entity, id)
+    else onChange({ ...section, rows: section.rows.filter(r => r.id !== id) })
+  }, [section, onChange, entity, year, deleteRowStore])
 
   const updateDescription = useCallback((rowId: string, desc: string) => {
     onChange({ ...section, rows: section.rows.map(r => r.id === rowId ? { ...r, description: desc } : r) })
@@ -194,7 +203,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
     <>
       {/* ── Section header — per-month totals always visible ─────── */}
       <tr className="grp" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={() => setOpen(o => !o)}>
-        <td style={{
+        <td colSpan={2} style={{
           position: 'sticky', left: 0, background: hdrBg,
           padding: '7px 12px', cursor: 'pointer',
           boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
@@ -227,6 +236,18 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
             style={flashRowId === row.id ? { outline: '2px solid var(--blue)', outlineOffset: '-2px', background: 'rgba(0,169,224,0.08)' } : undefined}
           >
               <DescCell row={row} onSave={desc => updateDescription(row.id, desc)} width={descColWidth} />
+              {/* ── Contactpersoon cell ── */}
+              <td style={{ background: 'var(--bg2)', padding: '2px 8px', width: contactColWidth }}>
+                <input
+                  className="ohw-inp"
+                  style={{ width: '100%', fontSize: 11, textAlign: 'left', background: 'transparent', border: 'none' }}
+                  defaultValue={row.contactPerson ?? ''}
+                  placeholder="—"
+                  onBlur={e => entity && updateRowContactStore(year, entity, row.id, e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  title={row.contactPerson ? `Contact: ${row.contactPerson}` : 'Vul een contactpersoon in (wie weet meer over deze rij)'}
+                />
+              </td>
               {months.map(m => {
                 const v = gv(row.values, m)
                 const cellRemark = row.remarks?.[m]
@@ -282,7 +303,11 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
                   )
                 }
                 return (
-                  <td key={m} style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)' }}>
+                  <td
+                    key={m}
+                    style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)', position: 'relative' }}
+                    className="ohw-cell-hoverable"
+                  >
                     <input
                       key={`${row.id}-${m}`}
                       className="ohw-inp"
@@ -291,6 +316,14 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
                       onBlur={e => updateCell(row.id, m, e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                     />
+                    {entity && (
+                      <CellCommentPopover
+                        remark={cellRemark ?? ''}
+                        hasRemark={!!cellRemark}
+                        hint={cellRemark ? `Opmerking: ${cellRemark}` : 'Opmerking toevoegen'}
+                        onSave={v2 => updateRowRemarkStore(year, entity, row.id, m, v2)}
+                      />
+                    )}
                   </td>
                 )
               })}

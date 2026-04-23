@@ -45,7 +45,7 @@ export const MetricRow = memo(function MetricRow({ label, dict, months, bold, co
 
   return (
     <tr style={{ background: bg }}>
-      <td style={{
+      <td colSpan={2} style={{
         position: 'sticky', left: 0,
         background: bg,
         padding: '6px 12px',
