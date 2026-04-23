@@ -382,11 +382,32 @@ export const useOhwStore = create<OhwStore>()(
     }),
     {
       name: 'tpg-ohw-data',
+      // Version bump bij formule-wijzigingen in recomputeEntity.
+      // Oudere gecachte data in localStorage bevat de vorige (onjuiste)
+      // afgeleide waardes — onRehydrateStorage herberekent ze zodat het
+      // teken van bv. mutatieVooruitgefactureerd direct klopt ook bij
+      // bestaande gebruikers.
+      version: 2,
       partialize: (state) => ({
         data2025: state.data2025,
         data2026: state.data2026,
         deletedRowIds: state.deletedRowIds,
       }) as unknown as OhwStore,
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+        if (state.data2025?.entities) {
+          state.data2025 = {
+            ...state.data2025,
+            entities: state.data2025.entities.map(e => recomputeEntity(e, state.data2025.allMonths)),
+          }
+        }
+        if (state.data2026?.entities) {
+          state.data2026 = {
+            ...state.data2026,
+            entities: state.data2026.entities.map(e => recomputeEntity(e, state.data2026.allMonths)),
+          }
+        }
+      },
     },
   ),
 )
