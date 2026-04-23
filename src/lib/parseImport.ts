@@ -207,24 +207,30 @@ export function parseDutchNumber(val: unknown): number | null {
 // Dit voorkomt false positives op detail-rijen die toevallig met "Totaal"
 // beginnen (zoals project-beschrijving "Totaal Glaspoort fase 1").
 
+// Gedeelde prefix-match — vangt "Totaal", "Subtotaal", "Sub Totaal" (spatie),
+// "Sub-totaal" (streepje), "Eindtotaal", "Eind Totaal", enz. De prefix-groep
+// ZELF is optioneel, niet alleen de trailing separator.
+const TOTAL_PREFIX_OPT = String.raw`(?:(?:sub|eind|grand|tussen|deel|end)[\s\-]*)?`
+
 /** Strikte patterns: cel is EXACT een totaal-label (hele string). */
 const TOTAL_LABEL_STRICT_PATTERNS = [
-  /^(sub|eind|grand\s?)?totaal\s*[:.-]?\s*$/i,                  // "Totaal", "Subtotaal", "Eindtotaal", "Totaal:"
-  /^(sub|eind|grand\s?)?total\s*[:.-]?\s*$/i,                   // "Total", "Grand total"
-  /^(sub|eind)?totaal[\s\-]+generaal\s*[:.-]?\s*$/i,            // "Totaal generaal"
-  /^(sub|eind)?totaal[\s\-]+per[\s\-]+\w+\s*[:.-]?\s*$/i,       // "Totaal per BV", "Totaal per maand"
-  /^(sub|eind)?totaal[\s\-]+(alle|all)\b.*$/i,                  // "Totaal alle BVs"
+  new RegExp(`^${TOTAL_PREFIX_OPT}totaal\\s*[:.\\-]?\\s*$`, 'i'),   // "Totaal", "Sub Totaal", "Eind-totaal", "Subtotaal:"
+  new RegExp(`^${TOTAL_PREFIX_OPT}total\\s*[:.\\-]?\\s*$`, 'i'),    // "Total", "Grand Total", "End total"
+  new RegExp(`^${TOTAL_PREFIX_OPT}totaal[\\s\\-]+generaal\\s*[:.\\-]?\\s*$`, 'i'),
+  new RegExp(`^${TOTAL_PREFIX_OPT}totaal[\\s\\-]+per[\\s\\-]+\\w+\\s*[:.\\-]?\\s*$`, 'i'),
+  new RegExp(`^${TOTAL_PREFIX_OPT}totaal[\\s\\-]+(alle|all)\\b.*$`, 'i'),
   /^\s*\*+\s*(eind|sub)?totaal.*\*+\s*$/i,                      // "** Totaal **"
-  /^som\s*[:.-]?\s*$/i,                                         // "Som", "Som:"
-  /^generaal\s*[:.-]?\s*$/i,                                    // "Generaal"
-  /^resultaat\s*[:.-]?\s*$/i,                                   // "Resultaat"
+  /^som\s*[:.-]?\s*$/i,
+  /^generaal\s*[:.-]?\s*$/i,
+  /^resultaat\s*[:.-]?\s*$/i,
   /^eindresultaat\s*[:.-]?\s*$/i,                               // "Eindresultaat"
+  /^eind\s+resultaat\s*[:.-]?\s*$/i,                            // "Eind Resultaat" (spatie)
   /^(netto|bruto)\s+resultaat\s*[:.-]?\s*$/i,
   /^samenvatting\s*[:.-]?\s*$/i,
-  /^grand\s+total\s*[:.-]?\s*$/i,
-  /^eindstand\s*[:.-]?\s*$/i,                                   // "Eindstand"
+  /^eindstand\s*[:.-]?\s*$/i,
   /^afsluitstand\s*[:.-]?\s*$/i,
-  /^(tussen|deel)totaal\s*[:.-]?\s*$/i,                         // "Tussentotaal", "Deeltotaal"
+  /^einde?\s+\S.*$/i,                                           // "Einde Projects", "Eind Consultancy" — markert einde BV-blok
+  /^result\s*[:.-]?\s*$/i,                                      // "Result" (kort Engels)
 ]
 
 /** Startsmatch: cel BEGINT met een totaal-keyword + whitespace, gevolgd door
@@ -232,20 +238,17 @@ const TOTAL_LABEL_STRICT_PATTERNS = [
  *  gecombineerd met een "rij is klein"-check om project-beschrijvingen uit
  *  te sluiten. */
 const TOTAL_LABEL_STARTSWITH_PATTERNS = [
-  // Elke variant van "Totaal <iets>" — zolang er een spatie na komt en
-  // daarna iets niet-leeg volgt. Vangt: "Totaal Consultancy", "Totaal per
-  // maand", "Totaal Kevin Janzen", "Totaal stroming C1", "Totaal Telecom",
-  // "Subtotaal Projects AK", "Eindtotaal", "Tussentotaal per BV", etc.
-  /^(sub|eind|grand\s?|tussen|deel)?totaal\s+\S/i,
-  /^(sub|eind|grand\s?)?total\s+\S/i,
-  /^(eind)?resultaat\s+\S/i,
+  new RegExp(`^${TOTAL_PREFIX_OPT}totaal\\s+\\S`, 'i'),         // "Totaal X", "Sub Totaal X", "Eind totaal X"
+  new RegExp(`^${TOTAL_PREFIX_OPT}total\\s+\\S`, 'i'),          // "Total X", "Grand Total X"
+  /^(eind)?\s*resultaat\s+\S/i,                                 // "Resultaat X", "Eind Resultaat X"
   /^(netto|bruto)\s+resultaat\s+\S/i,
   /^samenvatting\s+\S/i,
-  /^saldo\s+/i,                                                 // "Saldo" of "Saldo per BV"
-  /^som\s+\S/i,                                                 // "Som per BV", "Som van ..."
-  /^generaal\s+\S/i,                                            // "Generaal totaal ..."
+  /^saldo\s+/i,
+  /^som\s+\S/i,
+  /^generaal\s+\S/i,
   /^eindstand\s+\S/i,
   /^afsluitstand\s+\S/i,
+  /^einde?\s+\S/i,                                              // "Einde Projects", "End Consultancy"
 ]
 
 /** Is een cel-waarde een totaal-/resultaat-label?
