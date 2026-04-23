@@ -133,4 +133,6 @@ export interface FteEntry {
   month: string
   fte: number        // fulltime equivalent (decimaal, bijv. 12.4)
   headcount: number  // aantal personen (integer)
+  fteBudget?: number       // begrote FTE voor deze BV/maand (voor variance)
+  headcountBudget?: number // begroot aantal personen
 }

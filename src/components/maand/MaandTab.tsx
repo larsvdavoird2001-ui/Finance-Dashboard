@@ -3,8 +3,11 @@ import { flushSync } from 'react-dom'
 import { useFinStore, CLOSING_MONTHS } from '../../store/useFinStore'
 import { useImportStore } from '../../store/useImportStore'
 import { useOhwStore } from '../../store/useOhwStore'
-import { useFteStore, FTE_MONTHS } from '../../store/useFteStore'
-import { monthlyActuals2026 } from '../../data/plData'
+// FTE store werd hier inline gebruikt; dat blok is verhuisd naar FteTab.
+// Import blijft hier voor compat — als later een ander stukje van MaandTab
+// de FTE-data nodig heeft, kan het hierop teruggrijpen zonder extra import.
+// import { useFteStore, FTE_MONTHS } from '../../store/useFteStore'
+import { monthlyActuals2026, monthlyBudget2026 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
 import { fmt, parseNL } from '../../lib/format'
 import {
@@ -32,6 +35,7 @@ import { Toast } from '../common/Toast'
 import { ImportApprovalModal } from './ImportApprovalModal'
 import { useNavStore } from '../../store/useNavStore'
 import { TariffTable } from './TariffTable'
+import { FteTab } from './FteTab'
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
@@ -132,7 +136,7 @@ const AMORTISATIE_SUBS = [
 
 export function MaandTab({ filter: _filter }: Props) {
   const [month, setMonth] = useState<string>('Mar-26')
-  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'bijlagen'>('afsluiting')
+  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'fte' | 'bijlagen'>('afsluiting')
   const [expandedCosts, setExpandedCosts] = useState<Set<CostSectionId>>(new Set())
   const toggleCostSection = (id: CostSectionId) =>
     setExpandedCosts(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
@@ -182,8 +186,7 @@ export function MaandTab({ filter: _filter }: Props) {
   // medewerkers; werknemer kan worden gematcht op werknemernr, SAP alias
   // (powerbiNaam2), "Achternaam, Voornaam" (powerbiNaam) of volledige naam.
   const tariffLookup = buildTariffLookup(tariffEntries, 'Consultancy')
-  const { entries: fteEntries, updateEntry: updateFte } = useFteStore()
-  const fteEntry = (bv: BvId) => fteEntries.find(e => e.bv === bv && e.month === month)
+  // FTE/Headcount zit nu in FteTab (eigen subtab). Geen inline gebruik meer.
 
   const monthEntries = entries.filter(e => e.month === month)
   const entry = (bv: BvId): ClosingEntry | undefined => monthEntries.find(e => e.bv === bv)
@@ -252,6 +255,20 @@ export function MaandTab({ filter: _filter }: Props) {
   const ebitda = (bv: BvId) => grossMargin(bv) - opKosten(bv)
   const ebit   = (bv: BvId) => ebitda(bv) - amortisatie(bv)
 
+  // ── Budget lookups (monthlyBudget2026) ──────────────────────────────────
+  // Gebruikt voor EBITDA/EBIT analyse tegen budget. Budget-waardes in plData
+  // zijn ALTIJD zoals in de P&L-structuur: kosten negatief, omzet positief.
+  const budgetVal = (bv: BvId, key: string): number => {
+    return monthlyBudget2026[bv as EntityName]?.[month]?.[key] ?? 0
+  }
+  const budgetNetRevenue  = (bv: BvId) => budgetVal(bv, 'netto_omzet')
+  const budgetDirCosts    = (bv: BvId) => Math.abs(budgetVal(bv, 'directe_kosten'))
+  const budgetBrutomarge  = (bv: BvId) => budgetVal(bv, 'brutomarge')
+  const budgetOpKosten    = (bv: BvId) => Math.abs(budgetVal(bv, 'operationele_kosten'))
+  const budgetAmortisatie = (bv: BvId) => Math.abs(budgetVal(bv, 'amortisatie_afschrijvingen'))
+  const budgetEbitda      = (bv: BvId) => budgetVal(bv, 'ebitda')
+  const budgetEbit        = (bv: BvId) => budgetVal(bv, 'ebit')
+
   const totFactuur       = BVS.reduce((a, bv) => a + (entry(bv)?.factuurvolume       ?? 0), 0)
   const totDebiteuren    = BVS.reduce((a, bv) => a + (entry(bv)?.debiteuren          ?? 0), 0)
   const totOhw           = BVS.reduce((a, bv) => a + getOhwMutatie(bv), 0)
@@ -267,6 +284,14 @@ export function MaandTab({ filter: _filter }: Props) {
   const totAmortisatie = BVS.reduce((a, bv) => a + amortisatie(bv), 0)
   const totEbitda      = BVS.reduce((a, bv) => a + ebitda(bv), 0)
   const totEbit        = BVS.reduce((a, bv) => a + ebit(bv), 0)
+  const totBudgetEbitda     = BVS.reduce((a, bv) => a + budgetEbitda(bv), 0)
+  const totBudgetEbit       = BVS.reduce((a, bv) => a + budgetEbit(bv), 0)
+  const totBudgetBrutomarge = BVS.reduce((a, bv) => a + budgetBrutomarge(bv), 0)
+  const totBudgetNetRev     = BVS.reduce((a, bv) => a + budgetNetRevenue(bv), 0)
+  const totBudgetDirCosts   = BVS.reduce((a, bv) => a + budgetDirCosts(bv), 0)
+  const totBudgetOpKosten   = BVS.reduce((a, bv) => a + budgetOpKosten(bv), 0)
+  const totBudgetAmortisatie = BVS.reduce((a, bv) => a + budgetAmortisatie(bv), 0)
+  const hasBudgetData = totBudgetEbitda !== 0 || totBudgetEbit !== 0 || totBudgetNetRev !== 0
 
   // ── Validation ──────────────────────────────────────────────────────────
   const warnings: string[] = []
@@ -772,6 +797,7 @@ export function MaandTab({ filter: _filter }: Props) {
             </button>
             <button className={`tab${activeSection === 'export' ? ' active' : ''}`} onClick={() => setActiveSection('export')}>Export & Log</button>
             <button className={`tab${activeSection === 'tarieven' ? ' active' : ''}`} onClick={() => setActiveSection('tarieven')}>IC Tarieven</button>
+            <button className={`tab${activeSection === 'fte' ? ' active' : ''}`} onClick={() => setActiveSection('fte')}>FTE &amp; Headcount</button>
             <button className={`tab${activeSection === 'bijlagen' ? ' active' : ''}`} onClick={() => setActiveSection('bijlagen')}>📎 Bijlagen</button>
           </div>
 
@@ -1078,6 +1104,9 @@ export function MaandTab({ filter: _filter }: Props) {
 
         {/* ── IC TARIEVEN ─────────────────────────────────────────────────── */}
         {activeSection === 'tarieven' && <TariffTable />}
+
+        {/* ── FTE & HEADCOUNT ─────────────────────────────────────────────── */}
+        {activeSection === 'fte' && <FteTab />}
 
         {/* ── BIJLAGEN / ONDERBOUWING ─────────────────────────────────────── */}
         {activeSection === 'bijlagen' && (
@@ -1504,6 +1533,36 @@ export function MaandTab({ filter: _filter }: Props) {
                       </>, true
                     )}
 
+                    {hasBudgetData && (
+                      <>
+                        <tr>
+                          <td style={{ padding: '6px 12px', minWidth: 240, position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1, color: 'var(--t2)' }}>
+                            <span style={{ fontWeight: 500 }}>Budget EBITDA</span>
+                          </td>
+                          {BVS.map(bv => (
+                            <td key={bv} className="mono r" style={{ color: 'var(--t2)' }}>{fmt(budgetEbitda(bv))}</td>
+                          ))}
+                          <td className="mono r" style={{ color: 'var(--t2)' }}>{fmt(totBudgetEbitda)}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '6px 12px', minWidth: 240, position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1 }}>
+                            <span style={{ fontSize: 11, color: 'var(--t3)' }}>↳</span> Δ EBITDA vs Budget
+                          </td>
+                          {BVS.map(bv => {
+                            const d = ebitda(bv) - budgetEbitda(bv)
+                            return (
+                              <td key={bv} className="mono r" style={{ fontWeight: 600, color: d >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            )
+                          })}
+                          <td className="mono r" style={{ fontWeight: 700, color: (totEbitda - totBudgetEbitda) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                            {(totEbitda - totBudgetEbitda) >= 0 ? '+' : ''}{fmt(totEbitda - totBudgetEbitda)}
+                          </td>
+                        </tr>
+                      </>
+                    )}
+
                     {sectionRow('EBIT',
                       <>
                         {BVS.map(bv => {
@@ -1519,10 +1578,251 @@ export function MaandTab({ filter: _filter }: Props) {
                         </td>
                       </>, true
                     )}
+
+                    {hasBudgetData && (
+                      <>
+                        <tr>
+                          <td style={{ padding: '6px 12px', minWidth: 240, position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1, color: 'var(--t2)' }}>
+                            <span style={{ fontWeight: 500 }}>Budget EBIT</span>
+                          </td>
+                          {BVS.map(bv => (
+                            <td key={bv} className="mono r" style={{ color: 'var(--t2)' }}>{fmt(budgetEbit(bv))}</td>
+                          ))}
+                          <td className="mono r" style={{ color: 'var(--t2)' }}>{fmt(totBudgetEbit)}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '6px 12px', minWidth: 240, position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1 }}>
+                            <span style={{ fontSize: 11, color: 'var(--t3)' }}>↳</span> Δ EBIT vs Budget
+                          </td>
+                          {BVS.map(bv => {
+                            const d = ebit(bv) - budgetEbit(bv)
+                            return (
+                              <td key={bv} className="mono r" style={{ fontWeight: 600, color: d >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            )
+                          })}
+                          <td className="mono r" style={{ fontWeight: 700, color: (totEbit - totBudgetEbit) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                            {(totEbit - totBudgetEbit) >= 0 ? '+' : ''}{fmt(totEbit - totBudgetEbit)}
+                          </td>
+                        </tr>
+                      </>
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
+
+            {/* ── EBITDA / EBIT — analyse waar het verschil zit vs budget ── */}
+            {hasBudgetData && (
+              <div className="card">
+                <div className="card-hdr">
+                  <span className="card-title">Analyse: waar zit het verschil tov budget? — {month}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
+                    Componenten die het EBITDA/EBIT delta sturen (actuals − budget)
+                  </span>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th style={{ minWidth: 240, position: 'sticky', left: 0, background: 'var(--bg3)' }}>Component</th>
+                        {BVS.map(bv => (
+                          <th key={bv} className="r" style={{ minWidth: 130, background: 'var(--bg3)' }}>
+                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: BV_COLORS[bv], marginRight: 6 }} />
+                            {bv}
+                          </th>
+                        ))}
+                        <th className="r" style={{ minWidth: 130, background: 'var(--bg3)', fontWeight: 700 }}>Totaal</th>
+                        <th style={{ minWidth: 220, background: 'var(--bg3)', padding: '6px 12px' }}>Interpretatie</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* ── Netto-omzet delta ── */}
+                      {(() => {
+                        const perBv = BVS.map(bv => {
+                          const actual = entry(bv) ? netRevenue(entry(bv)!, bv) : 0
+                          return actual - budgetNetRevenue(bv)
+                        })
+                        const tot = perBv.reduce((s, v) => s + v, 0)
+                        return (
+                          <tr>
+                            <td style={{ padding: '6px 12px', position: 'sticky', left: 0, background: 'var(--bg2)' }}>
+                              <strong>Δ Netto-omzet</strong>
+                              <div style={{ fontSize: 9, color: 'var(--t3)' }}>actuals vs budget</div>
+                            </td>
+                            {perBv.map((d, i) => (
+                              <td key={i} className="mono r" style={{ color: d >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            ))}
+                            <td className="mono r" style={{ color: tot >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+                              {tot >= 0 ? '+' : ''}{fmt(tot)}
+                            </td>
+                            <td style={{ padding: '6px 12px', fontSize: 11, color: 'var(--t2)' }}>
+                              {tot > 0 ? '▲ Meer omzet dan begroot → hogere EBITDA' : tot < 0 ? '▼ Minder omzet → lagere EBITDA' : '— op budget'}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+
+                      {/* ── Directe kosten delta — omdraaien zodat lagere kosten = positief ── */}
+                      {(() => {
+                        const perBv = BVS.map(bv => budgetDirCosts(bv) - finalCosts(bv)) // positief = minder kosten dan budget
+                        const tot = perBv.reduce((s, v) => s + v, 0)
+                        return (
+                          <tr>
+                            <td style={{ padding: '6px 12px', position: 'sticky', left: 0, background: 'var(--bg2)' }}>
+                              <strong>Δ Directe kosten</strong>
+                              <div style={{ fontSize: 9, color: 'var(--t3)' }}>budget − actuals (positief = beter)</div>
+                            </td>
+                            {perBv.map((d, i) => (
+                              <td key={i} className="mono r" style={{ color: d >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            ))}
+                            <td className="mono r" style={{ color: tot >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+                              {tot >= 0 ? '+' : ''}{fmt(tot)}
+                            </td>
+                            <td style={{ padding: '6px 12px', fontSize: 11, color: 'var(--t2)' }}>
+                              {tot > 0 ? '▲ Lagere directe kosten → hogere brutomarge' : tot < 0 ? '▼ Hogere kosten dan begroot → lagere brutomarge' : '— op budget'}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+
+                      {/* ── Subtotaal: Δ Brutomarge (derived) ── */}
+                      {(() => {
+                        const perBv = BVS.map(bv => grossMargin(bv) - budgetBrutomarge(bv))
+                        const tot = perBv.reduce((s, v) => s + v, 0)
+                        return (
+                          <tr style={{ background: 'var(--bg3)' }}>
+                            <td style={{ padding: '6px 12px', fontWeight: 700, position: 'sticky', left: 0, background: 'var(--bg3)' }}>
+                              = Δ Brutomarge
+                            </td>
+                            {perBv.map((d, i) => (
+                              <td key={i} className="mono r" style={{ fontWeight: 700, color: d >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            ))}
+                            <td className="mono r" style={{ fontWeight: 700, color: tot >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                              {tot >= 0 ? '+' : ''}{fmt(tot)}
+                            </td>
+                            <td style={{ padding: '6px 12px' }} />
+                          </tr>
+                        )
+                      })()}
+
+                      {/* ── Operationele kosten delta ── */}
+                      {(() => {
+                        const perBv = BVS.map(bv => budgetOpKosten(bv) - opKosten(bv)) // positief = minder kosten dan budget
+                        const tot = perBv.reduce((s, v) => s + v, 0)
+                        return (
+                          <tr>
+                            <td style={{ padding: '6px 12px', position: 'sticky', left: 0, background: 'var(--bg2)' }}>
+                              <strong>Δ Operationele kosten</strong>
+                              <div style={{ fontSize: 9, color: 'var(--t3)' }}>budget − actuals (positief = beter)</div>
+                            </td>
+                            {perBv.map((d, i) => (
+                              <td key={i} className="mono r" style={{ color: d >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            ))}
+                            <td className="mono r" style={{ color: tot >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+                              {tot >= 0 ? '+' : ''}{fmt(tot)}
+                            </td>
+                            <td style={{ padding: '6px 12px', fontSize: 11, color: 'var(--t2)' }}>
+                              {tot > 0 ? '▲ Lagere OPEX — mogelijk door minder FTE (zie FTE tab)' : tot < 0 ? '▼ Hogere OPEX dan begroot' : '— op budget'}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+
+                      {/* ── Subtotaal: Δ EBITDA (derived) ── */}
+                      {(() => {
+                        const perBv = BVS.map(bv => ebitda(bv) - budgetEbitda(bv))
+                        const tot = perBv.reduce((s, v) => s + v, 0)
+                        return (
+                          <tr style={{ background: 'var(--bg3)' }}>
+                            <td style={{ padding: '6px 12px', fontWeight: 700, position: 'sticky', left: 0, background: 'var(--bg3)' }}>
+                              = Δ EBITDA
+                            </td>
+                            {perBv.map((d, i) => (
+                              <td key={i} className="mono r" style={{ fontWeight: 700, color: d >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            ))}
+                            <td className="mono r" style={{ fontWeight: 700, color: tot >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                              {tot >= 0 ? '+' : ''}{fmt(tot)}
+                            </td>
+                            <td style={{ padding: '6px 12px' }} />
+                          </tr>
+                        )
+                      })()}
+
+                      {/* ── Amortisatie delta ── */}
+                      {(() => {
+                        const perBv = BVS.map(bv => budgetAmortisatie(bv) - amortisatie(bv))
+                        const tot = perBv.reduce((s, v) => s + v, 0)
+                        return (
+                          <tr>
+                            <td style={{ padding: '6px 12px', position: 'sticky', left: 0, background: 'var(--bg2)' }}>
+                              <strong>Δ Amortisatie + afschrijvingen</strong>
+                              <div style={{ fontSize: 9, color: 'var(--t3)' }}>budget − actuals</div>
+                            </td>
+                            {perBv.map((d, i) => (
+                              <td key={i} className="mono r" style={{ color: d >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            ))}
+                            <td className="mono r" style={{ color: tot >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+                              {tot >= 0 ? '+' : ''}{fmt(tot)}
+                            </td>
+                            <td style={{ padding: '6px 12px', fontSize: 11, color: 'var(--t2)' }}>
+                              {tot > 0 ? '▲ Lagere afschrijving dan budget' : tot < 0 ? '▼ Hogere afschrijvingen' : '— op budget'}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+
+                      {/* ── Subtotaal: Δ EBIT (derived) ── */}
+                      {(() => {
+                        const perBv = BVS.map(bv => ebit(bv) - budgetEbit(bv))
+                        const tot = perBv.reduce((s, v) => s + v, 0)
+                        return (
+                          <tr style={{ background: 'var(--bg3)' }}>
+                            <td style={{ padding: '7px 12px', fontWeight: 700, position: 'sticky', left: 0, background: 'var(--bg3)', fontSize: 13 }}>
+                              = Δ EBIT
+                            </td>
+                            {perBv.map((d, i) => (
+                              <td key={i} className="mono r" style={{ fontWeight: 700, color: d >= 0 ? 'var(--green)' : 'var(--red)', fontSize: 13 }}>
+                                {d >= 0 ? '+' : ''}{fmt(d)}
+                              </td>
+                            ))}
+                            <td className="mono r" style={{ fontWeight: 700, color: tot >= 0 ? 'var(--green)' : 'var(--red)', fontSize: 13 }}>
+                              {tot >= 0 ? '+' : ''}{fmt(tot)}
+                            </td>
+                            <td style={{ padding: '6px 12px', fontSize: 11, color: 'var(--t2)' }}>
+                              {tot > 0 ? 'Boven budget — operatie presteert beter' : tot < 0 ? 'Onder budget — onderzoek oorzaken hierboven' : 'Op budget'}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ padding: '8px 14px', fontSize: 10, color: 'var(--t3)', borderTop: '1px solid var(--bd)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <span>💡 <strong>Lees-richtlijn:</strong> groen = gunstig t.o.v. budget (hogere omzet OF lagere kosten). Hogere kosten staan in rood — ook als het absolute bedrag lager lijkt.</span>
+                  <button
+                    onClick={() => setActiveSection('fte')}
+                    style={{ background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', fontSize: 11, textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3 }}
+                    title="Ga naar FTE/Headcount om personeelsvariance te koppelen aan kostenbeweging"
+                  >
+                    → Bekijk FTE/Headcount analyse
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Toelichtingen */}
             <div className="card">
@@ -1592,84 +1892,6 @@ export function MaandTab({ filter: _filter }: Props) {
                         </td>
                         <td className="mono r">—</td>
                         <td />
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* ── FTE & Headcount ───────────────────────────────────────── */}
-            {FTE_MONTHS.includes(month) && (
-              <div className="card">
-                <div className="card-hdr">
-                  <span className="card-title">FTE &amp; Headcount — {month}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>Personeelsinzet per BV</span>
-                </div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="tbl">
-                    <thead>
-                      <tr>
-                        <th style={{ minWidth: 200, position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 2 }}>BV</th>
-                        <th className="r" style={{ minWidth: 160 }}>FTE (voltijdsequivalent)</th>
-                        <th className="r" style={{ minWidth: 160 }}>Headcount (personen)</th>
-                        <th className="r" style={{ minWidth: 140 }}>FTE/HC verhouding</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {BVS.map(bv => {
-                        const fe = fteEntry(bv)
-                        if (!fe) return null
-                        const ratio = fe.headcount > 0 ? (fe.fte / fe.headcount * 100).toFixed(1) + '%' : '—'
-                        return (
-                          <tr key={bv}>
-                            <td style={{ position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 1 }}>
-                              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: BV_COLORS[bv], marginRight: 6 }} />
-                              <strong>{bv}</strong>
-                            </td>
-                            <td className="r" style={{ padding: '4px 8px' }}>
-                              <input
-                                className="ohw-inp"
-                                style={{ width: 110, textAlign: 'right' }}
-                                value={fe.fte === 0 ? '' : fe.fte.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-                                placeholder="0.0"
-                                onChange={e => {
-                                  const v = parseFloat(e.target.value.replace(',', '.'))
-                                  if (!isNaN(v)) updateFte(fe.id, { fte: v })
-                                }}
-                              />
-                            </td>
-                            <td className="r" style={{ padding: '4px 8px' }}>
-                              <input
-                                className="ohw-inp"
-                                style={{ width: 110, textAlign: 'right' }}
-                                value={fe.headcount === 0 ? '' : fe.headcount}
-                                placeholder="0"
-                                onChange={e => {
-                                  const v = parseInt(e.target.value)
-                                  if (!isNaN(v)) updateFte(fe.id, { headcount: v })
-                                }}
-                              />
-                            </td>
-                            <td className="mono r" style={{ color: 'var(--t3)', fontWeight: 600 }}>{ratio}</td>
-                          </tr>
-                        )
-                      })}
-                      <tr className="tot">
-                        <td style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 1 }}>Totaal</td>
-                        <td className="mono r">
-                          {BVS.reduce((s, bv) => s + (fteEntry(bv)?.fte ?? 0), 0).toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-                        </td>
-                        <td className="mono r">
-                          {BVS.reduce((s, bv) => s + (fteEntry(bv)?.headcount ?? 0), 0)}
-                        </td>
-                        <td className="mono r" style={{ color: 'var(--t3)' }}>
-                          {(() => {
-                            const totFte = BVS.reduce((s, bv) => s + (fteEntry(bv)?.fte ?? 0), 0)
-                            const totHc  = BVS.reduce((s, bv) => s + (fteEntry(bv)?.headcount ?? 0), 0)
-                            return totHc > 0 ? (totFte / totHc * 100).toFixed(1) + '%' : '—'
-                          })()}
-                        </td>
                       </tr>
                     </tbody>
                   </table>
