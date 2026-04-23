@@ -144,6 +144,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
   const updateRowRemarkStore = useOhwStore(s => s.updateRowRemark)
   const updateRowContactStore = useOhwStore(s => s.updateRowContact)
   const deleteRowStore = useOhwStore(s => s.deleteRow)
+  const removeSectionStore = useOhwStore(s => s.removeSection)
 
   const startOverride = (row: OhwRow, month: string) => {
     const currentValue = gv(row.values, month)
@@ -211,7 +212,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
           position: 'sticky', left: 0, background: hdrBg, zIndex: 2,
           width: contactColWidth, minWidth: contactColWidth,
         }} />
-        {/* Kolom 2: sectietitel (sticky met left-offset) */}
+        {/* Kolom 2: sectietitel + delete-knop (sticky met left-offset) */}
         <td style={{
           position: 'sticky', left: contactColWidth, background: hdrBg, zIndex: 2,
           padding: '7px 12px', cursor: 'pointer',
@@ -221,6 +222,30 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
         }}>
           <span style={{ fontSize: 9, width: 14, display: 'inline-block', transition: 'transform .2s', transform: open ? '' : 'rotate(-90deg)', marginRight: 4 }}>▼</span>
           <strong style={{ fontSize: 12 }}>{section.title}</strong>
+          {/* Verwijder-knop — alleen zichtbaar als de section LEEG is (geen rijen met waardes) */}
+          {(() => {
+            const hasFilled = section.rows.some(r => rowHasAnyValue(r))
+            if (hasFilled) return null
+            return (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (!entity) return
+                  if (!confirm(`Rubriek "${section.title}" verwijderen? Dit is alleen toegestaan omdat de rubriek leeg is.`)) return
+                  const ok = removeSectionStore(year, entity, section.id)
+                  if (!ok) alert('Rubriek kon niet verwijderd worden — er staan waardes in.')
+                }}
+                style={{
+                  marginLeft: 10, background: 'none', border: 'none',
+                  cursor: 'pointer', color: 'var(--red)', fontSize: 11,
+                  padding: '2px 6px', opacity: 0.7,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = '1' }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = '0.7' }}
+                title="Verwijder deze rubriek (alleen mogelijk als leeg)"
+              >✕ rubriek</button>
+            )
+          })()}
         </td>
         {stots.map((v, i) => (
           <td key={i} className="mono r" style={{ padding: '6px 8px', background: hdrBg, fontWeight: 600, color: v !== 0 ? 'var(--t1)' : 'var(--t3)', fontSize: 12 }}>

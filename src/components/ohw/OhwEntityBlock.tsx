@@ -58,6 +58,7 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
   const isSoftware = entity.entity === 'Software'
   const updateRowValueStore = useOhwStore(s => s.updateRowValue)
   const updateRowContact = useOhwStore(s => s.updateRowContact)
+  const pruneEmptyRows = useOhwStore(s => s.pruneEmptyRows)
   const nc = displayMonths.length
   const lastTot = gv(entity.totaalOnderhanden, displayMonths[nc - 1])
   const firstTot = gv(entity.totaalOnderhanden, displayMonths[0])
@@ -153,6 +154,18 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
           &nbsp;&nbsp;OHW: <strong style={{ color: 'var(--t1)' }}>{fmt(lastTot)}</strong>
         </span>
         <div style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
+          <button
+            className="btn sm ghost"
+            style={{ fontSize: 10 }}
+            onClick={() => {
+              const n = pruneEmptyRows(year, entity.entity)
+              if (n === 0) alert('Geen lege rijen om op te ruimen.')
+              else alert(`${n} lege ${n === 1 ? 'regel' : 'regels'} verwijderd.`)
+            }}
+            title="Verwijder alle rijen zonder waardes (locked rijen blijven staan)"
+          >
+            🧹 Opruim
+          </button>
           <button className="btn sm ghost" style={{ fontSize: 10 }} onClick={addSection}>+ Rubriek</button>
           <span
             style={{

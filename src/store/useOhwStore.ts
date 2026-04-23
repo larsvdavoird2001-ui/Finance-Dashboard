@@ -33,6 +33,14 @@ interface OhwStore {
    *  via Supabase-reload). Mag niet gebruikt worden voor locked rows of
    *  rijen met ingevulde waardes — caller checkt dat. */
   deleteRow: (year: '2025' | '2026', entityName: string, rowId: string) => void
+  /** Opruimen: verwijder in één klap alle niet-locked onderhanden-rijen
+   *  zonder waardes voor dat jaar (tombstones toegevoegd). Per entity te
+   *  draaien OF over alle entities. Returnt aantal verwijderde rijen. */
+  pruneEmptyRows: (year: '2025' | '2026', entityName?: string) => number
+  /** Verwijder een hele rubriek (section) inclusief al zijn rijen. Weigert
+   *  als de section rijen bevat met waardes (dan moet user eerst ruimen).
+   *  Returnt true bij succes, false als de section niet leeg was. */
+  removeSection: (year: '2025' | '2026', entityName: string, sectionId: string) => boolean
   /** IC-pair: voegt TWEE gekoppelde IC-rijen toe (één in fromBv, één in toBv)
    *  met gedeelde icPairId. Waardes blijven leeg; user vult ze later in. */
   addIcPair: (year: '2025' | '2026', fromBv: BvName, toBv: BvName, description: string, responsible?: string) => void
@@ -224,6 +232,80 @@ export const useOhwStore = create<OhwStore>()(
       return { [key]: { ...prev, entities }, deletedRowIds }
     })
     if (touched) upsertOhwEntity(year, touched)
+  },
+
+  removeSection: (year, entityName, sectionId) => {
+    // rowHasAnyValue — locked sectie-rijen worden ook als 'gebruikt' gezien
+    const isEmpty = (r: OhwRow) => !Object.values(r.values ?? {}).some(
+      v => v !== null && v !== undefined && v !== 0,
+    )
+    let ok = false
+    let touched: OhwEntityData | undefined
+    const removedIds: string[] = []
+    set(state => {
+      const key = year === '2025' ? 'data2025' : 'data2026'
+      const prev = state[key]
+      const entities = prev.entities.map(entity => {
+        if (entity.entity !== entityName) return entity
+        const section = entity.onderhanden.find(s => s.id === sectionId)
+        if (!section) return entity
+        // Guard: als er een rij met waarde in staat, weiger
+        const hasFilledRow = section.rows.some(r => !isEmpty(r))
+        if (hasFilledRow) return entity
+        // Alle rij-ids als tombstone zodat ze niet via Supabase-reload terugkomen
+        for (const r of section.rows) removedIds.push(r.id)
+        const onderhanden = entity.onderhanden.filter(s => s.id !== sectionId)
+        const updated = recomputeEntity({ ...entity, onderhanden }, prev.allMonths)
+        touched = updated
+        ok = true
+        return updated
+      })
+      const nextDeletedIds = [
+        ...state.deletedRowIds,
+        ...removedIds.filter(id => !state.deletedRowIds.includes(id)),
+      ]
+      return { [key]: { ...prev, entities }, deletedRowIds: nextDeletedIds }
+    })
+    if (touched) upsertOhwEntity(year, touched)
+    return ok
+  },
+
+  pruneEmptyRows: (year, entityName) => {
+    // rowHasAnyValue: alle cel-waardes null/undefined/0 → leeg
+    const isEmpty = (r: OhwRow) => !Object.values(r.values ?? {}).some(
+      v => v !== null && v !== undefined && v !== 0,
+    )
+    const removedIds: string[] = []
+    const touched: OhwEntityData[] = []
+    set(state => {
+      const key = year === '2025' ? 'data2025' : 'data2026'
+      const prev = state[key]
+      const entities = prev.entities.map(entity => {
+        if (entityName && entity.entity !== entityName) return entity
+        let changed = false
+        const onderhanden = entity.onderhanden.map(sec => {
+          const kept = sec.rows.filter(row => {
+            if (row.locked) return true             // locked (import-targets) blijft
+            if (!isEmpty(row)) return true          // met waarde blijft
+            removedIds.push(row.id)
+            changed = true
+            return false
+          })
+          return kept.length === sec.rows.length ? sec : { ...sec, rows: kept }
+        })
+        if (!changed) return entity
+        const updated = recomputeEntity({ ...entity, onderhanden }, prev.allMonths)
+        touched.push(updated)
+        return updated
+      })
+      const nextDeletedIds = [
+        ...state.deletedRowIds,
+        ...removedIds.filter(id => !state.deletedRowIds.includes(id)),
+      ]
+      return { [key]: { ...prev, entities }, deletedRowIds: nextDeletedIds }
+    })
+    for (const e of touched) upsertOhwEntity(year, e)
+    return removedIds.length
   },
 
   updateRowRemark: (year, entityName, rowId, month, remark) => {
