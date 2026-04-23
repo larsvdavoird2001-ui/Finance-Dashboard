@@ -18,13 +18,20 @@ interface Props {
   highlightRowId?: string | null
 }
 
-// Base sticky styles — zonder "top" want dat wisselt per rol (thead = top:0, td = niet sticky-top)
-const STICKY_LEFT: React.CSSProperties = {
+// Contactpersoon: allerlinks (kolom 1). Krijgt de standaard sticky-left.
+const STICKY_LEFT_CONTACT: React.CSSProperties = {
   position: 'sticky',
   left: 0,
   zIndex: 2,
-  boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.08)',
+  boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.05)',
 }
+// Omschrijving (kolom 2): sticky met left-offset = contactkolom-breedte.
+const STICKY_LEFT_DESC = (contactWidth: number): React.CSSProperties => ({
+  position: 'sticky',
+  left: contactWidth,
+  zIndex: 2,
+  boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.08)',
+})
 
 // Persistente kolombreedte in localStorage
 const WIDTH_KEY = 'tpg-ohw-desc-col-width'
@@ -162,14 +169,27 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
         </div>
       </div>
 
-      {/* ── Table body ──────────────────────────────────────────── */}
+      {/* ── Table body ──────────────────────────────────────────────
+         Overflow-x: visible zodat `position: sticky; top: 0` op de <th>
+         tegen de PAGE-scroll werkt (niet tegen een interne wrapper). Bij een
+         wrapper met overflow-x: auto wordt y ook auto volgens CSS-spec,
+         waardoor sticky enkel t.o.v. de wrapper plakt. */}
       {open && (
-        <div style={{ overflowX: 'auto', overflowY: 'visible', borderRadius: '0 0 var(--r2) var(--r2)', borderTop: '1px solid var(--bd)' }}>
-          <table className="tbl" style={{ minWidth: 'max-content', borderCollapse: 'collapse' }}>
+        <div style={{ overflow: 'visible', borderRadius: '0 0 var(--r2) var(--r2)', borderTop: '1px solid var(--bd)' }}>
+          <table className="tbl" style={{ minWidth: 'max-content', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
               <tr>
+                {/* Kolom 1: Contactpersoon — links, sticky */}
                 <th style={{
-                  ...STICKY_LEFT,
+                  ...STICKY_LEFT_CONTACT,
+                  minWidth: CONTACT_COL_WIDTH, width: CONTACT_COL_WIDTH,
+                  background: 'var(--bg3)', top: 0, zIndex: 6,
+                  padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)',
+                  whiteSpace: 'nowrap',
+                }}>Contactpersoon</th>
+                {/* Kolom 2: Omschrijving (resizable) */}
+                <th style={{
+                  ...STICKY_LEFT_DESC(CONTACT_COL_WIDTH),
                   minWidth: descColMinWidth, width: descColMinWidth,
                   background: 'var(--bg3)', top: 0, zIndex: 5,
                   padding: 0, borderBottom: '1px solid rgba(255,255,255,0.08)',
@@ -193,18 +213,12 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                     </div>
                   </div>
                 </th>
-                <th style={{
-                  minWidth: CONTACT_COL_WIDTH, width: CONTACT_COL_WIDTH,
-                  background: 'var(--bg3)', top: 0, zIndex: 3,
-                  padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)',
-                  position: 'sticky', whiteSpace: 'nowrap',
-                }}>Contactpersoon</th>
                 {displayMonths.map(m => (
                   <th
                     key={m}
                     className="r"
                     style={{
-                      minWidth: 120, background: 'var(--bg3)',
+                      minWidth: 120, width: 120, background: 'var(--bg3)',
                       borderBottom: '1px solid rgba(255,255,255,0.08)',
                       position: 'sticky', top: 0, zIndex: 3,
                       padding: '6px 8px',
@@ -212,7 +226,7 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                   >{m}</th>
                 ))}
                 <th style={{
-                  width: 40, background: 'var(--bg3)',
+                  width: 40, minWidth: 40, background: 'var(--bg3)',
                   borderBottom: '1px solid rgba(255,255,255,0.08)',
                   position: 'sticky', top: 0, zIndex: 3,
                 }} />
@@ -237,7 +251,10 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
 
               {/* ── Totaal Onderhanden ─────────────────────────── */}
               <tr style={{ background: 'var(--bg3)' }}>
-                <td colSpan={2} style={{ ...STICKY_LEFT, background: 'var(--bg3)', padding: '7px 12px', fontWeight: 700 }}>Totaal Onderhanden</td>
+                <td style={{ ...STICKY_LEFT_CONTACT, background: 'var(--bg3)', width: CONTACT_COL_WIDTH, minWidth: CONTACT_COL_WIDTH }} />
+                <td style={{ ...STICKY_LEFT_DESC(CONTACT_COL_WIDTH), background: 'var(--bg3)', padding: '7px 12px', fontWeight: 700, width: descColMinWidth, minWidth: descColMinWidth }}>
+                  Totaal Onderhanden
+                </td>
                 {displayMonths.map(m => (
                   <td key={m} className="mono r" style={{ padding: '5px 8px', fontWeight: 700, background: 'var(--bg3)' }}>
                     {fmt(gv(entity.totaalOnderhanden, m))}
@@ -256,10 +273,7 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                   </tr>
                   {entity.vooruitgefactureerd.map(row => (
                     <tr key={row.id}>
-                      <td style={{ paddingLeft: 26, ...STICKY_LEFT, background: 'var(--bg2)', fontSize: 12, width: descColMinWidth }}>
-                        {row.description}
-                      </td>
-                      <td style={{ background: 'var(--bg2)', padding: '2px 8px', width: CONTACT_COL_WIDTH }}>
+                      <td style={{ ...STICKY_LEFT_CONTACT, background: 'var(--bg2)', padding: '2px 8px', width: CONTACT_COL_WIDTH, minWidth: CONTACT_COL_WIDTH }}>
                         <input
                           className="ohw-inp"
                           style={{ width: '100%', fontSize: 11, textAlign: 'left', background: 'transparent', border: 'none' }}
@@ -267,6 +281,9 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                           placeholder="—"
                           onBlur={e => updateRowContact(year, entity.entity, row.id, e.target.value)}
                         />
+                      </td>
+                      <td style={{ paddingLeft: 26, ...STICKY_LEFT_DESC(CONTACT_COL_WIDTH), background: 'var(--bg2)', fontSize: 12, width: descColMinWidth, minWidth: descColMinWidth }}>
+                        {row.description}
                       </td>
                       {displayMonths.map(m => {
                         const v = gv(row.values, m)
@@ -289,8 +306,8 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                       <td style={{ background: 'var(--bg2)', width: 40 }} />
                     </tr>
                   ))}
-                  <MetricRow label="Totaal Vooruitgefactureerd" dict={entity.totaalVooruitgefactureerd} months={displayMonths} bold rowBg="var(--bg3)" />
-                  <MetricRow label="Mutatie Vooruitgefactureerd" dict={entity.mutatieVooruitgefactureerd} months={displayMonths} colorize rowBg="var(--bg2)" />
+                  <MetricRow label="Totaal Vooruitgefactureerd" dict={entity.totaalVooruitgefactureerd} months={displayMonths} bold rowBg="var(--bg3)" contactColWidth={CONTACT_COL_WIDTH} descColWidth={descColMinWidth} />
+                  <MetricRow label="Mutatie Vooruitgefactureerd" dict={entity.mutatieVooruitgefactureerd} months={displayMonths} colorize rowBg="var(--bg2)" contactColWidth={CONTACT_COL_WIDTH} descColWidth={descColMinWidth} />
                 </>
               )}
 
@@ -299,7 +316,10 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                 id={`ohw-row-${entity.entity}-mutatieOhw`}
                 style={mutatieRowFlash ? { outline: '2px solid var(--blue)', outlineOffset: '-2px', background: 'rgba(0,169,224,0.08)', transition: 'background 0.3s' } : undefined}
               >
-                <td colSpan={2} style={{ ...STICKY_LEFT, background: mutatieRowFlash ? 'rgba(0,169,224,0.12)' : 'var(--bg2)', padding: '5px 12px' }}>Mutatie OHW</td>
+                <td style={{ ...STICKY_LEFT_CONTACT, background: mutatieRowFlash ? 'rgba(0,169,224,0.12)' : 'var(--bg2)', width: CONTACT_COL_WIDTH, minWidth: CONTACT_COL_WIDTH }} />
+                <td style={{ ...STICKY_LEFT_DESC(CONTACT_COL_WIDTH), background: mutatieRowFlash ? 'rgba(0,169,224,0.12)' : 'var(--bg2)', padding: '5px 12px', width: descColMinWidth, minWidth: descColMinWidth }}>
+                  Mutatie OHW
+                </td>
                 {displayMonths.map(m => {
                   const v = gv(entity.mutatieOhw, m)
                   return (
@@ -310,7 +330,7 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                 })}
                 <td style={{ background: mutatieRowFlash ? 'rgba(0,169,224,0.08)' : 'var(--bg2)', width: 40 }} />
               </tr>
-              <MetricRow label="Netto Omzet voor IC" dict={entity.nettoOmzetVoorIC} months={displayMonths} rowBg="var(--bg2)" />
+              <MetricRow label="Netto Omzet voor IC" dict={entity.nettoOmzetVoorIC} months={displayMonths} rowBg="var(--bg2)" contactColWidth={CONTACT_COL_WIDTH} descColWidth={descColMinWidth} />
 
               {/* ── IC Verrekening ─────────────────────────────── */}
               <IcSection
@@ -320,11 +340,13 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                 onChange={handleICChange}
                 currentBv={entity.entity as 'Consultancy' | 'Projects' | 'Software'}
                 year={year}
+                contactColWidth={CONTACT_COL_WIDTH}
+                descColWidth={descColMinWidth}
               />
 
               {/* ── Totals & summary ──────────────────────────── */}
-              <MetricRow label="Totaal IC" dict={entity.totaalIC} months={displayMonths} bold colorize rowBg="var(--bg3)" />
-              <MetricRow label="Mutatie OHW na IC Verrekening" dict={entity.nettoOmzet} months={displayMonths} bold highlight />
+              <MetricRow label="Totaal IC" dict={entity.totaalIC} months={displayMonths} bold colorize rowBg="var(--bg3)" contactColWidth={CONTACT_COL_WIDTH} descColWidth={descColMinWidth} />
+              <MetricRow label="Mutatie OHW na IC Verrekening" dict={entity.nettoOmzet} months={displayMonths} bold highlight contactColWidth={CONTACT_COL_WIDTH} descColWidth={descColMinWidth} />
             </tbody>
           </table>
         </div>

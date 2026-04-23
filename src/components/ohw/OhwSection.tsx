@@ -38,14 +38,17 @@ const SOURCE_LABELS: Record<string, string> = {
 // Description cell: tekst afgekapt met ellipsis, schuift open bij focus.
 // ✕ zit in de eigen last column, niet hier.
 // Breedte volgt descColWidth zodat de header-resize door de hele tabel heen werkt.
+// Sticky-left met offset = contactColWidth (kolom 1 = contact, kolom 2 = desc).
 function DescCell({
   row,
   onSave,
   width,
+  leftOffset,
 }: {
   row: OhwRow
   onSave: (desc: string) => void
   width: number
+  leftOffset: number
 }) {
   const [expanded, setExpanded] = useState(false)
   // Effectieve input-breedte: houd wat marge tov de cell
@@ -57,7 +60,7 @@ function DescCell({
     return (
       <td style={{
         paddingLeft: 26,
-        position: 'sticky', left: 0,
+        position: 'sticky', left: leftOffset,
         background: 'var(--bg2)',
         zIndex: 1,
         boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
@@ -88,7 +91,7 @@ function DescCell({
   return (
     <td style={{
       paddingLeft: 26,
-      position: 'sticky', left: 0,
+      position: 'sticky', left: leftOffset,
       background: 'var(--bg2)',
       zIndex: expanded ? 6 : 1,
       boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
@@ -203,11 +206,18 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
     <>
       {/* ── Section header — per-month totals always visible ─────── */}
       <tr className="grp" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={() => setOpen(o => !o)}>
-        <td colSpan={2} style={{
-          position: 'sticky', left: 0, background: hdrBg,
+        {/* Kolom 1: lege contactpersoon-cel (sticky links) */}
+        <td style={{
+          position: 'sticky', left: 0, background: hdrBg, zIndex: 2,
+          width: contactColWidth, minWidth: contactColWidth,
+        }} />
+        {/* Kolom 2: sectietitel (sticky met left-offset) */}
+        <td style={{
+          position: 'sticky', left: contactColWidth, background: hdrBg, zIndex: 2,
           padding: '7px 12px', cursor: 'pointer',
           boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
           whiteSpace: 'nowrap',
+          width: descColWidth, minWidth: descColWidth,
         }}>
           <span style={{ fontSize: 9, width: 14, display: 'inline-block', transition: 'transform .2s', transform: open ? '' : 'rotate(-90deg)', marginRight: 4 }}>▼</span>
           <strong style={{ fontSize: 12 }}>{section.title}</strong>
@@ -235,9 +245,13 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
             className="sub"
             style={flashRowId === row.id ? { outline: '2px solid var(--blue)', outlineOffset: '-2px', background: 'rgba(0,169,224,0.08)' } : undefined}
           >
-              <DescCell row={row} onSave={desc => updateDescription(row.id, desc)} width={descColWidth} />
-              {/* ── Contactpersoon cell ── */}
-              <td style={{ background: 'var(--bg2)', padding: '2px 8px', width: contactColWidth }}>
+              {/* Kolom 1: Contactpersoon (sticky-left) */}
+              <td style={{
+                position: 'sticky', left: 0, zIndex: 1,
+                background: 'var(--bg2)', padding: '2px 8px',
+                width: contactColWidth, minWidth: contactColWidth, maxWidth: contactColWidth,
+                boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.05)',
+              }}>
                 <input
                   className="ohw-inp"
                   style={{ width: '100%', fontSize: 11, textAlign: 'left', background: 'transparent', border: 'none' }}
@@ -248,6 +262,8 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                   title={row.contactPerson ? `Contact: ${row.contactPerson}` : 'Vul een contactpersoon in (wie weet meer over deze rij)'}
                 />
               </td>
+              {/* Kolom 2: Omschrijving */}
+              <DescCell row={row} onSave={desc => updateDescription(row.id, desc)} width={descColWidth} leftOffset={contactColWidth} />
               {months.map(m => {
                 const v = gv(row.values, m)
                 const cellRemark = row.remarks?.[m]
@@ -361,7 +377,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
             </tr>
             {isEvidenceOpen && rowEvidence.length > 0 && (
               <tr>
-                <td colSpan={months.length + 2} style={{ background: 'rgba(245,166,35,0.05)', padding: '6px 26px' }}>
+                <td colSpan={months.length + 3} style={{ background: 'rgba(245,166,35,0.05)', padding: '6px 26px' }}>
                   <div style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 700, marginBottom: 4 }}>
                     📎 Onderbouwing ({rowEvidence.length})
                   </div>
@@ -398,7 +414,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
 
           {/* ── + Regel toevoegen ───────────────────────────────────── */}
           <tr>
-            <td colSpan={months.length + 2} style={{ background: 'var(--bg2)', padding: '4px 12px 4px 26px' }}>
+            <td colSpan={months.length + 3} style={{ background: 'var(--bg2)', padding: '4px 12px 4px 26px' }}>
               <button
                 className="btn sm"
                 style={{
@@ -437,7 +453,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
         const valueValid = isFinite(valueParsed)
         return (
           <tr style={{ position: 'relative' }}>
-            <td colSpan={months.length + 2} style={{ padding: 0, border: 0, background: 'transparent' }}>
+            <td colSpan={months.length + 3} style={{ padding: 0, border: 0, background: 'transparent' }}>
               <div
                 onClick={(e) => { if (e.target === e.currentTarget) cancelOverride() }}
                 style={{

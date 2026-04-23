@@ -135,7 +135,10 @@ html, body, #root {
 }
 
 .page {
-  flex: 1; overflow-y: auto;
+  /* Zowel verticaal als horizontaal scroll zodat brede tabellen
+   * horizontaal scrollen binnen de page (i.p.v. te clippen aan .main).
+   * Dit maakt position:sticky op <thead> tegen de page-scroll werkend. */
+  flex: 1; overflow: auto;
   padding: 20px 22px;
   display: flex; flex-direction: column;
   gap: 16px;

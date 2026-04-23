@@ -33,19 +33,24 @@ function IcDescCell({
   row,
   currentBv,
   onDescriptionSave,
+  leftOffset = 0,
+  width = 340,
 }: {
   row: OhwRow
   currentBv: BvName
   onDescriptionSave: (desc: string) => void
+  leftOffset?: number
+  width?: number
 }) {
   const [expanded, setExpanded] = useState(false)
   const isPaired = !!(row.icPairId && row.icFromBv && row.icToBv)
   const isTruncatable = (row.description?.length ?? 0) > 38
   return (
     <td style={{
-      paddingLeft: 26, position: 'sticky', left: 0,
+      paddingLeft: 26, position: 'sticky', left: leftOffset,
       background: 'var(--bg2)', zIndex: expanded ? 6 : 2,
       boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.08)',
+      width, minWidth: width, maxWidth: width,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
         {isPaired && row.icFromBv && row.icToBv && (
@@ -230,9 +235,12 @@ interface Props {
   currentBv: BvName
   /** Jaar voor de store-acties. */
   year: '2025' | '2026'
+  /** Breedtes van de vaste kolommen — nodig voor sticky-left alignment. */
+  contactColWidth?: number
+  descColWidth?: number
 }
 
-export const IcSection = memo(function IcSection({ rows, totaalIC, months, onChange, currentBv, year }: Props) {
+export const IcSection = memo(function IcSection({ rows, totaalIC, months, onChange, currentBv, year, contactColWidth = 150, descColWidth = 340 }: Props) {
   const [open, setOpen] = useState(false)
   const [showAddDialog, setShowAddDialog] = useState(false)
 
@@ -240,6 +248,8 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
   const removeIcPair = useOhwStore(s => s.removeIcPair)
   const updateIcPairValue = useOhwStore(s => s.updateIcPairValue)
   const updateIcPairDescription = useOhwStore(s => s.updateIcPairDescription)
+
+  const updateRowContactStore = useOhwStore(s => s.updateRowContact)
 
   const updateCell = useCallback((row: OhwRow, month: string, raw: string) => {
     const v = parseNL(raw)
@@ -278,11 +288,18 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
     <>
       {/* ── IC header — per-month totals always visible ─────────── */}
       <tr className="grp" style={{ background: hdrBg }} onClick={() => setOpen(o => !o)}>
+        {/* Kolom 1: lege contactpersoon-cel */}
         <td style={{
-          position: 'sticky', left: 0, background: hdrBg,
+          position: 'sticky', left: 0, background: hdrBg, zIndex: 2,
+          width: contactColWidth, minWidth: contactColWidth,
+        }} />
+        {/* Kolom 2: IC Verrekening label */}
+        <td style={{
+          position: 'sticky', left: contactColWidth, background: hdrBg, zIndex: 2,
           padding: '7px 12px', cursor: 'pointer',
           boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
           whiteSpace: 'nowrap',
+          width: descColWidth, minWidth: descColWidth,
         }}>
           <span style={{ fontSize: 9, width: 14, display: 'inline-block', transition: 'transform .2s', transform: open ? '' : 'rotate(-90deg)', marginRight: 4 }}>▼</span>
           <strong style={{ fontSize: 12 }}>IC Verrekening</strong>
@@ -302,10 +319,30 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
         const isPaired = !!row.icPairId
         return (
           <tr key={row.id} className="sub">
+            {/* Kolom 1: Contactpersoon (sticky-left) */}
+            <td style={{
+              position: 'sticky', left: 0, zIndex: 1,
+              background: 'var(--bg2)', padding: '2px 8px',
+              width: contactColWidth, minWidth: contactColWidth, maxWidth: contactColWidth,
+              boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.05)',
+            }}>
+              <input
+                className="ohw-inp"
+                style={{ width: '100%', fontSize: 11, textAlign: 'left', background: 'transparent', border: 'none' }}
+                defaultValue={row.contactPerson ?? ''}
+                placeholder="—"
+                onBlur={e => updateRowContactStore(year, currentBv, row.id, e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                title={row.contactPerson ? `Contact: ${row.contactPerson}` : 'Vul een contactpersoon in'}
+              />
+            </td>
+            {/* Kolom 2: Omschrijving */}
             <IcDescCell
               row={row}
               currentBv={currentBv}
               onDescriptionSave={desc => updateDescription(row, desc)}
+              leftOffset={contactColWidth}
+              width={descColWidth}
             />
             {months.map(m => {
               const v = gv(row.values, m)
@@ -339,7 +376,7 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
       {open && (
         <tr>
           <td
-            colSpan={months.length + 2}
+            colSpan={months.length + 3}
             style={{ background: 'var(--bg2)', padding: '4px 12px 4px 26px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}
           >
             <div style={{ display: 'flex', gap: 6 }}>
@@ -373,7 +410,7 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
       )}
 
       {showAddDialog && (
-        <tr><td colSpan={months.length + 2} style={{ padding: 0, background: 'transparent' }}>
+        <tr><td colSpan={months.length + 3} style={{ padding: 0, background: 'transparent' }}>
           <AddIcPairDialog
             currentBv={currentBv}
             onClose={() => setShowAddDialog(false)}
