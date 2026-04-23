@@ -66,6 +66,13 @@ export function recomputeEntity(entity: OhwEntityData, allMonths: string[]): Ohw
   }
 
   // 7. totaalVooruitgefactureerd + mutatie (Software only)
+  //
+  // Vooruitgefactureerd is een schuld-post: dalende saldo betekent dat
+  // vooruit-gefactureerde omzet in de lopende periode gerealiseerd wordt,
+  // dus een POSITIEVE bijdrage aan de netto-omzet. De "mutatie" wordt
+  // daarom berekend als (vorige − huidige): daling → positief getal, stijging
+  // → negatief getal. Zo kan deze mutatie rechtstreeks bij mutatieOhw worden
+  // opgeteld in de netto-omzet formule (zie MaandTab.getNettoomzetVoorIC).
   let totaalVooruitgefactureerd: Record<string, number | null> | undefined
   let mutatieVooruitgefactureerd: Record<string, number | null> | undefined
   if (entity.vooruitgefactureerd) {
@@ -79,7 +86,7 @@ export function recomputeEntity(entity: OhwEntityData, allMonths: string[]): Ohw
     for (let i = 0; i < displayMonths.length; i++) {
       const m = displayMonths[i]
       const prev = i === 0 ? gv(totaalVooruitgefactureerd, openingMonth) : gv(totaalVooruitgefactureerd, displayMonths[i - 1])
-      mutatieVooruitgefactureerd[m] = gv(totaalVooruitgefactureerd, m) - prev
+      mutatieVooruitgefactureerd[m] = prev - gv(totaalVooruitgefactureerd, m)
     }
   }
 
