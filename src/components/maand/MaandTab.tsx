@@ -36,6 +36,7 @@ import { ImportApprovalModal } from './ImportApprovalModal'
 import { useNavStore } from '../../store/useNavStore'
 import { TariffTable } from './TariffTable'
 import { FteTab } from './FteTab'
+import { useCostBreakdownStore } from '../../store/useCostBreakdownStore'
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
@@ -76,23 +77,74 @@ interface NumInputProps {
   value: number
   onChange: (v: number) => void
   color?: string
+  /** Cost mode: toont altijd met € en minteken (rood), input wordt intern
+   *  altijd positief opgeslagen. Heeft de user een minteken zelf ingetypt,
+   *  dan wordt dat weggenomen voor opslag. */
+  isCost?: boolean
+  /** data-attributes voor Enter/Tab navigatie tussen cellen */
+  navRow?: string
+  navCol?: string
 }
 
-function NumInput({ value, onChange, color }: NumInputProps) {
+/** Zoek het volgende input-veld in dezelfde column (Enter = omlaag) of row
+ *  (horizontaal = standaard browser Tab). Voor Enter gebruiken we onze eigen
+ *  navigatie via data-nav-* attributen. */
+function focusNextInColumn(current: HTMLInputElement) {
+  const col = current.dataset.navCol
+  const row = current.dataset.navRow
+  if (!col || !row) return
+  const all = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-nav-col]'))
+  const idx = all.indexOf(current)
+  for (let i = idx + 1; i < all.length; i++) {
+    if (all[i].dataset.navCol === col && all[i].dataset.navRow !== row) {
+      all[i].focus()
+      all[i].select?.()
+      return
+    }
+  }
+}
+
+function NumInput({ value, onChange, color, isCost, navRow, navCol }: NumInputProps) {
   const [raw, setRaw] = useState('')
   const [editing, setEditing] = useState(false)
+  const displayColor = isCost && value !== 0 ? 'var(--red)' : color
+  // Display: bij cost altijd '−€ X' met minteken, anders '€ X'
+  const displayValue = editing
+    ? raw
+    : value === 0
+      ? ''
+      : isCost
+        ? `−€ ${Math.abs(value).toLocaleString('nl-NL')}`
+        : `€ ${value.toLocaleString('nl-NL')}`
+  const commit = () => {
+    setEditing(false)
+    let v = parseNL(raw || '0')
+    if (isNaN(v)) v = 0
+    // Cost-mode: negeer het teken van de input en sla altijd positief op
+    // (display toont automatisch het minteken). Stored positive is de
+    // conventie die de kosten-override store al gebruikt.
+    if (isCost) v = Math.abs(v)
+    onChange(v)
+  }
   return (
     <input
       className="ohw-inp"
-      style={{ width: 130, ...(color ? { color } : {}) }}
-      value={editing ? raw : value === 0 ? '' : value.toLocaleString('nl-NL')}
-      placeholder="0"
-      onFocus={() => { setEditing(true); setRaw(value === 0 ? '' : String(value)) }}
+      style={{ width: 130, color: displayColor, fontWeight: isCost ? 600 : undefined }}
+      value={displayValue}
+      placeholder={isCost ? '−€ 0' : '€ 0'}
+      data-nav-col={navCol}
+      data-nav-row={navRow}
+      onFocus={(e) => { setEditing(true); setRaw(value === 0 ? '' : String(value)); setTimeout(() => e.target.select(), 0) }}
       onChange={e => setRaw(e.target.value)}
-      onBlur={() => {
-        setEditing(false)
-        const v = parseNL(raw || '0')
-        onChange(isNaN(v) ? 0 : v)
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          const target = e.currentTarget
+          target.blur()
+          // Na blur: focus de volgende input in dezelfde kolom (volgende rij)
+          setTimeout(() => focusNextInColumn(target), 0)
+        }
       }}
     />
   )
@@ -140,6 +192,10 @@ export function MaandTab({ filter: _filter }: Props) {
   const [expandedCosts, setExpandedCosts] = useState<Set<CostSectionId>>(new Set())
   const toggleCostSection = (id: CostSectionId) =>
     setExpandedCosts(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  // Drill-down expansion state per sub-categorie (bv. 'directe_inkoopkosten')
+  const [expandedSubCosts, setExpandedSubCosts] = useState<Set<string>>(new Set())
+  const toggleSubCost = (key: string) =>
+    setExpandedSubCosts(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s })
   const [uploadMonth, setUploadMonth] = useState<string>('Mar-26')
   const [uploadLoading, setUploadLoading] = useState<Record<string, boolean>>({})
   const [pendingRecord, setPendingRecord] = useState<ImportRecord | null>(null)
@@ -205,9 +261,29 @@ export function MaandTab({ filter: _filter }: Props) {
     return ohwEntity?.totaalIC[month] ?? 0
   }
 
-  // ── Kosten helpers: override per sub-regel, fallback naar actuals ────────
-  /** Geeft de positieve waarde voor een kosten-sleutel: override > actuals */
+  // ── Kosten helpers: breakdowns > override > actuals ────────────────────
+  const costBreakdownEntries = useCostBreakdownStore(s => s.entries)
+  const addBreakdown = useCostBreakdownStore(s => s.add)
+  const updateBreakdownLabel = useCostBreakdownStore(s => s.updateLabel)
+  const updateBreakdownValue = useCostBreakdownStore(s => s.updateValue)
+  const removeBreakdown = useCostBreakdownStore(s => s.remove)
+
+  /** Heeft deze (maand, categorie) specifieke drill-down rijen? */
+  const hasBreakdowns = (key: string) =>
+    costBreakdownEntries.some(e => e.month === month && e.category === key)
+  /** Som van alle breakdowns voor (maand, categorie) per BV. */
+  const sumBreakdowns = (bv: BvId, key: string): number => {
+    let sum = 0
+    for (const e of costBreakdownEntries) {
+      if (e.month === month && e.category === key) sum += e.values[bv] ?? 0
+    }
+    return sum
+  }
+
+  /** Geeft de positieve waarde voor een kosten-sleutel:
+   *  breakdowns-sum > override > actuals (fallback). */
   const getKostenVal = (bv: BvId, key: string): number => {
+    if (hasBreakdowns(key)) return sumBreakdowns(bv, key)
     const e = entry(bv)
     if (e && e.kostenOverrides[key] !== undefined) return e.kostenOverrides[key]
     return Math.abs(monthlyActuals2026[bv as EntityName]?.[month]?.[key] ?? 0)
@@ -775,6 +851,140 @@ export function MaandTab({ filter: _filter }: Props) {
 
   // Imports for current upload month
   const monthImports = importRecords.filter(r => r.month === uploadMonth)
+
+  // ── Kosten sub-row renderer + drill-down (verdieping) ─────────────────
+  // `prefix` onderscheidt de sectie (dk / op / am) zodat Enter-nav alleen
+  // binnen dezelfde kolom van dezelfde sectie navigeert.
+  const renderCostSubRow = (sub: { key: string; label: string }, prefix: string): React.ReactNode[] => {
+    const rowTot = BVS.reduce((s, bv) => s + getKostenVal(bv, sub.key), 0)
+    const isExpanded = expandedSubCosts.has(sub.key)
+    const subBreakdowns = costBreakdownEntries
+      .filter(e => e.month === month && e.category === sub.key)
+    const breakdownCount = subBreakdowns.length
+
+    const rows: React.ReactNode[] = []
+
+    // 1. De hoofd-sub-regel zelf
+    rows.push(
+      <tr key={sub.key} style={{ background: 'var(--bg1)' }}>
+        <td style={{ padding: '4px 12px', paddingLeft: 30, fontSize: 11, color: 'var(--t2)', position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1 }}>
+          <button
+            onClick={() => toggleSubCost(sub.key)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--t3)', fontSize: 10, padding: 0, marginRight: 6,
+              transition: 'transform .15s',
+              transform: isExpanded ? 'rotate(90deg)' : 'none',
+              display: 'inline-block',
+            }}
+            title={isExpanded ? 'Verdieping inklappen' : 'Klik om specifieke posten toe te voegen'}
+          >▸</button>
+          <span style={{ cursor: 'pointer' }} onClick={() => toggleSubCost(sub.key)}>
+            {sub.label}
+          </span>
+          {breakdownCount > 0 && (
+            <span style={{ fontSize: 9, marginLeft: 6, color: 'var(--blue)', background: 'var(--bd-blue)', padding: '1px 5px', borderRadius: 3 }}>
+              {breakdownCount} specifiek
+            </span>
+          )}
+        </td>
+        {BVS.map(bv => {
+          const hasBr = breakdownCount > 0
+          const val = getKostenVal(bv, sub.key)
+          // Als er breakdowns zijn: toon read-only som (berekend). Anders: editable input.
+          if (hasBr) {
+            return (
+              <td key={bv} className="r mono" style={{ padding: '3px 8px', fontSize: 11, color: val !== 0 ? 'var(--red)' : 'var(--t3)', fontWeight: 600 }}>
+                {val !== 0 ? fmt(-val) : '—'}
+              </td>
+            )
+          }
+          return (
+            <td key={bv} className="r" style={{ padding: '3px 8px' }}>
+              <NumInput
+                value={val}
+                onChange={v => updateKosten(bv, sub.key, v)}
+                isCost
+                navRow={`${prefix}-${sub.key}`}
+                navCol={`${bv}`}
+              />
+            </td>
+          )
+        })}
+        <td className="mono r" style={{ fontSize: 11, fontWeight: 600, color: rowTot !== 0 ? 'var(--red)' : 'var(--t3)' }}>{rowTot !== 0 ? fmt(-rowTot) : '—'}</td>
+      </tr>
+    )
+
+    // 2. Drill-down rijen als expanded
+    if (isExpanded) {
+      subBreakdowns.forEach((br, i) => {
+        const brRowTot = BVS.reduce((s, bv) => s + (br.values[bv] ?? 0), 0)
+        rows.push(
+          <tr key={`br-${br.id}`} style={{ background: 'var(--bg2)' }}>
+            <td style={{ padding: '3px 12px', paddingLeft: 48, fontSize: 11, position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 1 }}>
+              <span style={{ color: 'var(--t3)', marginRight: 6, fontSize: 9 }}>↳</span>
+              <input
+                className="ohw-inp"
+                style={{ width: 200, fontSize: 11, textAlign: 'left', background: 'var(--bg3)' }}
+                defaultValue={br.label}
+                placeholder="Specifieke post omschrijving..."
+                onBlur={e => updateBreakdownLabel(br.id, e.target.value)}
+              />
+            </td>
+            {BVS.map(bv => (
+              <td key={bv} className="r" style={{ padding: '3px 8px' }}>
+                <NumInput
+                  value={br.values[bv] ?? 0}
+                  onChange={v => updateBreakdownValue(br.id, bv, v)}
+                  isCost
+                  navRow={`${prefix}-${sub.key}-br-${i}`}
+                  navCol={`${bv}`}
+                />
+              </td>
+            ))}
+            <td style={{ padding: '3px 4px', textAlign: 'right' }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: brRowTot !== 0 ? 'var(--red)' : 'var(--t3)', marginRight: 4, fontFamily: 'var(--mono)' }}>
+                {brRowTot !== 0 ? fmt(-brRowTot) : '—'}
+              </span>
+              <button
+                onClick={() => removeBreakdown(br.id)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 12, padding: '2px 4px' }}
+                title="Verwijder deze specifieke post"
+              >✕</button>
+            </td>
+          </tr>
+        )
+      })
+
+      // 3. "+ Specifiëren"-knop onderin
+      rows.push(
+        <tr key={`${sub.key}-add`} style={{ background: 'var(--bg2)' }}>
+          <td colSpan={5} style={{ padding: '4px 12px 8px 48px', position: 'sticky', left: 0, background: 'var(--bg2)' }}>
+            <button
+              onClick={() => addBreakdown(month, sub.key, '')}
+              className="btn sm"
+              style={{
+                background: 'rgba(0,169,224,0.08)',
+                border: '1px dashed var(--blue)',
+                color: 'var(--blue)',
+                fontSize: 10, padding: '3px 10px',
+              }}
+              title="Voeg een specifieke post toe onder deze kostenregel"
+            >
+              + specifieke post toevoegen
+            </button>
+            {breakdownCount > 0 && (
+              <span style={{ marginLeft: 10, fontSize: 10, color: 'var(--t3)' }}>
+                {breakdownCount} post{breakdownCount === 1 ? '' : 'en'} — totaal overschrijft de hoofdregel
+              </span>
+            )}
+          </td>
+        </tr>
+      )
+    }
+
+    return rows
+  }
 
   return (
     <>
@@ -1353,39 +1563,18 @@ export function MaandTab({ filter: _filter }: Props) {
                         <span style={{ marginLeft: 8, fontSize: 9, color: 'var(--t3)', fontWeight: 400 }}>{expandedCosts.has('directe_kosten') ? 'inklappen' : 'uitklappen'}</span>
                       </td>
                       {BVS.map(bv => {
-                        const a = monthlyActuals2026[bv as EntityName]?.[month]
-                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: 'var(--t2)' }}>{fmt(a?.['directe_kosten'] ?? 0)}</td>
+                        const v = finalCosts(bv)
+                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: v !== 0 ? 'var(--red)' : 'var(--t2)' }}>{v !== 0 ? fmt(-v) : '—'}</td>
                       })}
-                      <td className="mono r" style={{ fontWeight: 600, color: 'var(--t2)' }}>{fmt(-totCosts)}</td>
+                      <td className="mono r" style={{ fontWeight: 600, color: totCosts !== 0 ? 'var(--red)' : 'var(--t2)' }}>{totCosts !== 0 ? fmt(-totCosts) : '—'}</td>
                     </tr>
-                    {expandedCosts.has('directe_kosten') && <>
-                      {DIRECTE_KOSTEN_SUBS.map(sub => {
-                        const rowTot = BVS.reduce((s, bv) => s + getKostenVal(bv, sub.key), 0)
-                        const isOverridden = BVS.some(bv => entry(bv)?.kostenOverrides[sub.key] !== undefined)
-                        return (
-                          <tr key={sub.key} style={{ background: 'var(--bg1)' }}>
-                            <td style={{ padding: '4px 12px', paddingLeft: 30, fontSize: 11, color: isOverridden ? 'var(--amber)' : 'var(--t2)', position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1 }}>
-                              {sub.label}{isOverridden && <span style={{ marginLeft: 5, fontSize: 9 }}>✏</span>}
-                            </td>
-                            {BVS.map(bv => (
-                              <td key={bv} className="r" style={{ padding: '3px 8px' }}>
-                                <NumInput
-                                  value={getKostenVal(bv, sub.key)}
-                                  onChange={v => updateKosten(bv, sub.key, v)}
-                                  color={entry(bv)?.kostenOverrides[sub.key] !== undefined ? 'var(--amber)' : undefined}
-                                />
-                              </td>
-                            ))}
-                            <td className="mono r" style={{ fontSize: 11, fontWeight: 600 }}>{fmt(rowTot)}</td>
-                          </tr>
-                        )
-                      })}
-                    </>}
+                    {expandedCosts.has('directe_kosten') && DIRECTE_KOSTEN_SUBS.flatMap(sub =>
+                      renderCostSubRow(sub, 'dk')
+                    )}
                     {!expandedCosts.has('directe_kosten') && (
                       <tr style={{ background: 'var(--bg1)' }}>
                         <td colSpan={5} style={{ padding: '2px 12px', paddingLeft: 30, fontSize: 10, color: 'var(--t3)', position: 'sticky', left: 0 }}>
                           {DIRECTE_KOSTEN_SUBS.map(s => s.label).join(' · ')}
-                          {DIRECTE_KOSTEN_SUBS.some(sub => BVS.some(bv => entry(bv)?.kostenOverrides[sub.key] !== undefined)) && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>✏ aangepaste regels</span>}
                         </td>
                       </tr>
                     )}
@@ -1402,39 +1591,17 @@ export function MaandTab({ filter: _filter }: Props) {
                       </td>
                       {BVS.map(bv => {
                         const v = opKosten(bv)
-                        const hasOverride = OPERATIONELE_KOSTEN_SUBS.some(sub => entry(bv)?.kostenOverrides[sub.key] !== undefined)
-                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: hasOverride ? 'var(--amber)' : 'var(--t2)' }}>{fmt(-v)}</td>
+                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: v !== 0 ? 'var(--red)' : 'var(--t2)' }}>{v !== 0 ? fmt(-v) : '—'}</td>
                       })}
-                      <td className="mono r" style={{ fontWeight: 600, color: 'var(--t2)' }}>{fmt(-totOpKosten)}</td>
+                      <td className="mono r" style={{ fontWeight: 600, color: totOpKosten !== 0 ? 'var(--red)' : 'var(--t2)' }}>{totOpKosten !== 0 ? fmt(-totOpKosten) : '—'}</td>
                     </tr>
-                    {expandedCosts.has('operationele_kosten') && <>
-                      {OPERATIONELE_KOSTEN_SUBS.map(sub => {
-                        const rowTot = BVS.reduce((s, bv) => s + getKostenVal(bv, sub.key), 0)
-                        const isOverridden = BVS.some(bv => entry(bv)?.kostenOverrides[sub.key] !== undefined)
-                        return (
-                          <tr key={sub.key} style={{ background: 'var(--bg1)' }}>
-                            <td style={{ padding: '4px 12px', paddingLeft: 30, fontSize: 11, color: isOverridden ? 'var(--amber)' : 'var(--t2)', position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1 }}>
-                              {sub.label}{isOverridden && <span style={{ marginLeft: 5, fontSize: 9 }}>✏</span>}
-                            </td>
-                            {BVS.map(bv => (
-                              <td key={bv} className="r" style={{ padding: '3px 8px' }}>
-                                <NumInput
-                                  value={getKostenVal(bv, sub.key)}
-                                  onChange={v => updateKosten(bv, sub.key, v)}
-                                  color={entry(bv)?.kostenOverrides[sub.key] !== undefined ? 'var(--amber)' : undefined}
-                                />
-                              </td>
-                            ))}
-                            <td className="mono r" style={{ fontSize: 11, fontWeight: 600 }}>{fmt(rowTot)}</td>
-                          </tr>
-                        )
-                      })}
-                    </>}
+                    {expandedCosts.has('operationele_kosten') && OPERATIONELE_KOSTEN_SUBS.flatMap(sub =>
+                      renderCostSubRow(sub, 'op')
+                    )}
                     {!expandedCosts.has('operationele_kosten') && (
                       <tr style={{ background: 'var(--bg1)' }}>
                         <td colSpan={5} style={{ padding: '2px 12px', paddingLeft: 30, fontSize: 10, color: 'var(--t3)', position: 'sticky', left: 0 }}>
                           {OPERATIONELE_KOSTEN_SUBS.map(s => s.label).join(' · ')}
-                          {OPERATIONELE_KOSTEN_SUBS.some(sub => BVS.some(bv => entry(bv)?.kostenOverrides[sub.key] !== undefined)) && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>✏ aangepaste regels</span>}
                         </td>
                       </tr>
                     )}
@@ -1451,39 +1618,17 @@ export function MaandTab({ filter: _filter }: Props) {
                       </td>
                       {BVS.map(bv => {
                         const v = amortisatie(bv)
-                        const hasOverride = AMORTISATIE_SUBS.some(sub => entry(bv)?.kostenOverrides[sub.key] !== undefined)
-                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: hasOverride ? 'var(--amber)' : 'var(--t2)' }}>{fmt(-v)}</td>
+                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: v !== 0 ? 'var(--red)' : 'var(--t2)' }}>{v !== 0 ? fmt(-v) : '—'}</td>
                       })}
-                      <td className="mono r" style={{ fontWeight: 600, color: 'var(--t2)' }}>{fmt(-totAmortisatie)}</td>
+                      <td className="mono r" style={{ fontWeight: 600, color: totAmortisatie !== 0 ? 'var(--red)' : 'var(--t2)' }}>{totAmortisatie !== 0 ? fmt(-totAmortisatie) : '—'}</td>
                     </tr>
-                    {expandedCosts.has('amortisatie_afschrijvingen') && <>
-                      {AMORTISATIE_SUBS.map(sub => {
-                        const rowTot = BVS.reduce((s, bv) => s + getKostenVal(bv, sub.key), 0)
-                        const isOverridden = BVS.some(bv => entry(bv)?.kostenOverrides[sub.key] !== undefined)
-                        return (
-                          <tr key={sub.key} style={{ background: 'var(--bg1)' }}>
-                            <td style={{ padding: '4px 12px', paddingLeft: 30, fontSize: 11, color: isOverridden ? 'var(--amber)' : 'var(--t2)', position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1 }}>
-                              {sub.label}{isOverridden && <span style={{ marginLeft: 5, fontSize: 9 }}>✏</span>}
-                            </td>
-                            {BVS.map(bv => (
-                              <td key={bv} className="r" style={{ padding: '3px 8px' }}>
-                                <NumInput
-                                  value={getKostenVal(bv, sub.key)}
-                                  onChange={v => updateKosten(bv, sub.key, v)}
-                                  color={entry(bv)?.kostenOverrides[sub.key] !== undefined ? 'var(--amber)' : undefined}
-                                />
-                              </td>
-                            ))}
-                            <td className="mono r" style={{ fontSize: 11, fontWeight: 600 }}>{fmt(rowTot)}</td>
-                          </tr>
-                        )
-                      })}
-                    </>}
+                    {expandedCosts.has('amortisatie_afschrijvingen') && AMORTISATIE_SUBS.flatMap(sub =>
+                      renderCostSubRow(sub, 'am')
+                    )}
                     {!expandedCosts.has('amortisatie_afschrijvingen') && (
                       <tr style={{ background: 'var(--bg1)' }}>
                         <td colSpan={5} style={{ padding: '2px 12px', paddingLeft: 30, fontSize: 10, color: 'var(--t3)', position: 'sticky', left: 0 }}>
                           {AMORTISATIE_SUBS.map(s => s.label).join(' · ')}
-                          {AMORTISATIE_SUBS.some(sub => BVS.some(bv => entry(bv)?.kostenOverrides[sub.key] !== undefined)) && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>✏ aangepaste regels</span>}
                         </td>
                       </tr>
                     )}

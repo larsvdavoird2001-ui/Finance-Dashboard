@@ -429,17 +429,9 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
             </td>
           </tr>
 
-          {/* ── Subtotaal ──────────────────────────────────────────── */}
-          <tr className="stot">
-            <td style={{ position: 'sticky', left: 0, background: 'var(--bg3)', fontSize: 12, padding: '5px 12px 5px 26px', fontStyle: 'italic', zIndex: 1, boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)' }}>
-              Subtotaal {section.title}
-            </td>
-            {stots.map((v, i) => (
-              <td key={i} className="mono r" style={{ padding: '5px 8px', fontWeight: 600, background: 'var(--bg3)' }}>{fmt(v)}</td>
-            ))}
-            <td style={{ background: 'var(--bg3)', width: 40 }} />
-          </tr>
-
+          {/* Subtotaal-rij is verwijderd: dezelfde totalen staan al in de
+              section-header bovenaan (die is altijd zichtbaar), dus een
+              herhaling onderaan de uitklap-sectie is dubbel. */}
         </>
       )}
 
