@@ -7,6 +7,7 @@ import type { EntityName } from '../../data/plData'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useOhwStore } from '../../store/useOhwStore'
+import { useFteStore } from '../../store/useFteStore'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
@@ -37,6 +38,9 @@ type EditTarget = { kind: 'budget' | 'le'; e: EntityName; m: string; k: string }
 export function BudgetsTab({ filter: _filter }: Props) {
   const store = useBudgetStore()
   const ohwData2026 = useOhwStore(s => s.data2026)
+  const fteGetEntry = useFteStore(s => s.getEntry)
+  // Trigger re-render bij FTE wijzigingen
+  useFteStore(s => s.entries)
   const { getMonthly } = useAdjustedActuals()
   const [metric, setMetric] = useState<string>('netto_omzet')
   const [editing, setEditing] = useState<EditTarget | null>(null)
@@ -53,6 +57,21 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return idx >= 0 ? MONTHS_2025_LABELS[idx] : m
   }
 
+  // ── Agenda-gebaseerde detectie: welke maanden zijn fully-closed? ──
+  // "Compleet" = volledig verstreken volgens de kalender. Bv. op 1 april → t/m maart.
+  const now = new Date()
+  const currentYearNum   = now.getFullYear()
+  const currentMonthIdx0 = now.getMonth() // 0–11
+  const closedMonthsCount =
+    currentYearNum > 2026 ? 12 :
+    currentYearNum < 2026 ? 0  :
+    currentMonthIdx0
+  const closedMonths = months.slice(0, closedMonthsCount)
+  const isClosedMonth = (m: string) => closedMonths.includes(m)
+  const lastClosedMonth: string | null = closedMonths.length > 0
+    ? closedMonths[closedMonths.length - 1]
+    : null
+
   // ── Effective budget lookup (source + overrides merged by store) ──
   const getVal = (e: EntityName, m: string, k: string): number => {
     const data = store.getMonth(e, m)
@@ -66,34 +85,58 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return getMonthly(e as BvId, m)
   }
 
-  // Heeft deze (BV, maand) echte actuals? (OHW gevuld OF base-actuals bestaat OF FinStore-entry)
-  const hasActualsFor = (e: EntityName, m: string): boolean => {
-    if (e === 'Holdings') {
-      const base = monthlyActuals2026['Holdings']?.[m]
-      return !!base && Object.keys(base).length > 0 && (Math.abs(base.netto_omzet ?? 0) > 0 || Math.abs(base.operationele_kosten ?? 0) > 0)
+  // ── Forecast voor toekomstige maanden ──
+  // Combineert: (a) 2025 seizoenspatroon × 2026 YTD-performance vs 2025,
+  //             (b) FTE-ratio (toekomstige vs laatst-gesloten),
+  //             (c) laatste-maand run-rate als trend-anker.
+  // Blend: 60% seizoenspatroon (× FTE), 40% run-rate (× FTE).
+  const getForecastFor = (e: EntityName, m: string, k: string): number => {
+    const v2025 = (month26: string) => monthlyActuals2025[e]?.[toPY(month26)]?.[k] ?? 0
+    const v2026 = (month26: string) => getActualsFor(e, month26)[k] ?? 0
+
+    const sameMonth2025 = v2025(m)
+
+    // 2026 performance multiplier vs 2025 same-period
+    let ytd2026 = 0, ytd2025 = 0
+    for (const cm of closedMonths) {
+      ytd2026 += v2026(cm)
+      ytd2025 += v2025(cm)
     }
-    // BV: OHW heeft netto voor deze maand?
-    const ohwEntity = ohwData2026.entities.find(ent => ent.entity === e)
-    if (ohwEntity && ohwEntity.nettoOmzet[m] != null) return true
-    // Base-actuals gevuld? (Jan/Feb hardcoded)
-    const base = monthlyActuals2026[e]?.[m]
-    if (base && Object.keys(base).length > 0 && (Math.abs(base.netto_omzet ?? 0) > 0)) return true
-    return false
+    const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
+
+    // Laatste-gesloten-maand actual (run-rate)
+    const lastActual = lastClosedMonth ? v2026(lastClosedMonth) : 0
+
+    // FTE-aanpassing (alleen voor BVs; Holdings heeft geen FTE-data)
+    let fteAdj = 1
+    if (e !== 'Holdings' && lastClosedMonth) {
+      const fteLast   = fteGetEntry(e as BvId, lastClosedMonth)?.fte ?? 0
+      const fteFuture = fteGetEntry(e as BvId, m)?.fte ?? fteLast
+      if (fteLast > 0) fteAdj = fteFuture / fteLast
+    }
+
+    const seasonalForecast = sameMonth2025 * perfMult * fteAdj
+    const runRateForecast  = lastActual * fteAdj
+
+    if (seasonalForecast === 0 && runRateForecast === 0) return 0
+    if (seasonalForecast === 0) return Math.round(runRateForecast)
+    if (runRateForecast === 0)  return Math.round(seasonalForecast)
+    return Math.round(0.6 * seasonalForecast + 0.4 * runRateForecast)
   }
 
-  // LE-waarde voor een cel: override → actual (als maand gesloten is) → budget
+  // LE-waarde voor een cel: override → actual (gesloten maand) → forecast (toekomst)
   const getLeVal = (e: EntityName, m: string, k: string): number => {
     const ov = store.getLeOverride(e, m, k)
     if (ov != null) return ov
-    if (hasActualsFor(e, m)) return getActualsFor(e, m)[k] ?? 0
-    return getVal(e, m, k)
+    if (isClosedMonth(m)) return getActualsFor(e, m)[k] ?? 0
+    return getForecastFor(e, m, k)
   }
 
   // Bron van de LE-waarde (voor styling)
-  const getLeSource = (e: EntityName, m: string, k: string): 'override' | 'actual' | 'budget' => {
+  const getLeSource = (e: EntityName, m: string, k: string): 'override' | 'actual' | 'forecast' => {
     if (store.getLeOverride(e, m, k) != null) return 'override'
-    if (hasActualsFor(e, m)) return 'actual'
-    return 'budget'
+    if (isClosedMonth(m)) return 'actual'
+    return 'forecast'
   }
 
   const metricItem = DISPLAY_KEYS.find(d => d.key === metric) ?? DISPLAY_KEYS[0]
@@ -230,13 +273,13 @@ export function BudgetsTab({ filter: _filter }: Props) {
   }
 
   // ── Latest Estimate: vul het hele jaar met hard snapshot ──
-  // Gesloten maanden → actuals; toekomst → budget. Alles wordt vastgelegd als override
-  // zodat het een echte LE-snapshot is, onafhankelijk van latere wijzigingen in bron.
+  // Gesloten maanden → actuals; toekomst → forecast (2025 pattern × performance × FTE × run-rate).
+  // Snapshot wordt vastgelegd als override zodat-ie onafhankelijk is van latere wijzigingen.
   const autoFillLatestEstimate = (e: EntityName) => {
     for (const m of months) {
-      const val = hasActualsFor(e, m)
+      const val = isClosedMonth(m)
         ? (getActualsFor(e, m)[metric] ?? 0)
-        : getVal(e, m, metric)
+        : getForecastFor(e, m, metric)
       store.setLeValue(e, m, metric, val)
     }
   }
@@ -419,19 +462,19 @@ export function BudgetsTab({ filter: _filter }: Props) {
         </div>
       </div>
 
-      {/* Full-year LATEST ESTIMATE matrix — actuals voor gesloten maanden + budget voor rest */}
+      {/* Full-year LATEST ESTIMATE matrix — actuals voor gesloten maanden + forecast voor rest */}
       <div className="card">
         <div className="card-hdr">
           <span className="card-title">🎯 Latest Estimate — FY 2026</span>
           <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 8 }}>
-            {metricItem.label} · gesloten maanden = actuals (hard), open maanden = budget
+            {metricItem.label} · t/m {lastClosedMonth ?? '—'} = actuals (hard), rest = forecast (2025 pattern × performance × FTE × run-rate)
           </span>
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>⚡ vult het hele jaar · klik cel om te bewerken</span>
         </div>
 
         <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center', gap: 12, fontSize: 10, color: 'var(--t3)', flexWrap: 'wrap' }}>
           <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(0,169,224,.2)', border: '1px solid var(--brand)', marginRight: 4, verticalAlign: 'middle' }} /> actual (hard)</span>
-          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(143,163,192,.15)', border: '1px solid var(--bd2)', marginRight: 4, verticalAlign: 'middle' }} /> budget (verwacht)</span>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(245,158,11,.15)', border: '1px solid var(--amber)', marginRight: 4, verticalAlign: 'middle' }} /> forecast (trend)</span>
           <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(38,201,151,.15)', border: '1px solid var(--green)', marginRight: 4, verticalAlign: 'middle' }} /> handmatig aangepast</span>
         </div>
 
@@ -463,20 +506,24 @@ export function BudgetsTab({ filter: _filter }: Props) {
                       const bg =
                         src === 'actual'   ? 'rgba(0,169,224,.08)' :
                         src === 'override' ? 'rgba(38,201,151,.08)' :
-                                             'rgba(143,163,192,.06)'
+                                             'rgba(245,158,11,.07)'
                       const color =
                         val === 0          ? 'var(--t3)' :
                         src === 'actual'   ? 'var(--brand)' :
                         src === 'override' ? 'var(--green)' :
-                                             'var(--t2)'
+                                             'var(--amber)'
                       const weight = src === 'actual' ? 700 : 500
-                      const style = src === 'budget' ? 'italic' : 'normal'
+                      const style = src === 'forecast' ? 'italic' : 'normal'
                       return (
                         <td
                           key={`le-${e}-${m}`}
                           className="r mono"
                           style={{ padding: '4px 6px', background: bg, cursor: 'pointer' }}
-                          title={src === 'actual' ? 'Werkelijk (uit OHW/Maandafsluiting)' : src === 'override' ? 'Handmatig aangepast' : 'Budget (verwacht)'}
+                          title={
+                            src === 'actual'   ? 'Werkelijk (uit OHW/Maandafsluiting)' :
+                            src === 'override' ? 'Handmatig aangepast' :
+                                                 'Forecast (2025 pattern × performance × FTE × run-rate)'
+                          }
                           onClick={() => startEdit('le', e, m, metric)}
                         >
                           {isEditing ? (
