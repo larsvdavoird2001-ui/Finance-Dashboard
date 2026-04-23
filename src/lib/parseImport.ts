@@ -2067,6 +2067,57 @@ export function computeGenericImport(
     })
   }
 
+  // ── STRUCTURELE totaal-regel detectie (wiskundig, geen label-afhankelijk) ──
+  // Als er één rij is waarvan het bedrag exact gelijk is aan de som van alle
+  // andere rijen (binnen 1 EUR / 0,1% tolerantie), is dat wiskundig bewijs
+  // dat het een duplicate totaal-regel is die door pattern-detectie heen
+  // glipte. We doen dit per BV-groep zodat we bij multi-BV bestanden ook
+  // per-BV subtotalen kunnen vangen.
+  const detailBvKey = (d: GenericImportDetail): BvId =>
+    d.bv ?? (slotConfig.targetBv ?? 'Consultancy')
+  const byBvGroup: Partial<Record<BvId, GenericImportDetail[]>> = {}
+  for (const d of details) {
+    const k = detailBvKey(d)
+    if (!byBvGroup[k]) byBvGroup[k] = []
+    byBvGroup[k]!.push(d)
+  }
+  const structuralTotalIndices = new Set<number>()
+  for (const k of Object.keys(byBvGroup) as BvId[]) {
+    const list = byBvGroup[k]!
+    if (list.length < 5) continue  // minstens 5 rijen nodig om toeval uit te sluiten
+    const bvTotal = list.reduce((s, d) => s + d.amount, 0)
+    // Sorteer op absolute waarde aflopend — de totaal-rij is meestal de
+    // grootste, maar kan ook negatief zijn.
+    const sorted = [...list].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+    const candidate = sorted[0]
+    const othersSum = bvTotal - candidate.amount
+    const tolerance = Math.max(1, Math.abs(bvTotal) * 0.001)
+    // Extra safeguard: candidate moet significant groter zijn dan de op één
+    // na grootste rij (minimaal 1,8×). Voorkomt false-positives op bestanden
+    // met slechts enkele detail-rijen waar de grootste toevallig ongeveer
+    // gelijk aan de som van de anderen is.
+    const secondLargest = sorted[1] ? Math.abs(sorted[1].amount) : 0
+    const isStructurallyTotal =
+      Math.abs(candidate.amount - othersSum) < tolerance &&
+      Math.abs(candidate.amount) > tolerance &&
+      Math.abs(candidate.amount) >= 1.8 * secondLargest
+    if (isStructurallyTotal) {
+      // Bevestigd: candidate.amount = som van alle andere rijen → het is een totaal-regel
+      structuralTotalIndices.add(candidate.rowIndex)
+      perBv[k] -= candidate.amount
+      total -= candidate.amount
+      matchedCount--
+      totalRowsSkipped++
+      totalRowLabels.push(`(structureel) rij ${candidate.rowIndex + 1} = €${Math.round(candidate.amount).toLocaleString('nl-NL')}`)
+    }
+  }
+  if (structuralTotalIndices.size > 0) {
+    // Verwijder de gedetecteerde totaal-rijen uit details
+    for (let i = details.length - 1; i >= 0; i--) {
+      if (structuralTotalIndices.has(details[i].rowIndex)) details.splice(i, 1)
+    }
+  }
+
   // Afronden op hele euro voor bedragen; uren blijven decimaal
   const isHoursSlot = /uren|hours/i.test(slotConfig.amountCols.join(' '))
   for (const k of Object.keys(perBv) as BvId[]) {
