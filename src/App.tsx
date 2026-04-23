@@ -87,7 +87,7 @@ export default function App() {
             showToast={showToast}
           />
         )}
-        {tab === 'budget'  && <BudgetTab filter={filter} />}
+        {tab === 'budget'  && <BudgetTab filter={filter} onFilterChange={onFilterChange} />}
         {tab === 'budgets' && <BudgetsTab filter={filter} />}
         {tab === 'maand'   && <MaandTab filter={filter} />}
       </div>

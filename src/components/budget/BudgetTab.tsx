@@ -50,9 +50,12 @@ function deltaColor(d: number, key: string): string {
   return d > 0 ? 'var(--green)' : 'var(--red)'
 }
 
-interface Props { filter: GlobalFilter }
+interface Props {
+  filter: GlobalFilter
+  onFilterChange?: (patch: Partial<GlobalFilter>) => void
+}
 
-export function BudgetTab({ filter }: Props) {
+export function BudgetTab({ filter, onFilterChange }: Props) {
   const periods: Period[] = filter.year === '2025' ? PERIODS_2025 : PERIODS_2026
   const defaultPeriod = filter.year === '2025' ? 'ytd25' : 'ytd26'
 
@@ -272,8 +275,21 @@ export function BudgetTab({ filter }: Props) {
     return { actual: sumActual, budget: sumBudget, delta: sumActual - sumBudget }
   })()
 
-  // Bepaal hoofdboodschap + hypothese-lijst
+  // Bepaal hoofdboodschap + hypothese-lijst. Rekening houdend met
+  // ontbrekende data: als actuals OF budget voor een component niet
+  // gevuld is, geven we GEEN conclusie maar een status-melding.
   const reasonFor = (d: typeof driversWithImpact[number]): string => {
+    const actualsZero = !anyEntityHas(d.key, allActuals)
+    const budgetZero  = !anyEntityHas(d.key, allBudgets)
+    if (actualsZero && budgetZero) {
+      return 'Nog geen actuals én geen budget voor deze component — geen variance-analyse mogelijk.'
+    }
+    if (budgetZero) {
+      return `Actuals gevuld (${fmt(totalActuals[d.key] ?? 0)}), maar budget voor deze component is nog niet ingevuld. Ga naar Budgetten om sturing mogelijk te maken.`
+    }
+    if (actualsZero) {
+      return `Budget staat op ${fmt(totalBudget[d.key] ?? 0)}, maar actuals zijn nog niet geboekt voor deze periode. Wacht tot closing afgerond is voor een betrouwbare analyse.`
+    }
     const fav = isFavourable(d.delta, d.isCost)
     if (d.key === 'netto_omzet') {
       return fav ? 'Meer omzet gerealiseerd dan begroot — duidt op sterkere vraag of hogere tarieven.'
@@ -304,8 +320,106 @@ export function BudgetTab({ filter }: Props) {
     return ''
   }
 
+  // ── Missing-data detectie per component ────────────────────────
+  // Bepaal per P&L-key of de actuals en/of budget daadwerkelijk gevuld zijn
+  // voor de GESELECTEERDE visibleEntities (dus niet alle BV's). Zo voorkomen
+  // we misleidende interpretaties op basis van 0-waarden die eigenlijk
+  // 'niet ingevuld' betekenen.
+  const anyEntityHas = (key: string, src: Record<EntityName, Record<string, number>>) =>
+    visibleEntities.some(e => {
+      const v = src[e]?.[key]
+      return v != null && v !== 0
+    })
+
   return (
     <div className="page">
+      {/* ── Filters toolbar — alles op één plek bovenaan ─────────── */}
+      <div className="card" style={{ overflow: 'visible' }}>
+        <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Filters:</span>
+
+          {/* Jaar (gesynchroniseerd met globale topbar-filter) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: 'var(--t3)' }}>Jaar</span>
+            <div className="tabs-row">
+              {(['2025', '2026'] as const).map(y => (
+                <button
+                  key={y}
+                  className={`tab${filter.year === y ? ' active' : ''}`}
+                  onClick={() => onFilterChange?.({ year: y })}
+                >{y}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* BV (gesynchroniseerd met globale topbar-filter) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: 'var(--t3)' }}>BV</span>
+            <div style={{ display: 'flex', gap: 3, background: 'var(--bg3)', padding: 2, borderRadius: 5 }}>
+              {(['all', 'Consultancy', 'Projects', 'Software'] as const).map(b => (
+                <button
+                  key={b}
+                  onClick={() => onFilterChange?.({ bv: b })}
+                  style={{
+                    padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: filter.bv === b ? 700 : 500,
+                    background: filter.bv === b ? 'var(--bg1)' : 'transparent',
+                    color: filter.bv === b ? 'var(--t1)' : 'var(--t3)',
+                    border: '1px solid', borderColor: filter.bv === b ? 'var(--bd2)' : 'transparent',
+                    cursor: 'pointer',
+                  }}
+                >{b === 'all' ? 'Alle BVs' : b}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Periode */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: 'var(--t3)' }}>Periode</span>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {periods.map(p => (
+                <button
+                  key={p.id}
+                  className={`btn sm${period === p.id ? ' primary' : ' ghost'}`}
+                  onClick={() => setPeriod(p.id)}
+                  style={{ fontSize: 11 }}
+                >{p.label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Kolom-toggles */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: 'var(--t3)' }}>Kolommen</span>
+            {(['actual', 'budget', 'delta'] as ColType[]).map(ct => (
+              <button
+                key={ct}
+                onClick={() => toggleCol(ct)}
+                style={{
+                  padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: colTypes.has(ct) ? 600 : 400,
+                  cursor: 'pointer', border: '1px solid', fontFamily: 'var(--font)', transition: 'all .12s',
+                  borderColor: colTypes.has(ct) ? (ct === 'delta' ? 'var(--amber)' : 'var(--blue)') : 'var(--bd2)',
+                  background:  colTypes.has(ct) ? (ct === 'delta' ? 'rgba(251,191,36,.12)' : 'rgba(0,169,224,.12)') : 'transparent',
+                  color: colTypes.has(ct) ? (ct === 'delta' ? 'var(--amber)' : 'var(--blue)') : 'var(--t3)',
+                }}
+              >{COL_LABELS[ct]}</button>
+            ))}
+          </div>
+
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--green)', background: 'var(--bd-green)', padding: '2px 7px', borderRadius: 4 }}>
+            ● Live OHW
+          </span>
+
+          <button
+            className="btn sm success"
+            onClick={exportExcel}
+            title={`Exporteer huidige selectie (${periodLabel}${filter.bv !== 'all' ? ' · ' + filter.bv : ''}) naar Excel`}
+            style={{ fontSize: 11 }}
+          >
+            ↓ Excel export
+          </button>
+        </div>
+      </div>
+
       {/* ── Analyse & redenen card — top ─────────────────────────── */}
       <div className="card" style={{ borderLeft: `3px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--amber)'}` }}>
         <div className="card-hdr">
@@ -453,57 +567,6 @@ export function BudgetTab({ filter }: Props) {
             <span>Bekijk de details in de tabel hieronder.</span>
           </div>
         </div>
-      </div>
-
-      {/* Toolbar */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        {/* Period buttons */}
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {periods.map(p => (
-            <button
-              key={p.id}
-              className={`btn sm${period === p.id ? ' primary' : ' ghost'}`}
-              onClick={() => setPeriod(p.id)}
-            >{p.label}</button>
-          ))}
-        </div>
-
-        <div style={{ width: 1, height: 18, background: 'var(--bd2)', margin: '0 2px' }} />
-
-        {/* Column type toggles */}
-        <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600 }}>Kolommen:</span>
-        {(['actual', 'budget', 'delta'] as ColType[]).map(ct => (
-          <button
-            key={ct}
-            onClick={() => toggleCol(ct)}
-            style={{
-              padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: colTypes.has(ct) ? 600 : 400,
-              cursor: 'pointer', border: '1px solid', fontFamily: 'var(--font)', transition: 'all .12s',
-              borderColor: colTypes.has(ct) ? (ct === 'delta' ? 'var(--amber)' : 'var(--blue)') : 'var(--bd2)',
-              background:  colTypes.has(ct) ? (ct === 'delta' ? 'rgba(251,191,36,.12)' : 'rgba(0,169,224,.12)') : 'transparent',
-              color: colTypes.has(ct) ? (ct === 'delta' ? 'var(--amber)' : 'var(--blue)') : 'var(--t3)',
-            }}
-          >{COL_LABELS[ct]}</button>
-        ))}
-
-        {filter.bv !== 'all' && (
-          <span style={{ marginLeft: 4, fontSize: 10, color: 'var(--t3)', background: 'var(--bg3)', padding: '2px 7px', borderRadius: 4, border: '1px solid var(--bd2)' }}>
-            {filter.bv}
-          </span>
-        )}
-
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--green)', background: 'var(--bd-green)', padding: '2px 7px', borderRadius: 4 }}>
-          ● Live OHW
-        </span>
-
-        <button
-          className="btn sm success"
-          onClick={exportExcel}
-          title={`Exporteer huidige selectie (${periodLabel}${filter.bv !== 'all' ? ' · ' + filter.bv : ''}) naar Excel`}
-          style={{ fontSize: 11 }}
-        >
-          ↓ Excel export
-        </button>
       </div>
 
       <div className="card">
