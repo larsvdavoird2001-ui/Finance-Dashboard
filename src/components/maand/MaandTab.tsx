@@ -471,20 +471,31 @@ export function MaandTab({ filter: _filter }: Props) {
   }
 
   const handleApprove = (record: ImportRecord) => {
-    approveRecord(record.id)
-    approveRawEntry(record.id)
-    applyImportToEntries(record)
+    // Sluit de modal ALTIJD eerst — voorkomt dat een uitzondering in de
+    // downstream store-updates (approveRecord / applyImportToEntries) de
+    // pop-up open laat staan na klikken.
     setPendingRecord(null)
     setPendingFile(null)
-    showToast(`${record.slotLabel} goedgekeurd en toegepast`, 'g')
+    try {
+      approveRecord(record.id)
+      approveRawEntry(record.id)
+      applyImportToEntries(record)
+      showToast(`${record.slotLabel} goedgekeurd en toegepast`, 'g')
+    } catch (err) {
+      showToast(`Toepassen mislukt: ${err instanceof Error ? err.message : String(err)}`, 'r')
+    }
   }
 
   const handleReject = (record: ImportRecord, reason: string) => {
-    rejectRecord(record.id, reason)
-    rejectRawEntry(record.id)
     setPendingRecord(null)
     setPendingFile(null)
-    showToast(`${record.slotLabel} afgekeurd`, 'r')
+    try {
+      rejectRecord(record.id, reason)
+      rejectRawEntry(record.id)
+      showToast(`${record.slotLabel} afgekeurd`, 'r')
+    } catch (err) {
+      showToast(`Afkeuren mislukt: ${err instanceof Error ? err.message : String(err)}`, 'r')
+    }
   }
 
   /** Verwijder een import record — als het record goedgekeurd was, maak ook
