@@ -108,27 +108,45 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
   const [amountCol, setAmountCol] = useState<string>('')
   const [bvCol, setBvCol] = useState<string>('')
   const [bvFilter, setBvFilter] = useState<BvId | ''>('')
-  const [filterCol, setFilterCol] = useState<string>('')
-  const [filterValue, setFilterValue] = useState<string>('')
+  // Meerdere kolom-filters (AND). Bv. D-lijst: BV-kolom + factuuraanvraag-kolom.
+  const [filters, setFilters] = useState<Array<{ col: string; value: string }>>([])
 
   useEffect(() => {
     setAmountCol(suggested.amountCol)
     setBvCol(isSingleBv ? '' : suggested.bvCol)
     setBvFilter(suggested.bvFilterSuggestion)
-    setFilterCol(suggested.filterCol)
-    setFilterValue(suggested.filterValue)
-  }, [suggested.amountCol, suggested.bvCol, suggested.bvFilterSuggestion, suggested.filterCol, suggested.filterValue, isSingleBv])
+    setFilters(suggested.filters.length > 0 ? suggested.filters : [])
+  }, [suggested.amountCol, suggested.bvCol, suggested.bvFilterSuggestion, suggested.filters, isSingleBv])
 
   // Reset exclusions when config changes
   useEffect(() => {
     setExcludedRows(new Set())
-  }, [amountCol, bvCol, bvFilter, filterCol, filterValue])
+  }, [amountCol, bvCol, bvFilter, filters])
 
-  // Distinct waarden voor de gekozen filterkolom (voor het radio-picker lijstje)
-  const filterColValues = useMemo(() => {
-    if (!filterCol) return []
-    return getDistinctColumnValues(filterCol, dataRows, 50)
-  }, [filterCol, dataRows])
+  // Distinct-waarden lookup per gekozen filterkolom — gedeeld tussen alle
+  // filter-rijen via een map zodat we niet per render elke filter los hoeven
+  // te recomputen.
+  const filterColValuesByCol = useMemo(() => {
+    const map = new Map<string, Array<{ value: string; count: number }>>()
+    for (const f of filters) {
+      if (f.col && !map.has(f.col)) {
+        map.set(f.col, getDistinctColumnValues(f.col, dataRows, 50))
+      }
+    }
+    return map
+  }, [filters, dataRows])
+
+  const updateFilter = (index: number, patch: Partial<{ col: string; value: string }>) => {
+    setFilters(prev => prev.map((f, i) => i === index ? { ...f, ...patch } : f))
+  }
+  const addFilter = () => setFilters(prev => [...prev, { col: '', value: '' }])
+  const removeFilter = (index: number) => setFilters(prev => prev.filter((_, i) => i !== index))
+
+  // Alleen actieve filters (beide col + value ingevuld) doorgeven naar compute.
+  const activeFilters = useMemo(
+    () => filters.filter(f => f.col && f.value && f.value.trim()),
+    [filters],
+  )
 
   // Live preview
   const livePreview: ParseResult | null = useMemo(() => {
@@ -138,19 +156,16 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
     try {
       const cfg: GenericImportConfig = {
         amountCol,
-        // bvCol wordt altijd meegegeven; voor single-BV slots fungeert-ie als
-        // filter (niet-matching rijen worden uitgesloten i.p.v. meegeteld)
         bvCol: bvCol || undefined,
         bvFilter: bvFilter || undefined,
-        filterCol: filterCol || undefined,
-        filterValue: filterCol && filterValue ? filterValue : undefined,
+        filters: activeFilters.length > 0 ? activeFilters : undefined,
         excludedRowIndices: step === 4 ? excludedRows : undefined,
       }
       return computeGenericImport(headers, dataRows, slotId, cfg)
     } catch {
       return null
     }
-  }, [step, amountCol, bvCol, bvFilter, filterCol, filterValue, excludedRows, headers, dataRows, slotId, isSingleBv])
+  }, [step, amountCol, bvCol, bvFilter, activeFilters, excludedRows, headers, dataRows, slotId, isSingleBv])
 
   // Alle details voor stap 4 (zonder handmatige exclusions)
   const detailsInline: GenericImportDetail[] = useMemo(() => {
@@ -159,17 +174,14 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
     try {
       const cfg: GenericImportConfig = {
         amountCol,
-        // bvCol wordt altijd meegegeven; voor single-BV slots fungeert-ie als
-        // filter (niet-matching rijen worden uitgesloten i.p.v. meegeteld)
         bvCol: bvCol || undefined,
         bvFilter: bvFilter || undefined,
-        filterCol: filterCol || undefined,
-        filterValue: filterCol && filterValue ? filterValue : undefined,
+        filters: activeFilters.length > 0 ? activeFilters : undefined,
       }
       const r = computeGenericImport(headers, dataRows, slotId, cfg)
       return r.genericImportDetails ?? []
     } catch { return [] }
-  }, [amountCol, bvCol, bvFilter, filterCol, filterValue, headers, dataRows, slotId, isSingleBv])
+  }, [amountCol, bvCol, bvFilter, activeFilters, headers, dataRows, slotId, isSingleBv])
 
   const canAdvance = () => {
     if (step === 1) return !!sheetName
@@ -192,8 +204,7 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
           amountCol,
           bvCol: bvCol || undefined,
           bvFilter: bvFilter || undefined,
-          filterCol: filterCol || undefined,
-          filterValue: filterCol && filterValue ? filterValue : undefined,
+          filters: activeFilters.length > 0 ? activeFilters : undefined,
           excludedRowIndices: excludedRows,
         }
         const r = computeGenericImport(headers, dataRows, slotId, cfg)
@@ -442,64 +453,43 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                   </div>
                 )}
 
-                {/* ── Extra kolom-filter (optioneel) ── */}
-                <FilterColumnPicker
-                  label="Kolom: Extra filter (optioneel)"
-                  helpText={slotId === 'uren_lijst'
-                    ? 'Typisch "Projectfactuuraanvraag status" — alleen rijen met de gekozen waarde (bv. "Niet toegewezen") tellen mee.'
-                    : 'Beperk de meetellende rijen tot één specifieke waarde in een extra kolom.'}
-                  color="var(--purple)"
-                  value={filterCol}
-                  onChange={setFilterCol}
-                  headers={headers}
-                  suggestion={suggested.filterCol}
-                  previewValues={dataRows.slice(0, 3).map(r => String(r[filterCol] ?? ''))}
-                />
-                {filterCol && (
-                  <div style={{ paddingLeft: 12, borderLeft: '2px solid var(--purple)', fontSize: 11 }}>
-                    <div style={{ color: 'var(--t3)', marginBottom: 6 }}>
-                      Alleen rijen waarvan "<strong style={{ color: 'var(--t2)' }}>{filterCol}</strong>" gelijk is aan:
+                {/* ── Extra kolom-filters (AND) — meerdere tegelijk mogelijk ── */}
+                <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: '10px 12px', border: '1px solid var(--bd2)', borderLeftWidth: 3, borderLeftColor: 'var(--purple)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t1)' }}>
+                      Extra kolom-filters (optioneel)
                     </div>
-                    {filterColValues.length === 0 ? (
-                      <div style={{ color: 'var(--t3)', fontStyle: 'italic' }}>
-                        Geen waarden gevonden in deze kolom.
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                        <button
-                          onClick={() => setFilterValue('')}
-                          className={`btn sm${filterValue === '' ? ' primary' : ' ghost'}`}
-                          style={{ fontSize: 10 }}
-                        >
-                          (geen filter — alle waarden)
-                        </button>
-                        {filterColValues.slice(0, 20).map(({ value, count }) => {
-                          const label = value === '' ? '(leeg)' : value
-                          const active = filterValue.trim().toLowerCase() === value.trim().toLowerCase() && filterValue !== ''
-                          return (
-                            <button
-                              key={value || '__empty__'}
-                              onClick={() => setFilterValue(value)}
-                              className={`btn sm${active ? ' primary' : ' ghost'}`}
-                              style={{ fontSize: 10 }}
-                              title={`${count} rij(en) met deze waarde`}
-                            >
-                              {label.slice(0, 40)} <span style={{ opacity: 0.6, marginLeft: 4 }}>({count})</span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
-                    <input
-                      type="text"
-                      placeholder="of typ een exacte waarde..."
-                      value={filterValue}
-                      onChange={e => setFilterValue(e.target.value)}
-                      className="ohw-inp"
-                      style={{ width: 200, fontSize: 10 }}
-                    />
+                    <span style={{ fontSize: 9, color: 'var(--t3)' }}>
+                      {filters.length === 0 ? 'geen' : `${filters.length} actief · AND-logica`}
+                    </span>
+                    <button
+                      onClick={addFilter}
+                      className="btn sm ghost"
+                      style={{ fontSize: 10, marginLeft: 'auto' }}
+                    >
+                      + Filter toevoegen
+                    </button>
                   </div>
-                )}
+                  <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 6 }}>
+                    Een rij telt alleen mee als <strong>alle</strong> filters matchen. Bv. BV-kolom = "Consultancy B.V." <strong>én</strong> Projectfactuuraanvraag status = "Niet toegewezen".
+                  </div>
+                  {filters.length === 0 && (
+                    <div style={{ fontSize: 10, color: 'var(--t3)', fontStyle: 'italic', padding: '6px 0' }}>
+                      Geen filters actief — alle rijen met geldig bedrag tellen mee.
+                    </div>
+                  )}
+                  {filters.map((f, idx) => (
+                    <FilterRow
+                      key={idx}
+                      filter={f}
+                      headers={headers}
+                      dataRows={dataRows}
+                      distinctValues={filterColValuesByCol.get(f.col) ?? []}
+                      onChange={(patch) => updateFilter(idx, patch)}
+                      onRemove={() => removeFilter(idx)}
+                    />
+                  ))}
+                </div>
               </div>
 
               {/* Live preview */}
@@ -557,9 +547,9 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                       <BucketTag label="Leeg / 0" value={livePreview.missingHoursCounts.emptyOrZero} color="var(--t3)" />
                       <BucketTag label="Totaalregels" value={livePreview.missingHoursCounts.totalRowsSkipped} color="var(--t3)" />
                       {bvFilter && <BucketTag label={`Filter "${bvFilter}"`} value={livePreview.missingHoursCounts.bedrijfFiltered} color="var(--amber)" />}
-                      {filterCol && filterValue && (livePreview.missingHoursCounts.filterColumnSkipped ?? 0) > 0 && (
+                      {activeFilters.length > 0 && (livePreview.missingHoursCounts.filterColumnSkipped ?? 0) > 0 && (
                         <BucketTag
-                          label={`Kolomfilter "${filterCol}"`}
+                          label={`Kolomfilters (${activeFilters.length})`}
                           value={livePreview.missingHoursCounts.filterColumnSkipped ?? 0}
                           color="var(--purple)"
                         />
@@ -910,42 +900,87 @@ function BvColumnPicker({ label, helpText, color, value, onChange, headers, sugg
   )
 }
 
-// ── FilterColumnPicker: dropdown voor een extra kolom-filter (optioneel) ──
-interface FilterPickerProps {
-  label: string
-  helpText: string
-  color: string
-  value: string
-  onChange: (v: string) => void
+// ── FilterRow: één filter-regel in de lijst met kolom + waarde picker ──
+interface FilterRowProps {
+  filter: { col: string; value: string }
   headers: string[]
-  suggestion: string
-  previewValues: string[]
+  dataRows: Record<string, unknown>[]
+  distinctValues: Array<{ value: string; count: number }>
+  onChange: (patch: Partial<{ col: string; value: string }>) => void
+  onRemove: () => void
 }
-function FilterColumnPicker({ label, helpText, color, value, onChange, headers, suggestion, previewValues }: FilterPickerProps) {
+function FilterRow({ filter, headers, dataRows, distinctValues, onChange, onRemove }: FilterRowProps) {
+  const previewValues = filter.col
+    ? dataRows.slice(0, 3).map(r => String(r[filter.col] ?? ''))
+    : []
   return (
-    <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: '10px 12px', border: '1px solid var(--bd2)', borderLeftWidth: 3, borderLeftColor: color }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t1)' }}>{label}</div>
-        {suggestion && suggestion === value && (
-          <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, background: 'var(--bd-green)', color: 'var(--green)', fontWeight: 700 }}>AUTO</span>
-        )}
+    <div style={{
+      background: 'var(--bg2)', borderRadius: 6, padding: '8px 10px',
+      border: '1px solid var(--bd2)', borderLeftWidth: 2, borderLeftColor: 'var(--purple)',
+      marginTop: 6,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <select
+          value={filter.col}
+          onChange={e => onChange({ col: e.target.value, value: '' })}
+          style={{
+            background: 'var(--bg1)', border: '1px solid var(--bd3)', borderRadius: 5,
+            color: 'var(--t1)', fontSize: 11, padding: '4px 8px', flex: 1,
+            outline: 'none', cursor: 'pointer',
+          }}
+        >
+          <option value="">— kies een kolom —</option>
+          {headers.map(h => <option key={h} value={h}>{h}</option>)}
+        </select>
+        <button
+          onClick={onRemove}
+          className="btn sm ghost"
+          style={{ fontSize: 10, color: 'var(--red)', padding: '3px 8px' }}
+          title="Verwijder filter"
+        >✕</button>
       </div>
-      <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 6 }}>{helpText}</div>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{ background: 'var(--bg1)', border: '1px solid var(--bd3)', borderRadius: 5, color: 'var(--t1)', fontSize: 11, padding: '5px 8px', width: '100%', outline: 'none', cursor: 'pointer' }}
-      >
-        <option value="">— geen filter (alle rijen) —</option>
-        {headers.map(h => {
-          const suffix = suggestion === h ? '   (voorstel)' : ''
-          return <option key={h} value={h}>{h}{suffix}</option>
-        })}
-      </select>
-      {value && (
-        <div style={{ marginTop: 5, fontSize: 10, color: 'var(--t3)', fontFamily: 'var(--mono)' }}>
-          Voorbeeldwaarden: {previewValues.filter(Boolean).slice(0, 3).map(v => `"${v.slice(0, 22)}"`).join(' · ') || '—'}
-        </div>
+      {filter.col && (
+        <>
+          <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 4 }}>
+            Exacte waarde in "<strong style={{ color: 'var(--t2)' }}>{filter.col}</strong>":
+          </div>
+          {distinctValues.length === 0 ? (
+            <div style={{ color: 'var(--t3)', fontStyle: 'italic', fontSize: 10 }}>
+              Geen waarden gevonden in deze kolom.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
+              {distinctValues.slice(0, 20).map(({ value, count }) => {
+                const label = value === '' ? '(leeg)' : value
+                const active = filter.value.trim().toLowerCase() === value.trim().toLowerCase() && filter.value !== ''
+                return (
+                  <button
+                    key={value || '__empty__'}
+                    onClick={() => onChange({ value })}
+                    className={`btn sm${active ? ' primary' : ' ghost'}`}
+                    style={{ fontSize: 10 }}
+                    title={`${count} rij(en) met deze waarde`}
+                  >
+                    {label.slice(0, 40)} <span style={{ opacity: 0.6, marginLeft: 4 }}>({count})</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <input
+            type="text"
+            placeholder="of typ een exacte waarde..."
+            value={filter.value}
+            onChange={e => onChange({ value: e.target.value })}
+            className="ohw-inp"
+            style={{ width: 200, fontSize: 10 }}
+          />
+          {previewValues.length > 0 && (
+            <div style={{ marginTop: 4, fontSize: 10, color: 'var(--t3)', fontFamily: 'var(--mono)' }}>
+              Voorbeeld: {previewValues.filter(Boolean).slice(0, 3).map(v => `"${v.slice(0, 22)}"`).join(' · ') || '—'}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

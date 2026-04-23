@@ -1770,12 +1770,15 @@ export interface GenericImportConfig {
   bvCol?: string
   /** Alleen relevant voor multi-BV slots: beperk output tot één BV */
   bvFilter?: BvId
-  /** Optionele extra kolom-filter: alleen rijen waarvan de cel-waarde in
-   *  `filterCol` (case-insensitive/trim) gelijk is aan `filterValue` tellen
-   *  mee. Bedoeld voor bv. uren_lijst waar alleen rijen met
-   *  "Projectfactuuraanvraag status = Niet toegewezen" meegerekend mogen
-   *  worden. Leeg laten = geen filter. */
+  /** Extra kolom-filters (AND): een rij telt alleen mee als elke filter
+   *  in deze lijst matcht. Bedoeld voor bv. D-lijst met zowel een BV-filter
+   *  ("The People Group | Consultancy B.V.") als een factuuraanvraag-filter
+   *  ("Niet toegewezen"). Leeg / weggelaten = geen extra filters. */
+  filters?: Array<{ col: string; value: string }>
+  /** @deprecated — backwards-compatible single-filter fallback. Gebruik
+   *  `filters` voor nieuwe code. Wordt intern genormaliseerd naar `filters`. */
   filterCol?: string
+  /** @deprecated — zie `filterCol`. */
   filterValue?: string
   excludedRowIndices?: Set<number>
 }
@@ -1799,12 +1802,10 @@ export function suggestGenericImportColumns(
   amountCol: string
   bvCol: string
   bvFilterSuggestion: BvId | ''
-  /** Voor slots zoals uren_lijst: suggereer de "Projectfactuuraanvraag
-   *  status"-kolom als die bestaat. Leeg = geen suggestie. */
-  filterCol: string
-  /** Default filterwaarde (bv. "Niet toegewezen") alleen als filterCol
-   *  daadwerkelijk zo'n waarde bevat in de sample-data. */
-  filterValue: string
+  /** Voorgestelde extra kolom-filters (AND). Kan 0, 1 of meerdere filters
+   *  bevatten. Voor D-lijst: BV-kolom + factuuraanvraag. Voor uren_lijst:
+   *  factuuraanvraag. */
+  filters: Array<{ col: string; value: string }>
 } {
   const slotConfig = SLOT_CONFIGS[slotId] ?? SLOT_CONFIGS.factuurvolume
   const sample = dataRows.length > 150 ? dataRows.slice(0, 150) : dataRows
@@ -1822,42 +1823,41 @@ export function suggestGenericImportColumns(
     bvFilterSuggestion = slotConfig.targetBv
   }
 
-  // Kolom-filter suggestie: voor uren_lijst is het standaard scenario dat
-  // alleen "Niet toegewezen" mag meetellen. Matchen we op header-keyword
-  // "factuuraanvraag" of "projectfactuuraanvraag".
-  let filterCol = ''
-  let filterValue = ''
-  if (slotId === 'uren_lijst') {
-    const normalize = (s: string) => s.toLowerCase().replace(/[\s\-_.]+/g, '')
-    const found = headers.find(h => {
-      const n = normalize(h)
-      return n.includes('factuuraanvraag') || n.includes('projectfactuuraanvraag')
+  // Verzamel alle voorgestelde filters. Voor D-lijst worden er zelfs twee
+  // voorgesteld: BV-filter + factuuraanvraag-filter.
+  const filters: Array<{ col: string; value: string }> = []
+  const normalize = (s: string) => s.toLowerCase().replace(/[\s\-_.]+/g, '')
+
+  // Voorstel 1: Projectfactuuraanvraag-status = "Niet toegewezen".
+  // Van toepassing op alle slots met zo'n kolom — typisch uren_lijst en
+  // d_lijst, maar ook conceptfacturen/factuurvolume als die kolom bestaat.
+  const factuuraanvraagCol = headers.find(h => {
+    const n = normalize(h)
+    return n.includes('factuuraanvraag') || n.includes('projectfactuuraanvraag')
+  })
+  if (factuuraanvraagCol) {
+    const hasNietToegewezen = sample.some(r =>
+      String(r[factuuraanvraagCol] ?? '').trim().toLowerCase() === 'niet toegewezen'
+    )
+    filters.push({
+      col: factuuraanvraagCol,
+      value: hasNietToegewezen ? 'Niet toegewezen' : '',
     })
-    if (found) {
-      filterCol = found
-      const hasNietToegewezen = sample.some(r =>
-        String(r[found] ?? '').trim().toLowerCase() === 'niet toegewezen'
-      )
-      if (hasNietToegewezen) filterValue = 'Niet toegewezen'
-    }
   }
 
-  // Voor single-BV slots (d_lijst, conceptfacturen) die de fuzzy `detectBv`
-  // niet betrouwbaar op kostenplaats-codes (C00001 / P15000) kunnen uitvoeren:
-  // suggereer de BV-kolom als STRICT filter-kolom. Zo ziet de gebruiker de
-  // distinct waardes in de UI en kan zelf exact filteren. Als we ook nog een
-  // waarde kunnen matchen aan target-BV, vullen we die alvast als default.
-  if (!filterCol && slotConfig.targetBv && bvCol) {
+  // Voorstel 2: voor single-BV slots (d_lijst, conceptfacturen) die de fuzzy
+  // `detectBv` niet betrouwbaar op kostenplaats-codes (C00001 / P15000)
+  // kunnen uitvoeren: suggereer de BV-kolom als STRICT filter-kolom. Zo ziet
+  // de user distinct values in de UI en kan zelf exact filteren. Als we ook
+  // nog een waarde kunnen matchen aan target-BV, vullen we die alvast in.
+  if (slotConfig.targetBv && bvCol && !filters.some(f => f.col === bvCol)) {
     const targetBv = slotConfig.targetBv
-    filterCol = bvCol   // altijd voorstellen — user ziet distinct list
     const distinct = new Map<string, number>()
     for (const row of sample) {
       const raw = String(row[bvCol] ?? '').trim()
       if (!raw) continue
       distinct.set(raw, (distinct.get(raw) ?? 0) + 1)
     }
-    // Pak de meest-voorkomende waarde die detectBv als target-BV classificeert
-    // als default filterwaarde. Anders laat default leeg (user kiest zelf).
     let bestValue = ''
     let bestCount = 0
     for (const [val, count] of distinct.entries()) {
@@ -1866,10 +1866,10 @@ export function suggestGenericImportColumns(
         bestCount = count
       }
     }
-    if (bestValue) filterValue = bestValue
+    filters.push({ col: bvCol, value: bestValue })
   }
 
-  return { amountCol, bvCol, bvFilterSuggestion, filterCol, filterValue }
+  return { amountCol, bvCol, bvFilterSuggestion, filters }
 }
 
 /** Voor elke kolom: aantal rijen waarvoor parseAmountCell een numerieke
@@ -1936,16 +1936,23 @@ export function computeGenericImport(
   let totalRowsSkipped = 0    // "Totaal"/"Subtotaal"/"Eindtotaal" rijen
   const totalRowLabels: string[] = []  // eerste paar gedetecteerde total labels (voor diagnostiek)
 
-  // Normaliseer filter-waarde één keer voor efficiënte vergelijking per rij
-  const filterActive = !!(cfg.filterCol && cfg.filterValue && cfg.filterValue.trim())
-  const filterValueNorm = filterActive ? cfg.filterValue!.trim().toLowerCase() : ''
+  // Bouw de actieve filter-lijst uit nieuwe `filters` array + legacy
+  // `filterCol`/`filterValue` fallback. Normaliseer één keer per filter.
+  const rawFilters: Array<{ col: string; value: string }> = []
+  if (cfg.filters) rawFilters.push(...cfg.filters)
+  if (cfg.filterCol && cfg.filterValue) rawFilters.push({ col: cfg.filterCol, value: cfg.filterValue })
+  const activeFilters = rawFilters
+    .filter(f => f.col && f.value && f.value.trim())
+    .map(f => ({ col: f.col, valueNorm: f.value.trim().toLowerCase() }))
 
   warnings.push(
     `Configuratie slot "${slotId}": bedrag="${cfg.amountCol}"` +
     (cfg.bvCol ? `, bv="${cfg.bvCol}"` : '') +
     (slotConfig.targetBv ? `, target-BV=${slotConfig.targetBv}` : '') +
     (cfg.bvFilter ? `, filter=${cfg.bvFilter}` : '') +
-    (filterActive ? `, extra-filter="${cfg.filterCol}"="${cfg.filterValue}"` : '')
+    (activeFilters.length > 0
+      ? `, extra-filters=[${activeFilters.map(f => `"${f.col}"="${f.valueNorm}"`).join(', ')}]`
+      : '')
   )
   warnings.push(`Data: ${dataRows.length} rijen, ${headers.length} kolommen`)
 
@@ -1969,12 +1976,15 @@ export function computeGenericImport(
       continue
     }
 
-    // Extra kolom-filter (bv. "Projectfactuuraanvraag status = Niet toegewezen").
-    // Toegepast vóór bedrag-parse zodat gefilterde rijen niet in skippedCount
-    // terechtkomen wanneer ze toevallig geen parseerbaar bedrag hebben.
-    if (filterActive) {
-      const rawFilterVal = String(row[cfg.filterCol!] ?? '').trim().toLowerCase()
-      if (rawFilterVal !== filterValueNorm) { filterColumnSkipped++; continue }
+    // Extra kolom-filters (AND): elke filter moet matchen anders skip. Vóór
+    // de bedrag-parse zodat gefilterde rijen niet in skippedCount belanden.
+    if (activeFilters.length > 0) {
+      let passedAll = true
+      for (const f of activeFilters) {
+        const cell = String(row[f.col] ?? '').trim().toLowerCase()
+        if (cell !== f.valueNorm) { passedAll = false; break }
+      }
+      if (!passedAll) { filterColumnSkipped++; continue }
     }
 
     const rawAmountVal = row[cfg.amountCol]
@@ -2059,7 +2069,8 @@ export function computeGenericImport(
     warnings.push(`${bvFilteredOut} rij(en) weggefilterd door BV-filter (${bvLabel})`)
   }
   if (filterColumnSkipped > 0) {
-    warnings.push(`${filterColumnSkipped} rij(en) weggefilterd door kolomfilter ("${cfg.filterCol}" = "${cfg.filterValue}")`)
+    const labels = activeFilters.map(f => `"${f.col}" = "${f.valueNorm}"`).join(' AND ')
+    warnings.push(`${filterColumnSkipped} rij(en) weggefilterd door kolomfilters: ${labels}`)
   }
   if (manualExclusions > 0) warnings.push(`${manualExclusions} handmatig uitgesloten`)
 
