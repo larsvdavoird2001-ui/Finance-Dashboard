@@ -158,7 +158,7 @@ export function MaandTab({ filter: _filter }: Props) {
   const navigateTo = useNavStore(s => s.navigateTo)
   useEffect(() => {
     const target = navConsume()
-    if (target?.section === 'import') {
+    if (target?.section === 'import' && target.month && target.slotId) {
       setActiveSection('import')
       setUploadMonth(target.month)
       setHighlightSlot(target.slotId)
@@ -284,14 +284,10 @@ export function MaandTab({ filter: _filter }: Props) {
   const totAmortisatie = BVS.reduce((a, bv) => a + amortisatie(bv), 0)
   const totEbitda      = BVS.reduce((a, bv) => a + ebitda(bv), 0)
   const totEbit        = BVS.reduce((a, bv) => a + ebit(bv), 0)
-  const totBudgetEbitda     = BVS.reduce((a, bv) => a + budgetEbitda(bv), 0)
-  const totBudgetEbit       = BVS.reduce((a, bv) => a + budgetEbit(bv), 0)
-  const totBudgetBrutomarge = BVS.reduce((a, bv) => a + budgetBrutomarge(bv), 0)
-  const totBudgetNetRev     = BVS.reduce((a, bv) => a + budgetNetRevenue(bv), 0)
-  const totBudgetDirCosts   = BVS.reduce((a, bv) => a + budgetDirCosts(bv), 0)
-  const totBudgetOpKosten   = BVS.reduce((a, bv) => a + budgetOpKosten(bv), 0)
-  const totBudgetAmortisatie = BVS.reduce((a, bv) => a + budgetAmortisatie(bv), 0)
-  const hasBudgetData = totBudgetEbitda !== 0 || totBudgetEbit !== 0 || totBudgetNetRev !== 0
+  const totBudgetEbitda = BVS.reduce((a, bv) => a + budgetEbitda(bv), 0)
+  const totBudgetEbit   = BVS.reduce((a, bv) => a + budgetEbit(bv), 0)
+  const totBudgetNetRev = BVS.reduce((a, bv) => a + budgetNetRevenue(bv), 0)
+  const hasBudgetData   = totBudgetEbitda !== 0 || totBudgetEbit !== 0 || totBudgetNetRev !== 0
 
   // ── Validation ──────────────────────────────────────────────────────────
   const warnings: string[] = []
