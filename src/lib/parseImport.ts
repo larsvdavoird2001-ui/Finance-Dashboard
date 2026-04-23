@@ -242,6 +242,10 @@ const TOTAL_LABEL_STARTSWITH_PATTERNS = [
   /^(netto|bruto)\s+resultaat\s+\S/i,
   /^samenvatting\s+\S/i,
   /^saldo\s+/i,                                                 // "Saldo" of "Saldo per BV"
+  /^som\s+\S/i,                                                 // "Som per BV", "Som van ..."
+  /^generaal\s+\S/i,                                            // "Generaal totaal ..."
+  /^eindstand\s+\S/i,
+  /^afsluitstand\s+\S/i,
 ]
 
 /** Is een cel-waarde een totaal-/resultaat-label (strict)? */
@@ -272,28 +276,39 @@ export function isLikelyTotalRow(row: Record<string, unknown>): boolean {
   // Tellen: aantal niet-lege cellen + cellen met totaal-keyword prefix
   let nonEmpty = 0
   let numericOnlyCount = 0
+  let textCount = 0           // niet-lege, niet-numerieke cellen
   let hasStartsWithTotal = false
+  let totalLabelLen = 0       // lengte van de eerste totaal-label-cel (voor length-check)
   for (const val of values) {
     if (val === null || val === undefined) continue
     const s = String(val).trim()
     if (!s) continue
     nonEmpty++
-    if (parseDutchNumber(s) !== null) numericOnlyCount++
+    const isNum = parseDutchNumber(s) !== null
+    if (isNum) numericOnlyCount++
+    else textCount++
     if (TOTAL_LABEL_STARTSWITH_PATTERNS.some(p => p.test(s))) {
       hasStartsWithTotal = true
+      if (totalLabelLen === 0) totalLabelLen = s.length
     }
   }
 
   // Signaal B: startsWith-match + rij heeft niet heel veel niet-lege cellen
   // (detail-rijen in SAP exports hebben typisch 8+ kolommen gevuld;
-  // subtotaal-rijen hebben slechts label + enkele getallen). Drempel van 7
-  // laat typische SAP subtotaal-rijen (met datum/maand/referentie cellen)
-  // vallen zonder detail-rijen te raken.
-  if (hasStartsWithTotal && nonEmpty <= 7) return true
+  // subtotaal-rijen hebben slechts label + enkele getallen). Drempel
+  // verhoogd naar 12 om ook brede SAP subtotaal-rijen te vangen (met
+  // datum/ref/metadata-cellen) zonder detail-rijen te raken.
+  if (hasStartsWithTotal && nonEmpty <= 12) return true
 
   // Signaal C: "sparse" rij — ≤ 3 non-empty cellen, waarvan ≥ 1 numeriek en
   // een andere begint met totaal/subtotaal/...
   if (nonEmpty <= 3 && numericOnlyCount >= 1 && hasStartsWithTotal) return true
+
+  // Signaal D: aggregate-rij — EXACT 1 tekst-cel die met "Totaal/Subtotaal/
+  // Resultaat/…" begint, alle andere non-empty cellen zijn numeriek, en de
+  // label-cel is kort (≤ 40 tekens — zodat project-beschrijvingen als
+  // "Totaal Glaspoort fase 1 - verder uit te zoeken…" niet wegvallen).
+  if (hasStartsWithTotal && textCount === 1 && numericOnlyCount >= 1 && totalLabelLen <= 40) return true
 
   return false
 }
