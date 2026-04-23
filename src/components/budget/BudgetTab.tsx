@@ -11,6 +11,8 @@ import type { EntityName } from '../../data/plData'
 import { fmt } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
+import { useFteStore } from '../../store/useFteStore'
+import { useNavStore } from '../../store/useNavStore'
 
 type ColType = 'actual' | 'budget' | 'delta'
 
@@ -198,8 +200,261 @@ export function BudgetTab({ filter }: Props) {
     )
   }
 
+  // ── Variance analyse: auto-gegenereerde redenen + koppelingen ──────────
+  // Bereken per component (netto_omzet, directe_kosten, operationele_kosten,
+  // amortisatie, ebitda, ebit) het verschil tov budget, sorteer op impact,
+  // en geef per driver een hypothese over de oorzaak (met FTE-link waar
+  // relevant).
+  const fteEntries = useFteStore(s => s.entries)
+  const navigateTo = useNavStore(s => s.navigateTo)
+
+  const deltaOf = (key: string) => (totalActuals[key] ?? 0) - (totalBudget[key] ?? 0)
+  const varianceDrivers = [
+    {
+      key: 'netto_omzet',
+      label: 'Netto-omzet',
+      delta: deltaOf('netto_omzet'),
+      isCost: false,
+    },
+    {
+      key: 'directe_kosten',
+      label: 'Directe kosten',
+      delta: deltaOf('directe_kosten'),
+      isCost: true,
+    },
+    {
+      key: 'operationele_kosten',
+      label: 'Operationele kosten',
+      delta: deltaOf('operationele_kosten'),
+      isCost: true,
+    },
+    {
+      key: 'amortisatie_afschrijvingen',
+      label: 'Amortisatie & afschrijvingen',
+      delta: deltaOf('amortisatie_afschrijvingen'),
+      isCost: true,
+    },
+  ]
+  // "Gunstig" = groen. Voor kosten-regels (waarde is negatief in P&L) betekent
+  // een NEGATIEVE delta (lagere kosten dan budget) gunstig.
+  const isFavourable = (delta: number, isCost: boolean) => isCost ? delta < 0 : delta > 0
+  const deltaEbitda = deltaOf('ebitda')
+  const deltaEbit   = deltaOf('ebit')
+  const deltaBrut   = deltaOf('brutomarge')
+
+  // Sorteer drivers op impact op EBITDA (absoluut). Kosten-delta's gaan IN op
+  // EBITDA met omgekeerd teken (lager = gunstig), daarom nemen we -delta als
+  // EBITDA-impact voor kosten.
+  const driversWithImpact = varianceDrivers
+    .map(d => ({ ...d, ebitdaImpact: d.isCost ? -d.delta : d.delta }))
+    .sort((a, b) => Math.abs(b.ebitdaImpact) - Math.abs(a.ebitdaImpact))
+
+  // FTE: check of er een relevante FTE-afwijking is per BV over de periode
+  // van currentPeriod. Als currentPeriod.month → één maand, anders gemiddeld
+  // over ytdMonths.
+  const fteMonthsForPeriod = currentPeriod.month
+    ? [currentPeriod.month]
+    : (currentPeriod.ytdMonths ?? [])
+  const fteDelta = (() => {
+    const bvs: BvId[] = visibleEntities.filter(e => e !== 'Holdings') as BvId[]
+    let sumActual = 0
+    let sumBudget = 0
+    let anyData = false
+    for (const bv of bvs) {
+      for (const m of fteMonthsForPeriod) {
+        const e = fteEntries.find(f => f.bv === bv && f.month === m)
+        if (!e) continue
+        if (e.fte != null) { sumActual += e.fte; anyData = true }
+        if (e.fteBudget != null) sumBudget += e.fteBudget
+      }
+    }
+    if (!anyData) return null
+    return { actual: sumActual, budget: sumBudget, delta: sumActual - sumBudget }
+  })()
+
+  // Bepaal hoofdboodschap + hypothese-lijst
+  const reasonFor = (d: typeof driversWithImpact[number]): string => {
+    const fav = isFavourable(d.delta, d.isCost)
+    if (d.key === 'netto_omzet') {
+      return fav ? 'Meer omzet gerealiseerd dan begroot — duidt op sterkere vraag of hogere tarieven.'
+                 : 'Minder omzet dan begroot — mogelijk lagere bezetting, uitgestelde projecten of prijsdruk.'
+    }
+    if (d.key === 'directe_kosten') {
+      return fav ? 'Lagere directe kosten dan begroot — efficiëntere inzet of lagere inkoopkosten.'
+                 : 'Hogere directe kosten dan begroot — mogelijk meer inhuur, inflatie op materialen of onverwachte overwerk.'
+    }
+    if (d.key === 'operationele_kosten') {
+      if (fteDelta && fteDelta.delta < -0.5) {
+        return fav
+          ? `Lagere OPEX — loopt samen met lagere bezetting (Δ FTE ${fteDelta.delta.toFixed(1)}). Kostenreductie voornamelijk door personele onderbezetting.`
+          : `Hogere OPEX ondanks lagere FTE (Δ ${fteDelta.delta.toFixed(1)}) — duidt op niet-personele lastenverhogingen (ICT, huur, marketing).`
+      }
+      if (fteDelta && fteDelta.delta > 0.5) {
+        return fav
+          ? `Lagere OPEX ondanks hogere bezetting (Δ FTE +${fteDelta.delta.toFixed(1)}) — operationele efficiëntieverbetering.`
+          : `Hogere OPEX — mogelijk verklaard door hogere bezetting (Δ FTE +${fteDelta.delta.toFixed(1)}).`
+      }
+      return fav ? 'Lagere operationele kosten dan begroot — efficiëntiewinst of uitgestelde uitgaven.'
+                 : 'Hogere operationele kosten dan begroot — onderzoek inflatie, marketing, ICT of algemene kosten.'
+    }
+    if (d.key === 'amortisatie_afschrijvingen') {
+      return fav ? 'Lagere afschrijvingen dan begroot — uitgestelde investeringen of langere afschrijvingstermijn.'
+                 : 'Hogere afschrijvingen dan begroot — extra investeringen of kortere termijn.'
+    }
+    return ''
+  }
+
   return (
     <div className="page">
+      {/* ── Analyse & redenen card — top ─────────────────────────── */}
+      <div className="card" style={{ borderLeft: `3px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--amber)'}` }}>
+        <div className="card-hdr">
+          <span className="card-title">Analyse & redenen — {periodLabel}</span>
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
+            {filter.bv === 'all' ? 'Alle BV\'s' : filter.bv} · automatische interpretatie van verschillen
+          </span>
+        </div>
+        <div style={{ padding: '14px 18px' }}>
+
+          {/* Top-line: Δ EBITDA samengevat */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+            <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: '1px solid var(--bd2)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
+                Δ Brutomarge
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: deltaBrut >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {deltaBrut >= 0 ? '+' : ''}{fmt(deltaBrut)}
+              </div>
+            </div>
+            <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: `1px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--red)'}` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
+                Δ EBITDA
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)', color: deltaEbitda >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {deltaEbitda >= 0 ? '+' : ''}{fmt(deltaEbitda)}
+                <span style={{ fontSize: 11, marginLeft: 6, color: 'var(--t3)', fontWeight: 400 }}>
+                  {(totalBudget['ebitda'] ?? 0) !== 0 ? `(${deltaEbitda >= 0 ? '+' : ''}${(deltaEbitda / Math.abs(totalBudget['ebitda']) * 100).toFixed(1)}%)` : ''}
+                </span>
+              </div>
+            </div>
+            <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: '1px solid var(--bd2)' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
+                Δ EBIT
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: deltaEbit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {deltaEbit >= 0 ? '+' : ''}{fmt(deltaEbit)}
+              </div>
+            </div>
+          </div>
+
+          {/* Kernboodschap */}
+          <div style={{
+            padding: '10px 12px', borderRadius: 7, marginBottom: 14,
+            background: deltaEbitda >= 0 ? 'var(--bd-green)' : 'var(--bd-amber)',
+            border: `1px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--amber)'}`,
+            fontSize: 12, color: 'var(--t1)',
+          }}>
+            <strong>{deltaEbitda >= 0 ? '▲' : '▼'} EBITDA {deltaEbitda >= 0 ? 'boven' : 'onder'} budget</strong>
+            {' — '}
+            De grootste driver van dit resultaat is <strong>{driversWithImpact[0].label.toLowerCase()}</strong>
+            {' ('}
+            <span style={{ fontFamily: 'var(--mono)' }}>{driversWithImpact[0].delta >= 0 ? '+' : ''}{fmt(driversWithImpact[0].delta)}</span>
+            {' → EBITDA-impact '}
+            <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: driversWithImpact[0].ebitdaImpact >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              {driversWithImpact[0].ebitdaImpact >= 0 ? '+' : ''}{fmt(driversWithImpact[0].ebitdaImpact)}
+            </span>
+            {').'}
+          </div>
+
+          {/* Driver-lijst met redenen */}
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>
+            Verschillen per component (gesorteerd op EBITDA-impact)
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {driversWithImpact.map(d => {
+              const fav = isFavourable(d.delta, d.isCost)
+              const reason = reasonFor(d)
+              const absImpact = Math.abs(d.ebitdaImpact)
+              const maxImpact = Math.max(...driversWithImpact.map(x => Math.abs(x.ebitdaImpact)), 1)
+              const barPct = (absImpact / maxImpact * 100).toFixed(0)
+              return (
+                <div key={d.key} style={{
+                  padding: '8px 10px', borderRadius: 6,
+                  background: 'var(--bg2)', border: '1px solid var(--bd)',
+                  display: 'grid', gridTemplateColumns: '180px 1fr 140px', gap: 10, alignItems: 'center',
+                }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t1)' }}>{d.label}</div>
+                    <div style={{ fontSize: 9, color: 'var(--t3)', marginTop: 1 }}>
+                      actuals: <span style={{ fontFamily: 'var(--mono)' }}>{fmt(totalActuals[d.key] ?? 0)}</span> · budget: <span style={{ fontFamily: 'var(--mono)' }}>{fmt(totalBudget[d.key] ?? 0)}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--t2)', lineHeight: 1.4 }}>{reason}</div>
+                    <div style={{ marginTop: 4, height: 3, background: 'var(--bg3)', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${barPct}%`, background: fav ? 'var(--green)' : 'var(--red)', transition: 'width 0.3s' }} />
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--mono)', color: fav ? 'var(--green)' : 'var(--red)' }}>
+                      {d.delta >= 0 ? '+' : ''}{fmt(d.delta)}
+                    </div>
+                    <div style={{ fontSize: 9, color: 'var(--t3)', marginTop: 1 }}>
+                      EBITDA-impact: <span style={{ fontWeight: 600, color: d.ebitdaImpact >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {d.ebitdaImpact >= 0 ? '+' : ''}{fmt(d.ebitdaImpact)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* FTE-koppeling — als er FTE-data is voor deze periode */}
+          {fteDelta && (
+            <div style={{
+              marginTop: 12, padding: '10px 12px', borderRadius: 7,
+              background: 'var(--bd-blue)', border: '1px solid var(--blue)',
+              fontSize: 11, color: 'var(--t1)', lineHeight: 1.5,
+              display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap',
+            }}>
+              <span style={{ fontSize: 16 }}>👥</span>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <strong>FTE-koppeling</strong>
+                {' — '}
+                Bezetting actuals: <span style={{ fontFamily: 'var(--mono)' }}>{fteDelta.actual.toFixed(1)}</span>,
+                budget: <span style={{ fontFamily: 'var(--mono)' }}>{fteDelta.budget.toFixed(1)}</span>,
+                <strong style={{ marginLeft: 4, color: fteDelta.delta <= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--mono)' }}>
+                  Δ {fteDelta.delta >= 0 ? '+' : ''}{fteDelta.delta.toFixed(1)}
+                </strong>
+                {Math.abs(fteDelta.delta) > 0.5 && (
+                  <> — {fteDelta.delta < 0
+                    ? 'onderbezetting t.o.v. plan; een deel van de OPEX/salariskostenreductie is hieraan toe te schrijven.'
+                    : 'overschrijding van bezetting; directe en indirecte personeelskosten mogelijk hoger dan begroot.'}</>
+                )}
+              </div>
+              <button
+                onClick={() => navigateTo({ tab: 'maand', section: 'fte' })}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--blue)', fontSize: 11, fontWeight: 600,
+                  textDecoration: 'underline', textDecorationStyle: 'dotted',
+                  textUnderlineOffset: 3, padding: 0,
+                }}
+              >
+                → FTE tab
+              </button>
+            </div>
+          )}
+
+          {/* Hint-regel */}
+          <div style={{ marginTop: 10, fontSize: 10, color: 'var(--t3)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <span>💡 <strong>Lees-richtlijn:</strong> groen = gunstig voor EBITDA (meer omzet OF minder kosten). Voor kosten-regels wordt het teken automatisch omgedraaid.</span>
+            <span>Bekijk de details in de tabel hieronder.</span>
+          </div>
+        </div>
+      </div>
+
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         {/* Period buttons */}

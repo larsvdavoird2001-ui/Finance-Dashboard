@@ -1895,6 +1895,94 @@ export function MaandTab({ filter: _filter }: Props) {
               </div>
             )}
 
+            {/* ── EBITDA summary bar — actuals, budget, Δ prominent ──── */}
+            {hasBudgetData && (
+              <div className="card">
+                <div className="card-hdr">
+                  <span className="card-title">EBITDA {month} — samenvatting vs budget</span>
+                </div>
+                <div style={{ padding: '14px 18px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+                  {/* Actuals */}
+                  <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg3)', border: '1px solid var(--bd2)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>
+                      Actuals
+                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)', color: totEbitda >= 0 ? 'var(--t1)' : 'var(--red)' }}>
+                      {fmt(totEbitda)}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>
+                      {totNetRev > 0 ? `${(totEbitda / totNetRev * 100).toFixed(1)}% van netto-omzet` : '—'}
+                    </div>
+                  </div>
+                  {/* Budget */}
+                  <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg3)', border: '1px solid var(--bd2)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>
+                      Budget
+                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--t2)' }}>
+                      {fmt(totBudgetEbitda)}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>
+                      {totBudgetNetRev > 0 ? `${(totBudgetEbitda / totBudgetNetRev * 100).toFixed(1)}% van begrote omzet` : '—'}
+                    </div>
+                  </div>
+                  {/* Delta */}
+                  {(() => {
+                    const d = totEbitda - totBudgetEbitda
+                    const pct = totBudgetEbitda !== 0 ? (d / Math.abs(totBudgetEbitda) * 100) : 0
+                    const favourable = d >= 0
+                    return (
+                      <div style={{
+                        padding: '12px 14px', borderRadius: 8,
+                        background: favourable ? 'var(--bd-green)' : 'var(--bd-red)',
+                        border: `1px solid ${favourable ? 'var(--green)' : 'var(--red)'}`,
+                      }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>
+                          Δ vs Budget
+                        </div>
+                        <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)', color: favourable ? 'var(--green)' : 'var(--red)' }}>
+                          {favourable ? '+' : ''}{fmt(d)}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>
+                          {totBudgetEbitda !== 0 ? `${favourable ? '+' : ''}${pct.toFixed(1)}% vs budget` : '—'}
+                          <span style={{ marginLeft: 8, color: favourable ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                            {favourable ? '▲ boven budget' : '▼ onder budget'}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+                {/* Per-BV uitsplitsing */}
+                <div style={{ padding: '4px 18px 14px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                  {BVS.map(bv => {
+                    const a = ebitda(bv)
+                    const b = budgetEbitda(bv)
+                    const d = a - b
+                    return (
+                      <div key={bv} style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--bg2)', borderLeft: `3px solid ${BV_COLORS[bv]}`, fontSize: 11 }}>
+                        <div style={{ fontWeight: 600, color: BV_COLORS[bv], marginBottom: 3 }}>{bv}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ color: 'var(--t3)' }}>Actuals</span>
+                          <span style={{ fontFamily: 'var(--mono)', color: 'var(--t1)' }}>{fmt(a)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ color: 'var(--t3)' }}>Budget</span>
+                          <span style={{ fontFamily: 'var(--mono)', color: 'var(--t2)' }}>{fmt(b)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, borderTop: '1px solid var(--bd)', marginTop: 3, paddingTop: 3 }}>
+                          <span style={{ color: 'var(--t2)', fontWeight: 600 }}>Δ</span>
+                          <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: d >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                            {d >= 0 ? '+' : ''}{fmt(d)}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {warnings.length === 0 && totNetRev > 0 && (
               <div style={{ background: 'var(--bd-green)', border: '1px solid var(--green)', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: 'var(--green)', display: 'flex', gap: 8, alignItems: 'center' }}>
                 <span style={{ fontSize: 16 }}>✓</span>
