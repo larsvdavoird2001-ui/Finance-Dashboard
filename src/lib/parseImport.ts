@@ -251,16 +251,26 @@ const TOTAL_LABEL_STARTSWITH_PATTERNS = [
   /^einde?\s+\S/i,                                              // "Einde Projects", "End Consultancy"
 ]
 
+/** Word-boundary keywords die overal in een korte cel een totaal-regel
+ *  aanduiden. Gebruikt als laatste-redmiddel check in looksLikeTotalLabel. */
+const TOTAL_KEYWORD_WORDS = /\b(sub\s*totaal|eind\s*totaal|tussen\s*totaal|deel\s*totaal|grand\s*totaal|totaal|sub\s*total|grand\s*total|end\s*total|total|subtotal|resultaat|eind\s*resultaat|eindresultaat|netto\s+resultaat|bruto\s+resultaat|tussensom|eindsom|eindstand|afsluitstand|samenvatting|generaal\s+totaal|generaal|som\s+van|sum\s+of)\b/i
+
 /** Is een cel-waarde een totaal-/resultaat-label?
  *
- *  Drie varianten worden herkend:
+ *  Vier herkenningsvarianten (in volgorde van specifiek → ruim):
  *   1. Strict: de cel matcht exact een total-pattern ("Totaal", "Resultaat").
  *   2. Starts-with + kort: de cel begint met "Totaal …" / "Resultaat …" en
- *      is korter dan 40 tekens (vangt "Resultaat Consultancy B.V.",
- *      "Totaal per BV", "Subtotaal Q1 2026"), maar laat lange project-
- *      beschrijvingen als "Totaal Glaspoort fase 1 — uit te zoeken…" wel door.
- *   3. BV-suffix: de cel eindigt op " Resultaat" of " Totaal" (bv.
- *      "Consultancy Resultaat", "Projects Totaal").
+ *      is ≤ 40 tekens (vangt "Resultaat Consultancy B.V.",
+ *      "Totaal per BV", "Subtotaal Q1 2026").
+ *   3. Suffix: de cel eindigt op " Resultaat" / " Totaal" (bv. "Consultancy
+ *      Resultaat", "Projects Totaal").
+ *   4. Bevat-keyword + kort: de cel bevat ergens (word-boundary) een bekend
+ *      totaal-keyword en is ≤ 30 tekens. Vangt varianten die bij specifieke
+ *      patterns doorglippen, zoals "** Totaal sectie **" of "Q1 Totaal".
+ *
+ *  Lange project-beschrijvingen (> 40 tekens) die toevallig met "Totaal"
+ *  beginnen (bv. "Totaal Glaspoort fase 1 — uit te zoeken…") worden nog
+ *  steeds als detail behandeld.
  */
 export function looksLikeTotalLabel(val: unknown): boolean {
   if (val === null || val === undefined) return false
@@ -268,8 +278,11 @@ export function looksLikeTotalLabel(val: unknown): boolean {
   if (!s) return false
   if (TOTAL_LABEL_STRICT_PATTERNS.some(p => p.test(s))) return true
   if (s.length <= 40 && TOTAL_LABEL_STARTSWITH_PATTERNS.some(p => p.test(s))) return true
-  // Suffix-varianten: "Consultancy Resultaat", "Projects Totaal"
   if (s.length <= 40 && /\s+(resultaat|totaal|subtotaal|eindtotaal|eindresultaat|som|generaal|saldo|samenvatting|eindstand)\s*[:.-]?\s*$/i.test(s)) return true
+  // Bevat-keyword fallback — korte cellen (≤ 30 tekens) die ergens een
+  // totaal-keyword bevatten. Vangt SAP-varianten als "** Totaal **",
+  // "Q1 Totaal", "Totaal Consultancy 2026", "E-projecten Eindtotaal".
+  if (s.length <= 30 && TOTAL_KEYWORD_WORDS.test(s)) return true
   return false
 }
 
