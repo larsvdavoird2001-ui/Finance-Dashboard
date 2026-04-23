@@ -7,8 +7,14 @@ import { useFteStore, FTE_MONTHS } from '../../store/useFteStore'
 import { monthlyActuals2026 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
 import { fmt, parseNL } from '../../lib/format'
-import { parseImportFile, buildTariffLookup, readWorkbookFromFile } from '../../lib/parseImport'
-import type { ParseOverrides, ParseResult } from '../../lib/parseImport'
+import {
+  parseImportFile,
+  buildTariffLookup,
+  readWorkbookFromFile,
+  computeMissingHours,
+  getMissingHoursSlotConfig,
+} from '../../lib/parseImport'
+import type { ParseOverrides, ParseResult, MissingHoursComputeConfig } from '../../lib/parseImport'
 import type * as XLSX from 'xlsx'
 import { MissingHoursWizard } from './MissingHoursWizard'
 import { GenericImportWizard } from './GenericImportWizard'
@@ -162,8 +168,8 @@ export function MaandTab({ filter: _filter }: Props) {
   }, [navPending])
 
   const { entries, updateEntry } = useFinStore()
-  const { records: importRecords, addRecord, approveRecord, rejectRecord, removeRecord, exportPeriod } = useImportStore()
-  const { addEntry: addRawEntry, approveEntry: approveRawEntry, rejectEntry: rejectRawEntry } = useRawDataStore()
+  const { records: importRecords, addRecord, approveRecord, rejectRecord, removeRecord, updateRecordValues, exportPeriod } = useImportStore()
+  const { addEntry: addRawEntry, approveEntry: approveRawEntry, rejectEntry: rejectRawEntry, entries: rawDataEntries } = useRawDataStore()
   const { toasts, showToast } = useToast()
   const ohwData2026 = useOhwStore(s => s.data2026)
   const updateRowValue = useOhwStore(s => s.updateRowValue)
@@ -502,6 +508,95 @@ export function MaandTab({ filter: _filter }: Props) {
     showToast(`${record.slotLabel} afgekeurd`, 'r')
   }
 
+  /** Herberekent een bestaand missing_hours record met de HUIDIGE IC-tarieven.
+   *  Update record.perBv/totalAmount/parsedCount en — als het record al
+   *  goedgekeurd is — de OHW-rij c4 (Consultancy missing hours).
+   *
+   *  Return: nieuwe totalAmount, of null als herberekenen niet kon (bv. raw
+   *  rows zijn niet in geheugen). Zwijgt bij problemen — dit is een
+   *  achtergrond-update, geen user-initiated actie. */
+  const recomputeMissingHoursRecord = (record: ImportRecord): number | null => {
+    if (record.slotId !== 'missing_hours') return null
+    const rawEntry = rawDataEntries.find(e => e.recordId === record.id)
+    if (!rawEntry || !rawEntry.rows || rawEntry.rows.length === 0) return null
+    if (!rawEntry.amountCol || !rawEntry.bvCol) return null
+
+    try {
+      const cfg: MissingHoursComputeConfig = {
+        werknemerCol: rawEntry.bvCol,    // opgeslagen als bvCol
+        urenCol: rawEntry.amountCol,     // opgeslagen als amountCol
+        bedrijfCol: rawEntry.bedrijfCol,
+        bedrijfFilter: rawEntry.bedrijfFilter,
+      }
+      const result = computeMissingHours(
+        record.headers,
+        rawEntry.rows,
+        tariffLookup,
+        cfg,
+        getMissingHoursSlotConfig(),
+      )
+      // Alleen bijwerken als er daadwerkelijk iets is veranderd
+      const oldTotal = record.totalAmount
+      if (Math.abs(result.totalAmount - oldTotal) < 0.5) return oldTotal
+
+      updateRecordValues(record.id, {
+        perBv: result.perBv,
+        totalAmount: result.totalAmount,
+        parsedCount: result.parsedCount,
+        warnings: result.warnings,
+      })
+      // Goedgekeurde records: ook de OHW-rij bijwerken (c4 voor Consultancy)
+      if (record.status === 'approved') {
+        const slot = UPLOAD_SLOTS.find(s => s.id === 'missing_hours')
+        if (slot?.targetRowId && slot?.targetEntity) {
+          updateRowValue('2026', slot.targetEntity, slot.targetRowId, record.month, result.totalAmount)
+        }
+      }
+      return result.totalAmount
+    } catch (err) {
+      console.error('[recomputeMissingHoursRecord] faalde:', err)
+      return null
+    }
+  }
+
+  /** useEffect: bij elke tarief-wijziging checken of er missing_hours records
+   *  zijn die opnieuw berekend moeten worden. Draait NIET op mount (skip als
+   *  tariff-entries nog niet geladen zijn en records nog niet in store). */
+  const recomputeRef = useRef<string>('')
+  useEffect(() => {
+    // Genereer een stabiele hash over de relevante tarief-data. Alleen
+    // herberekenen als deze hash wijzigt t.o.v. vorige render (d.w.z. een
+    // tarief is daadwerkelijk toegevoegd/gewijzigd, geen ander re-render).
+    const tariffHash = tariffEntries
+      .filter(t => t.bedrijf === 'Consultancy')
+      .map(t => `${t.id}:${t.tarief}`)
+      .sort()
+      .join('|')
+    if (recomputeRef.current === '') {
+      // Eerste render — alleen hash opslaan, nog niet herberekenen
+      recomputeRef.current = tariffHash
+      return
+    }
+    if (recomputeRef.current === tariffHash) return
+    recomputeRef.current = tariffHash
+
+    // Recompute alle missing_hours records voor alle maanden
+    const mhRecords = importRecords.filter(r => r.slotId === 'missing_hours' && r.status !== 'rejected')
+    if (mhRecords.length === 0) return
+
+    const updated: string[] = []
+    for (const rec of mhRecords) {
+      const newTotal = recomputeMissingHoursRecord(rec)
+      if (newTotal !== null && newTotal !== rec.totalAmount) {
+        updated.push(`${rec.month}: ${fmt(newTotal)}`)
+      }
+    }
+    if (updated.length > 0) {
+      showToast(`Missing Hours herberekend met bijgewerkte IC-tarieven — ${updated.join(' · ')}`, 'g')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tariffEntries])
+
   /** Verwijder een import record — als het record goedgekeurd was, maak ook
    *  de eventuele OHW-waarde / closing-entry-waarde die erdoor was gezet
    *  ongedaan. Als er nog een ANDERE goedgekeurde upload bestaat voor
@@ -607,7 +702,14 @@ export function MaandTab({ filter: _filter }: Props) {
   }
 
   // ── Wizard callback: gebruiker heeft bestand-config bevestigd ──
-  const handleWizardConfirm = (result: ParseResult) => {
+  const handleWizardConfirm = (result: ParseResult, cfg: {
+    sheetName: string
+    headerRow: number
+    werknemerCol: string
+    urenCol: string
+    bedrijfCol?: string
+    bedrijfFilter?: string
+  }) => {
     if (!wizardState) return
     const slot = UPLOAD_SLOTS.find(s => s.id === 'missing_hours')!
     const record: ImportRecord = {
@@ -638,9 +740,11 @@ export function MaandTab({ filter: _filter }: Props) {
       fileName: wizardState.fileName,
       uploadedAt: record.uploadedAt,
       rows: result.rawRows,
-      amountCol: result.detectedAmountCol,
-      bvCol: result.detectedBvCol,
+      amountCol: cfg.urenCol,        // uren-kolom
+      bvCol: cfg.werknemerCol,       // werknemer-kolom
       status: 'pending',
+      bedrijfCol: cfg.bedrijfCol,
+      bedrijfFilter: cfg.bedrijfFilter,
     })
     setPendingFile(wizardState.file)
     setPendingRecord(record)

@@ -17,6 +17,9 @@ interface ImportStore {
   approveRecord: (id: string) => void
   rejectRecord: (id: string, reason?: string) => void
   removeRecord: (id: string) => void
+  /** Updatet cijfers van een bestaand record (bv. na her-berekening met
+   *  bijgewerkte IC-tarieven). Laat de status ongewijzigd. */
+  updateRecordValues: (id: string, patch: Partial<Pick<ImportRecord, 'perBv' | 'totalAmount' | 'parsedCount' | 'warnings'>>) => void
   getByMonth: (month: string) => ImportRecord[]
   getApprovedByMonth: (month: string) => ImportRecord[]
   exportPeriod: (months: string[]) => void
@@ -65,6 +68,19 @@ export const useImportStore = create<ImportStore>()(
   removeRecord: (id) => {
     set(s => ({ records: s.records.filter(r => r.id !== id) }))
     deleteImportRecord(id)
+  },
+
+  updateRecordValues: (id, patch) => {
+    let updated: ImportRecord | undefined
+    set(s => ({
+      records: s.records.map(r => {
+        if (r.id !== id) return r
+        const next = { ...r, ...patch }
+        updated = next
+        return next
+      }),
+    }))
+    if (updated) insertImportRecord(updated)   // upsert → sync naar Supabase
   },
 
   getByMonth: (month) =>

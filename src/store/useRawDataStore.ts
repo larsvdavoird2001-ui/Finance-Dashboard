@@ -22,6 +22,10 @@ export interface RawDataEntry {
   amountCol: string
   bvCol: string
   status: 'pending' | 'approved' | 'rejected'
+  /** Voor missing_hours: het bedrijfs-kolomfilter uit de wizard. Nodig om
+   *  bij een IC-tarief-update achteraf automatisch te kunnen herberekenen. */
+  bedrijfCol?: string
+  bedrijfFilter?: string
 }
 
 interface RawDataStore {
