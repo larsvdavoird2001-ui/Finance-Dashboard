@@ -3,7 +3,6 @@ import type { OhwYearData, OhwEntityData } from '../../data/types'
 import { fmt, gv } from '../../lib/format'
 import { OhwEntityBlock } from './OhwEntityBlock'
 import { useNavStore } from '../../store/useNavStore'
-import { OhwBackupBar } from './OhwBackupBar'
 
 interface Props {
   data2025: OhwYearData
@@ -50,7 +49,6 @@ export function OhwTab({ data2025, data2026, onEntityChange, showToast }: Props)
 
   return (
     <div className="page">
-      <OhwBackupBar />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div className="tabs-row">
           {(['2025', '2026'] as const).map(y => (
