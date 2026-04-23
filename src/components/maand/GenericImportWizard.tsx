@@ -9,6 +9,7 @@ import {
   perColumnAmountMatches,
   perColumnBvMatches,
   getSlotConfig,
+  getDistinctColumnValues,
 } from '../../lib/parseImport'
 import type {
   ParseResult,
@@ -107,17 +108,27 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
   const [amountCol, setAmountCol] = useState<string>('')
   const [bvCol, setBvCol] = useState<string>('')
   const [bvFilter, setBvFilter] = useState<BvId | ''>('')
+  const [filterCol, setFilterCol] = useState<string>('')
+  const [filterValue, setFilterValue] = useState<string>('')
 
   useEffect(() => {
     setAmountCol(suggested.amountCol)
     setBvCol(isSingleBv ? '' : suggested.bvCol)
     setBvFilter(suggested.bvFilterSuggestion)
-  }, [suggested.amountCol, suggested.bvCol, suggested.bvFilterSuggestion, isSingleBv])
+    setFilterCol(suggested.filterCol)
+    setFilterValue(suggested.filterValue)
+  }, [suggested.amountCol, suggested.bvCol, suggested.bvFilterSuggestion, suggested.filterCol, suggested.filterValue, isSingleBv])
 
   // Reset exclusions when config changes
   useEffect(() => {
     setExcludedRows(new Set())
-  }, [amountCol, bvCol, bvFilter])
+  }, [amountCol, bvCol, bvFilter, filterCol, filterValue])
+
+  // Distinct waarden voor de gekozen filterkolom (voor het radio-picker lijstje)
+  const filterColValues = useMemo(() => {
+    if (!filterCol) return []
+    return getDistinctColumnValues(filterCol, dataRows, 50)
+  }, [filterCol, dataRows])
 
   // Live preview
   const livePreview: ParseResult | null = useMemo(() => {
@@ -131,13 +142,15 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
         // filter (niet-matching rijen worden uitgesloten i.p.v. meegeteld)
         bvCol: bvCol || undefined,
         bvFilter: bvFilter || undefined,
+        filterCol: filterCol || undefined,
+        filterValue: filterCol && filterValue ? filterValue : undefined,
         excludedRowIndices: step === 4 ? excludedRows : undefined,
       }
       return computeGenericImport(headers, dataRows, slotId, cfg)
     } catch {
       return null
     }
-  }, [step, amountCol, bvCol, bvFilter, excludedRows, headers, dataRows, slotId, isSingleBv])
+  }, [step, amountCol, bvCol, bvFilter, filterCol, filterValue, excludedRows, headers, dataRows, slotId, isSingleBv])
 
   // Alle details voor stap 4 (zonder handmatige exclusions)
   const detailsInline: GenericImportDetail[] = useMemo(() => {
@@ -150,11 +163,13 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
         // filter (niet-matching rijen worden uitgesloten i.p.v. meegeteld)
         bvCol: bvCol || undefined,
         bvFilter: bvFilter || undefined,
+        filterCol: filterCol || undefined,
+        filterValue: filterCol && filterValue ? filterValue : undefined,
       }
       const r = computeGenericImport(headers, dataRows, slotId, cfg)
       return r.genericImportDetails ?? []
     } catch { return [] }
-  }, [amountCol, bvCol, bvFilter, headers, dataRows, slotId, isSingleBv])
+  }, [amountCol, bvCol, bvFilter, filterCol, filterValue, headers, dataRows, slotId, isSingleBv])
 
   const canAdvance = () => {
     if (step === 1) return !!sheetName
@@ -403,6 +418,65 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                     </div>
                   </div>
                 )}
+
+                {/* ── Extra kolom-filter (optioneel) ── */}
+                <FilterColumnPicker
+                  label="Kolom: Extra filter (optioneel)"
+                  helpText={slotId === 'uren_lijst'
+                    ? 'Typisch "Projectfactuuraanvraag status" — alleen rijen met de gekozen waarde (bv. "Niet toegewezen") tellen mee.'
+                    : 'Beperk de meetellende rijen tot één specifieke waarde in een extra kolom.'}
+                  color="var(--purple)"
+                  value={filterCol}
+                  onChange={setFilterCol}
+                  headers={headers}
+                  suggestion={suggested.filterCol}
+                  previewValues={dataRows.slice(0, 3).map(r => String(r[filterCol] ?? ''))}
+                />
+                {filterCol && (
+                  <div style={{ paddingLeft: 12, borderLeft: '2px solid var(--purple)', fontSize: 11 }}>
+                    <div style={{ color: 'var(--t3)', marginBottom: 6 }}>
+                      Alleen rijen waarvan "<strong style={{ color: 'var(--t2)' }}>{filterCol}</strong>" gelijk is aan:
+                    </div>
+                    {filterColValues.length === 0 ? (
+                      <div style={{ color: 'var(--t3)', fontStyle: 'italic' }}>
+                        Geen waarden gevonden in deze kolom.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                        <button
+                          onClick={() => setFilterValue('')}
+                          className={`btn sm${filterValue === '' ? ' primary' : ' ghost'}`}
+                          style={{ fontSize: 10 }}
+                        >
+                          (geen filter — alle waarden)
+                        </button>
+                        {filterColValues.slice(0, 20).map(({ value, count }) => {
+                          const label = value === '' ? '(leeg)' : value
+                          const active = filterValue.trim().toLowerCase() === value.trim().toLowerCase() && filterValue !== ''
+                          return (
+                            <button
+                              key={value || '__empty__'}
+                              onClick={() => setFilterValue(value)}
+                              className={`btn sm${active ? ' primary' : ' ghost'}`}
+                              style={{ fontSize: 10 }}
+                              title={`${count} rij(en) met deze waarde`}
+                            >
+                              {label.slice(0, 40)} <span style={{ opacity: 0.6, marginLeft: 4 }}>({count})</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                    <input
+                      type="text"
+                      placeholder="of typ een exacte waarde..."
+                      value={filterValue}
+                      onChange={e => setFilterValue(e.target.value)}
+                      className="ohw-inp"
+                      style={{ width: 200, fontSize: 10 }}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Live preview */}
@@ -460,6 +534,13 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                       <BucketTag label="Leeg / 0" value={livePreview.missingHoursCounts.emptyOrZero} color="var(--t3)" />
                       <BucketTag label="Totaalregels" value={livePreview.missingHoursCounts.totalRowsSkipped} color="var(--t3)" />
                       {bvFilter && <BucketTag label={`Filter "${bvFilter}"`} value={livePreview.missingHoursCounts.bedrijfFiltered} color="var(--amber)" />}
+                      {filterCol && filterValue && (livePreview.missingHoursCounts.filterColumnSkipped ?? 0) > 0 && (
+                        <BucketTag
+                          label={`Kolomfilter "${filterCol}"`}
+                          value={livePreview.missingHoursCounts.filterColumnSkipped ?? 0}
+                          color="var(--purple)"
+                        />
+                      )}
                     </div>
                   )}
 
@@ -797,6 +878,47 @@ function BvColumnPicker({ label, helpText, color, value, onChange, headers, sugg
           ))}
         </div>
       )}
+      {value && (
+        <div style={{ marginTop: 5, fontSize: 10, color: 'var(--t3)', fontFamily: 'var(--mono)' }}>
+          Voorbeeldwaarden: {previewValues.filter(Boolean).slice(0, 3).map(v => `"${v.slice(0, 22)}"`).join(' · ') || '—'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── FilterColumnPicker: dropdown voor een extra kolom-filter (optioneel) ──
+interface FilterPickerProps {
+  label: string
+  helpText: string
+  color: string
+  value: string
+  onChange: (v: string) => void
+  headers: string[]
+  suggestion: string
+  previewValues: string[]
+}
+function FilterColumnPicker({ label, helpText, color, value, onChange, headers, suggestion, previewValues }: FilterPickerProps) {
+  return (
+    <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: '10px 12px', border: '1px solid var(--bd2)', borderLeftWidth: 3, borderLeftColor: color }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t1)' }}>{label}</div>
+        {suggestion && suggestion === value && (
+          <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, background: 'var(--bd-green)', color: 'var(--green)', fontWeight: 700 }}>AUTO</span>
+        )}
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 6 }}>{helpText}</div>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{ background: 'var(--bg1)', border: '1px solid var(--bd3)', borderRadius: 5, color: 'var(--t1)', fontSize: 11, padding: '5px 8px', width: '100%', outline: 'none', cursor: 'pointer' }}
+      >
+        <option value="">— geen filter (alle rijen) —</option>
+        {headers.map(h => {
+          const suffix = suggestion === h ? '   (voorstel)' : ''
+          return <option key={h} value={h}>{h}{suffix}</option>
+        })}
+      </select>
       {value && (
         <div style={{ marginTop: 5, fontSize: 10, color: 'var(--t3)', fontFamily: 'var(--mono)' }}>
           Voorbeeldwaarden: {previewValues.filter(Boolean).slice(0, 3).map(v => `"${v.slice(0, 22)}"`).join(' · ') || '—'}

@@ -529,6 +529,9 @@ export interface ParseResult {
     bedrijfFiltered: number   // weggefilterd door bedrijfskolom-filter
     manuallyExcluded: number  // handmatig uitgevinkt in Verfijnen-stap
     totalRowsSkipped: number  // "Totaal"/"Subtotaal"/"Eindtotaal" rijen overgeslagen
+    /** Weggefilterd door de extra kolom-filter (generic import, bv.
+     *  "Projectfactuuraanvraag status"). Alleen gezet als filter actief was. */
+    filterColumnSkipped?: number
   }
 }
 
@@ -1738,6 +1741,13 @@ export interface GenericImportConfig {
   bvCol?: string
   /** Alleen relevant voor multi-BV slots: beperk output tot één BV */
   bvFilter?: BvId
+  /** Optionele extra kolom-filter: alleen rijen waarvan de cel-waarde in
+   *  `filterCol` (case-insensitive/trim) gelijk is aan `filterValue` tellen
+   *  mee. Bedoeld voor bv. uren_lijst waar alleen rijen met
+   *  "Projectfactuuraanvraag status = Niet toegewezen" meegerekend mogen
+   *  worden. Leeg laten = geen filter. */
+  filterCol?: string
+  filterValue?: string
   excludedRowIndices?: Set<number>
 }
 
@@ -1756,7 +1766,17 @@ export function suggestGenericImportColumns(
   headers: string[],
   dataRows: Record<string, unknown>[],
   slotId: string,
-): { amountCol: string; bvCol: string; bvFilterSuggestion: BvId | '' } {
+): {
+  amountCol: string
+  bvCol: string
+  bvFilterSuggestion: BvId | ''
+  /** Voor slots zoals uren_lijst: suggereer de "Projectfactuuraanvraag
+   *  status"-kolom als die bestaat. Leeg = geen suggestie. */
+  filterCol: string
+  /** Default filterwaarde (bv. "Niet toegewezen") alleen als filterCol
+   *  daadwerkelijk zo'n waarde bevat in de sample-data. */
+  filterValue: string
+} {
   const slotConfig = SLOT_CONFIGS[slotId] ?? SLOT_CONFIGS.factuurvolume
   const sample = dataRows.length > 150 ? dataRows.slice(0, 150) : dataRows
 
@@ -1773,7 +1793,27 @@ export function suggestGenericImportColumns(
     bvFilterSuggestion = slotConfig.targetBv
   }
 
-  return { amountCol, bvCol, bvFilterSuggestion }
+  // Kolom-filter suggestie: voor uren_lijst is het standaard scenario dat
+  // alleen "Niet toegewezen" mag meetellen. Matchen we op header-keyword
+  // "factuuraanvraag" of "projectfactuuraanvraag".
+  let filterCol = ''
+  let filterValue = ''
+  if (slotId === 'uren_lijst') {
+    const normalize = (s: string) => s.toLowerCase().replace(/[\s\-_.]+/g, '')
+    const found = headers.find(h => {
+      const n = normalize(h)
+      return n.includes('factuuraanvraag') || n.includes('projectfactuuraanvraag')
+    })
+    if (found) {
+      filterCol = found
+      const hasNietToegewezen = sample.some(r =>
+        String(r[found] ?? '').trim().toLowerCase() === 'niet toegewezen'
+      )
+      if (hasNietToegewezen) filterValue = 'Niet toegewezen'
+    }
+  }
+
+  return { amountCol, bvCol, bvFilterSuggestion, filterCol, filterValue }
 }
 
 /** Voor elke kolom: aantal rijen waarvoor parseAmountCell een numerieke
@@ -1836,14 +1876,20 @@ export function computeGenericImport(
   let manualExclusions = 0
   let bvUndetected = 0        // kan niet aan BV toewijzen (multi-BV slot)
   let bvFilteredOut = 0       // bvFilter niet match
+  let filterColumnSkipped = 0 // weggefilterd door filterCol+filterValue
   let totalRowsSkipped = 0    // "Totaal"/"Subtotaal"/"Eindtotaal" rijen
   const totalRowLabels: string[] = []  // eerste paar gedetecteerde total labels (voor diagnostiek)
+
+  // Normaliseer filter-waarde één keer voor efficiënte vergelijking per rij
+  const filterActive = !!(cfg.filterCol && cfg.filterValue && cfg.filterValue.trim())
+  const filterValueNorm = filterActive ? cfg.filterValue!.trim().toLowerCase() : ''
 
   warnings.push(
     `Configuratie slot "${slotId}": bedrag="${cfg.amountCol}"` +
     (cfg.bvCol ? `, bv="${cfg.bvCol}"` : '') +
     (slotConfig.targetBv ? `, target-BV=${slotConfig.targetBv}` : '') +
-    (cfg.bvFilter ? `, filter=${cfg.bvFilter}` : '')
+    (cfg.bvFilter ? `, filter=${cfg.bvFilter}` : '') +
+    (filterActive ? `, extra-filter="${cfg.filterCol}"="${cfg.filterValue}"` : '')
   )
   warnings.push(`Data: ${dataRows.length} rijen, ${headers.length} kolommen`)
 
@@ -1865,6 +1911,14 @@ export function computeGenericImport(
         }
       }
       continue
+    }
+
+    // Extra kolom-filter (bv. "Projectfactuuraanvraag status = Niet toegewezen").
+    // Toegepast vóór bedrag-parse zodat gefilterde rijen niet in skippedCount
+    // terechtkomen wanneer ze toevallig geen parseerbaar bedrag hebben.
+    if (filterActive) {
+      const rawFilterVal = String(row[cfg.filterCol!] ?? '').trim().toLowerCase()
+      if (rawFilterVal !== filterValueNorm) { filterColumnSkipped++; continue }
     }
 
     const rawAmountVal = row[cfg.amountCol]
@@ -1948,6 +2002,9 @@ export function computeGenericImport(
     const bvLabel = cfg.bvFilter ?? (slotConfig.targetBv ? `alleen ${slotConfig.targetBv}` : 'BV-filter')
     warnings.push(`${bvFilteredOut} rij(en) weggefilterd door BV-filter (${bvLabel})`)
   }
+  if (filterColumnSkipped > 0) {
+    warnings.push(`${filterColumnSkipped} rij(en) weggefilterd door kolomfilter ("${cfg.filterCol}" = "${cfg.filterValue}")`)
+  }
   if (manualExclusions > 0) warnings.push(`${manualExclusions} handmatig uitgesloten`)
 
   warnings.push(
@@ -1994,8 +2051,30 @@ export function computeGenericImport(
       bedrijfFiltered: bvFilteredOut,
       manuallyExcluded: manualExclusions,
       totalRowsSkipped,
+      filterColumnSkipped,
     },
   }
+}
+
+/** Distinct waarden in een kolom met counts — gebruikt door de generic
+ *  import wizard om de gebruiker een lijst keuzes te tonen voor de
+ *  kolom-filter. Lege/whitespace cellen worden gegroepeerd onder key "".
+ *  Geordend op count (hoog → laag). */
+export function getDistinctColumnValues(
+  column: string,
+  dataRows: Record<string, unknown>[],
+  maxSamples = 200,
+): Array<{ value: string; count: number }> {
+  const counts = new Map<string, number>()
+  for (const row of dataRows) {
+    // Sla totaal-/subtotaalrijen over — die zijn in de compute-flow ook weg.
+    if (isLikelyTotalRow(row)) continue
+    const raw = String(row[column] ?? '').trim()
+    counts.set(raw, (counts.get(raw) ?? 0) + 1)
+  }
+  const arr = Array.from(counts.entries()).map(([value, count]) => ({ value, count }))
+  arr.sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+  return arr.slice(0, maxSamples)
 }
 
 /** Voor een specifieke kolom: lijst van cel-waarden die NIET matchen met
