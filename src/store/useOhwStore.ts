@@ -382,19 +382,24 @@ export const useOhwStore = create<OhwStore>()(
     }),
     {
       name: 'tpg-ohw-data',
-      // Version bump bij formule-wijzigingen in recomputeEntity.
-      // Oudere gecachte data in localStorage bevat de vorige (onjuiste)
-      // afgeleide waardes — onRehydrateStorage herberekent ze zodat het
-      // teken van bv. mutatieVooruitgefactureerd direct klopt ook bij
-      // bestaande gebruikers.
-      version: 2,
+      // GEEN version bump — dat veroorzaakte data-verlies bij gebruikers
+      // zonder migrate-functie (Zustand persist reset de store naar default
+      // state als version mismatcht en er geen migrate is). In plaats daarvan
+      // gebruiken we onRehydrateStorage om afgeleide velden te hertellen —
+      // RUWE DATA BLIJFT ALTIJD BEHOUDEN.
       partialize: (state) => ({
         data2025: state.data2025,
         data2026: state.data2026,
         deletedRowIds: state.deletedRowIds,
       }) as unknown as OhwStore,
+      // Accepteer elke oude versie uit localStorage zonder data te verliezen
+      // (fail-safe voor wanneer persist-versies ooit wel opzettelijk bumpen).
+      migrate: (persistedState) => persistedState as OhwStore,
       onRehydrateStorage: () => (state) => {
         if (!state) return
+        // Recompute afgeleide velden (mutatieOhw, mutatieVooruitgefactureerd,
+        // nettoOmzet, etc) uit de ruwe rijen. Doet GEEN data-vernietiging —
+        // alleen re-berekening van derived values met huidige calc-regels.
         if (state.data2025?.entities) {
           state.data2025 = {
             ...state.data2025,
