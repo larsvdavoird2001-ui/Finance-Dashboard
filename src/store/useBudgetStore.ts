@@ -32,6 +32,8 @@ function emptyOverrides(): BudgetOverrides {
 
 interface BudgetState {
   overrides: BudgetOverrides
+  /** Latest Estimate overrides — user-edited cells in de LE-matrix (snapshot of actual+budget mix) */
+  leOverrides: BudgetOverrides
   loaded: boolean
   loadFromDb: () => Promise<void>
   setValue: (entity: EntityName, month: string, key: string, val: number) => void
@@ -41,12 +43,22 @@ interface BudgetState {
   getMonth: (entity: EntityName, month: string) => Record<string, number>
   hasSource: (entity: EntityName, month: string) => boolean
   hasOverride: (entity: EntityName, month: string) => boolean
+
+  // ── Latest Estimate ─────────────────────────────────────────────────────
+  setLeValue: (entity: EntityName, month: string, key: string, val: number) => void
+  setLeMonth: (entity: EntityName, month: string, data: Record<string, number>) => void
+  clearLeMonth: (entity: EntityName, month: string) => void
+  clearAllLe: (entity: EntityName) => void
+  /** Raw override only (voor detectie) */
+  getLeOverride: (entity: EntityName, month: string, key: string) => number | undefined
+  hasLeOverride: (entity: EntityName, month: string) => boolean
 }
 
 export const useBudgetStore = create<BudgetState>()(
   persist(
     (set, get) => ({
       overrides: emptyOverrides(),
+      leOverrides: emptyOverrides(),
       loaded: false,
 
       loadFromDb: async () => {
@@ -115,6 +127,46 @@ export const useBudgetStore = create<BudgetState>()(
 
       hasOverride: (entity, month) => {
         const ov = get().overrides[entity]?.[month]
+        return !!ov && Object.keys(ov).length > 0
+      },
+
+      // ── Latest Estimate overrides ─────────────────────────────────────────
+      setLeValue: (entity, month, key, val) => {
+        set(s => {
+          const entityOv = { ...(s.leOverrides[entity] ?? {}) }
+          const monthOv  = { ...(entityOv[month] ?? {}) }
+          monthOv[key] = val
+          entityOv[month] = monthOv
+          return { leOverrides: { ...s.leOverrides, [entity]: entityOv } }
+        })
+      },
+
+      setLeMonth: (entity, month, data) => {
+        set(s => {
+          const entityOv = { ...(s.leOverrides[entity] ?? {}) }
+          entityOv[month] = { ...data }
+          return { leOverrides: { ...s.leOverrides, [entity]: entityOv } }
+        })
+      },
+
+      clearLeMonth: (entity, month) => {
+        set(s => {
+          const entityOv = { ...(s.leOverrides[entity] ?? {}) }
+          delete entityOv[month]
+          return { leOverrides: { ...s.leOverrides, [entity]: entityOv } }
+        })
+      },
+
+      clearAllLe: (entity) => {
+        set(s => ({ leOverrides: { ...s.leOverrides, [entity]: {} } }))
+      },
+
+      getLeOverride: (entity, month, key) => {
+        return get().leOverrides[entity]?.[month]?.[key]
+      },
+
+      hasLeOverride: (entity, month) => {
+        const ov = get().leOverrides[entity]?.[month]
         return !!ov && Object.keys(ov).length > 0
       },
     }),

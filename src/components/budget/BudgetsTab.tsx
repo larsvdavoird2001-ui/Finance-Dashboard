@@ -1,11 +1,13 @@
-import { Fragment, useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import '../../lib/chartSetup'
 import { baseChartOptions } from '../../lib/chartSetup'
-import { PL_STRUCTURE, ytdBudget2026, ytdActuals2025, ytdBudget2025 } from '../../data/plData'
+import { PL_STRUCTURE, ytdBudget2026, ytdActuals2025, ytdBudget2025, monthlyActuals2026 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
+import { useOhwStore } from '../../store/useOhwStore'
+import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
 
@@ -30,10 +32,14 @@ const DISPLAY_KEYS = [
 
 interface Props { filter: GlobalFilter }
 
+type EditTarget = { kind: 'budget' | 'le'; e: EntityName; m: string; k: string }
+
 export function BudgetsTab({ filter: _filter }: Props) {
   const store = useBudgetStore()
+  const ohwData2026 = useOhwStore(s => s.data2026)
+  const { getMonthly } = useAdjustedActuals()
   const [metric, setMetric] = useState<string>('netto_omzet')
-  const [editing, setEditing] = useState<{ e: EntityName; m: string; k: string } | null>(null)
+  const [editing, setEditing] = useState<EditTarget | null>(null)
   const [rawInput, setRawInput] = useState('')
 
   const months = BUDGET_MONTHS_2026
@@ -51,6 +57,43 @@ export function BudgetsTab({ filter: _filter }: Props) {
   const getVal = (e: EntityName, m: string, k: string): number => {
     const data = store.getMonth(e, m)
     return data[k] ?? 0
+  }
+
+  // ── Actuals-lookup: werkelijke cijfers voor gesloten/ingevulde maanden ──
+  // BVs gebruiken useAdjustedActuals (OHW + FinStore + base); Holdings gebruikt base-actuals.
+  const getActualsFor = (e: EntityName, m: string): Record<string, number> => {
+    if (e === 'Holdings') return monthlyActuals2026['Holdings']?.[m] ?? {}
+    return getMonthly(e as BvId, m)
+  }
+
+  // Heeft deze (BV, maand) echte actuals? (OHW gevuld OF base-actuals bestaat OF FinStore-entry)
+  const hasActualsFor = (e: EntityName, m: string): boolean => {
+    if (e === 'Holdings') {
+      const base = monthlyActuals2026['Holdings']?.[m]
+      return !!base && Object.keys(base).length > 0 && (Math.abs(base.netto_omzet ?? 0) > 0 || Math.abs(base.operationele_kosten ?? 0) > 0)
+    }
+    // BV: OHW heeft netto voor deze maand?
+    const ohwEntity = ohwData2026.entities.find(ent => ent.entity === e)
+    if (ohwEntity && ohwEntity.nettoOmzet[m] != null) return true
+    // Base-actuals gevuld? (Jan/Feb hardcoded)
+    const base = monthlyActuals2026[e]?.[m]
+    if (base && Object.keys(base).length > 0 && (Math.abs(base.netto_omzet ?? 0) > 0)) return true
+    return false
+  }
+
+  // LE-waarde voor een cel: override → actual (als maand gesloten is) → budget
+  const getLeVal = (e: EntityName, m: string, k: string): number => {
+    const ov = store.getLeOverride(e, m, k)
+    if (ov != null) return ov
+    if (hasActualsFor(e, m)) return getActualsFor(e, m)[k] ?? 0
+    return getVal(e, m, k)
+  }
+
+  // Bron van de LE-waarde (voor styling)
+  const getLeSource = (e: EntityName, m: string, k: string): 'override' | 'actual' | 'budget' => {
+    if (store.getLeOverride(e, m, k) != null) return 'override'
+    if (hasActualsFor(e, m)) return 'actual'
+    return 'budget'
   }
 
   const metricItem = DISPLAY_KEYS.find(d => d.key === metric) ?? DISPLAY_KEYS[0]
@@ -108,28 +151,28 @@ export function BudgetsTab({ filter: _filter }: Props) {
     }
   }, [metric, activeEntities.join(','), store.overrides])
 
-  // ── Source detection: Jan/Feb/Mar have source data; rest are editable ──
+  // ── Source detection: Jan/Feb/Mar komen uit bron, maar zijn nu ook bewerkbaar ──
   const SOURCE_MONTHS = ['Jan-26', 'Feb-26', 'Mar-26']
   const isSource = (m: string) => SOURCE_MONTHS.includes(m)
 
   // ── Edit handlers ──
-  const startEdit = (e: EntityName, m: string, k: string) => {
-    const cur = getVal(e, m, k)
+  const startEdit = (kind: 'budget' | 'le', e: EntityName, m: string, k: string) => {
+    const cur = kind === 'budget' ? getVal(e, m, k) : getLeVal(e, m, k)
     setRawInput(cur === 0 ? '' : String(cur))
-    setEditing({ e, m, k })
+    setEditing({ kind, e, m, k })
   }
   const commitEdit = () => {
     if (!editing) return
     const parsed = parseNL(rawInput)
     const v = isNaN(parsed) ? 0 : parsed
-    store.setValue(editing.e, editing.m, editing.k, v)
+    if (editing.kind === 'budget') {
+      store.setValue(editing.e, editing.m, editing.k, v)
+    } else {
+      store.setLeValue(editing.e, editing.m, editing.k, v)
+    }
     setEditing(null)
   }
   const cancelEdit = () => setEditing(null)
-
-  const clearMonth = (e: EntityName, m: string) => {
-    if (confirm(`Overrides wissen voor ${e} ${m}?`)) store.clearMonth(e, m)
-  }
 
   // ── Auto-fill: gebruikt het seizoenspatroon van 2025 om maanden te vullen ──
   // Verdeelt de FY-target volgens de maandelijkse ratio's van 2025-actuals,
@@ -180,10 +223,27 @@ export function BudgetsTab({ filter: _filter }: Props) {
   }
 
   const clearAllOverrides = (e: EntityName) => {
-    if (!confirm(`Alle budget overrides wissen voor ${e}?`)) return
+    if (!confirm(`Alle budget overrides wissen voor ${e}? (Jan–Mar terug naar bron, Apr–Dec leeg)`)) return
     for (const m of months) {
-      if (!isSource(m)) store.clearMonth(e, m)
+      store.clearMonth(e, m)
     }
+  }
+
+  // ── Latest Estimate: vul het hele jaar met hard snapshot ──
+  // Gesloten maanden → actuals; toekomst → budget. Alles wordt vastgelegd als override
+  // zodat het een echte LE-snapshot is, onafhankelijk van latere wijzigingen in bron.
+  const autoFillLatestEstimate = (e: EntityName) => {
+    for (const m of months) {
+      const val = hasActualsFor(e, m)
+        ? (getActualsFor(e, m)[metric] ?? 0)
+        : getVal(e, m, metric)
+      store.setLeValue(e, m, metric, val)
+    }
+  }
+
+  const clearLatestEstimate = (e: EntityName) => {
+    if (!confirm(`Latest Estimate overrides wissen voor ${e}? (terug naar auto-afgeleid)`)) return
+    store.clearAllLe(e)
   }
 
   return (
@@ -252,12 +312,12 @@ export function BudgetsTab({ filter: _filter }: Props) {
         </div>
       </div>
 
-      {/* Full-year matrix — editable */}
+      {/* Full-year BUDGET matrix — elke cel bewerkbaar (ook Jan–Mar) */}
       <div className="card">
         <div className="card-hdr">
           <span className="card-title">📅 Budget matrix — FY 2026</span>
           <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 8 }}>
-            {metricItem.label} · Jan–Mar uit bron, rest bewerkbaar
+            {metricItem.label} · alle maanden bewerkbaar
           </span>
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>Klik cel om te bewerken</span>
         </div>
@@ -287,17 +347,18 @@ export function BudgetsTab({ filter: _filter }: Props) {
                       const src = isSource(m)
                       const hasOv = store.hasOverride(e, m)
                       const val = getVal(e, m, metric) * sign
-                      const isEditing = editing?.e === e && editing.m === m && editing.k === metric
+                      const isEditing = editing?.kind === 'budget' && editing.e === e && editing.m === m && editing.k === metric
                       return (
                         <td
                           key={m}
                           className="r mono"
                           style={{
                             padding: '4px 6px',
-                            background: src ? 'rgba(0,169,224,.05)' : hasOv ? 'rgba(38,201,151,.06)' : undefined,
-                            cursor: src ? 'default' : 'pointer',
+                            background: hasOv ? 'rgba(38,201,151,.06)' : src ? 'rgba(0,169,224,.04)' : undefined,
+                            cursor: 'pointer',
                           }}
-                          onClick={() => { if (!src) startEdit(e, m, metric) }}
+                          title={hasOv ? 'Handmatige override' : src ? 'Uit bron (bewerkbaar)' : 'Bewerkbaar'}
+                          onClick={() => startEdit('budget', e, m, metric)}
                         >
                           {isEditing ? (
                             <input
@@ -310,7 +371,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
                               style={{ width: 80, fontSize: 11, padding: '2px 5px' }}
                             />
                           ) : (
-                            <span style={{ color: val === 0 ? 'var(--t3)' : src ? 'var(--t1)' : 'var(--green)' }}>
+                            <span style={{ color: val === 0 ? 'var(--t3)' : hasOv ? 'var(--green)' : 'var(--t1)' }}>
                               {val === 0 ? '—' : fmt(val)}
                             </span>
                           )}
@@ -333,7 +394,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
                         >⚡</button>
                         <button
                           className="btn sm ghost"
-                          title="Wis alle overrides"
+                          title="Wis alle overrides (terug naar bron)"
                           style={{ fontSize: 9, padding: '2px 4px', color: 'var(--red)' }}
                           onClick={() => clearAllOverrides(e)}
                         >✕</button>
@@ -358,42 +419,122 @@ export function BudgetsTab({ filter: _filter }: Props) {
         </div>
       </div>
 
-      {/* Per-month clear tool */}
+      {/* Full-year LATEST ESTIMATE matrix — actuals voor gesloten maanden + budget voor rest */}
       <div className="card">
         <div className="card-hdr">
-          <span className="card-title">🛠 Override-status per BV / maand</span>
-          <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 8 }}>Klik op een gekleurde cel om de override voor die maand te wissen</span>
+          <span className="card-title">🎯 Latest Estimate — FY 2026</span>
+          <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 8 }}>
+            {metricItem.label} · gesloten maanden = actuals (hard), open maanden = budget
+          </span>
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>⚡ vult het hele jaar · klik cel om te bewerken</span>
         </div>
-        <div style={{ padding: 12, display: 'grid', gridTemplateColumns: 'auto repeat(12, 1fr)', gap: 4, fontSize: 10 }}>
-          <div></div>
-          {months.map(m => <div key={m} style={{ textAlign: 'center', color: 'var(--t3)', fontWeight: 600 }}>{m.slice(0, 3)}</div>)}
-          {activeEntities.map(e => (
-            <Fragment key={e}>
-              <div style={{ color: BV_COLORS[e], fontWeight: 700 }}>{e}</div>
-              {months.map(m => {
-                const src = isSource(m)
-                const ov  = store.hasOverride(e, m)
+
+        <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center', gap: 12, fontSize: 10, color: 'var(--t3)', flexWrap: 'wrap' }}>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(0,169,224,.2)', border: '1px solid var(--brand)', marginRight: 4, verticalAlign: 'middle' }} /> actual (hard)</span>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(143,163,192,.15)', border: '1px solid var(--bd2)', marginRight: 4, verticalAlign: 'middle' }} /> budget (verwacht)</span>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(38,201,151,.15)', border: '1px solid var(--green)', marginRight: 4, verticalAlign: 'middle' }} /> handmatig aangepast</span>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table className="tbl" style={{ minWidth: 'max-content' }}>
+            <thead>
+              <tr>
+                <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 180 }}>BV / Maand</th>
+                {months.map(m => (
+                  <th key={m} className="r" style={{ minWidth: 95 }}>{m}</th>
+                ))}
+                <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)', minWidth: 110 }}>FY LE</th>
+                <th style={{ width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeEntities.map(e => {
+                const rowTotal = months.reduce((s, m) => s + getLeVal(e, m, metric), 0)
                 return (
-                  <div
-                    key={`${e}-${m}`}
-                    onClick={() => { if (ov) clearMonth(e, m) }}
-                    style={{
-                      height: 22, borderRadius: 4,
-                      background: src ? 'rgba(0,169,224,.2)' : ov ? 'rgba(38,201,151,.25)' : 'var(--bg3)',
-                      border: `1px solid ${src ? 'var(--brand)' : ov ? 'var(--green)' : 'var(--bd2)'}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: ov ? 'pointer' : 'default',
-                      color: src ? 'var(--brand)' : ov ? 'var(--green)' : 'var(--t3)',
-                      fontWeight: 700,
-                    }}
-                    title={src ? 'Brondata' : ov ? 'Override (klik om te wissen)' : 'Leeg'}
-                  >
-                    {src ? '●' : ov ? '✎' : '·'}
-                  </div>
+                  <tr key={`le-${e}`}>
+                    <td style={{ position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 1, fontWeight: 600, color: BV_COLORS[e] }}>
+                      <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: BV_COLORS[e], marginRight: 6 }} />
+                      {e}
+                    </td>
+                    {months.map(m => {
+                      const src = getLeSource(e, m, metric)
+                      const val = getLeVal(e, m, metric) * sign
+                      const isEditing = editing?.kind === 'le' && editing.e === e && editing.m === m && editing.k === metric
+                      const bg =
+                        src === 'actual'   ? 'rgba(0,169,224,.08)' :
+                        src === 'override' ? 'rgba(38,201,151,.08)' :
+                                             'rgba(143,163,192,.06)'
+                      const color =
+                        val === 0          ? 'var(--t3)' :
+                        src === 'actual'   ? 'var(--brand)' :
+                        src === 'override' ? 'var(--green)' :
+                                             'var(--t2)'
+                      const weight = src === 'actual' ? 700 : 500
+                      const style = src === 'budget' ? 'italic' : 'normal'
+                      return (
+                        <td
+                          key={`le-${e}-${m}`}
+                          className="r mono"
+                          style={{ padding: '4px 6px', background: bg, cursor: 'pointer' }}
+                          title={src === 'actual' ? 'Werkelijk (uit OHW/Maandafsluiting)' : src === 'override' ? 'Handmatig aangepast' : 'Budget (verwacht)'}
+                          onClick={() => startEdit('le', e, m, metric)}
+                        >
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              value={rawInput}
+                              onChange={ev => setRawInput(ev.target.value)}
+                              onBlur={commitEdit}
+                              onKeyDown={ev => { if (ev.key === 'Enter') commitEdit(); else if (ev.key === 'Escape') cancelEdit() }}
+                              className="ohw-inp"
+                              style={{ width: 80, fontSize: 11, padding: '2px 5px' }}
+                            />
+                          ) : (
+                            <span style={{ color, fontWeight: weight, fontStyle: style }}>
+                              {val === 0 ? '—' : fmt(val)}
+                            </span>
+                          )}
+                        </td>
+                      )
+                    })}
+                    <td
+                      className="r mono"
+                      style={{ fontWeight: 700, color: 'var(--brand)', borderLeft: '1px solid var(--bd2)' }}
+                    >
+                      {fmt(rowTotal * sign)}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 3 }}>
+                        <button
+                          className="btn sm ghost"
+                          title="Vul hele jaar: actuals voor gesloten maanden, budget voor rest"
+                          style={{ fontSize: 9, padding: '2px 4px' }}
+                          onClick={() => autoFillLatestEstimate(e)}
+                        >⚡</button>
+                        <button
+                          className="btn sm ghost"
+                          title="Wis LE-overrides (terug naar auto-afgeleid)"
+                          style={{ fontSize: 9, padding: '2px 4px', color: 'var(--red)' }}
+                          onClick={() => clearLatestEstimate(e)}
+                        >✕</button>
+                      </div>
+                    </td>
+                  </tr>
                 )
               })}
-            </Fragment>
-          ))}
+              <tr className="tot">
+                <td style={{ position: 'sticky', left: 0, background: 'var(--bg4)', zIndex: 1 }}>Totaal LE</td>
+                {months.map(m => {
+                  const total = activeEntities.reduce((s, e) => s + getLeVal(e, m, metric), 0) * sign
+                  return <td key={`le-tot-${m}`} className="r mono">{total === 0 ? '—' : fmt(total)}</td>
+                })}
+                <td className="r mono" style={{ color: 'var(--brand)', borderLeft: '1px solid var(--bd2)' }}>
+                  {fmt(activeEntities.reduce((s, e) => s + months.reduce((ss, m) => ss + getLeVal(e, m, metric), 0), 0) * sign)}
+                </td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
