@@ -160,9 +160,7 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({ entity, displayMont
 
               {/* ── Totals & summary ──────────────────────────── */}
               <MetricRow label="Totaal IC" dict={entity.totaalIC} months={displayMonths} bold colorize rowBg="var(--bg3)" />
-              <MetricRow label="Netto Omzet" dict={entity.nettoOmzet} months={displayMonths} bold highlight badge="= P&L" />
-              <MetricRow label="Budget" dict={entity.budget} months={displayMonths} dimZero rowBg="var(--bg2)" />
-              <MetricRow label="Delta (vs Budget)" dict={entity.delta} months={displayMonths} isDelta rowBg="var(--bg2)" />
+              <MetricRow label="Mutatie OHW na IC Verrekening" dict={entity.nettoOmzet} months={displayMonths} bold highlight />
             </tbody>
           </table>
         </div>
