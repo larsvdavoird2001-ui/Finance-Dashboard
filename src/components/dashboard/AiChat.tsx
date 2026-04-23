@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useOhwStore } from '../../store/useOhwStore'
 import { useRawDataStore } from '../../store/useRawDataStore'
+import { useFteStore } from '../../store/useFteStore'
 import { monthlyBudget2026, ytdBudget2026 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
 import { fmt } from '../../lib/format'
@@ -395,6 +396,135 @@ function Md({ text }: { text: string }) {
   )
 }
 
+// ── System-prompt bouwer met alle financiële context voor Claude ──────────
+/** Bouwt een rijke system prompt met alle relevante financiële data. De
+ *  assistent krijgt zo directe toegang tot actuals, budget, OHW en FTE
+ *  zonder tool-calls nodig te hebben. */
+function buildSystemPrompt(
+  ctx: FinCtx,
+  ohw: ReturnType<typeof useOhwStore.getState>['data2026'],
+  fteEntries: ReturnType<typeof useFteStore.getState>['entries'],
+  rawEntries: Array<{ slotLabel: string; month: string; fileName: string; rows: RawRow[] }>,
+): string {
+  const bvList = BVS.join(', ')
+  const months = ACTUAL_MONTHS
+
+  // P&L per BV per maand — compact tabel
+  const plRows: string[] = []
+  for (const bv of BVS) {
+    for (const m of months) {
+      const a = ctx.monthly[bv][m]
+      const b = ctx.budM[bv][m]
+      const omzet = a?.netto_omzet ?? 0
+      const brut  = a?.brutomarge ?? 0
+      const ebitda = a?.ebitda ?? 0
+      const ebit   = a?.ebit ?? 0
+      const budOmzet = b?.netto_omzet ?? 0
+      const budEbitda = b?.ebitda ?? 0
+      plRows.push(`${bv} ${m}: omzet=${omzet} (budget ${budOmzet}), brutomarge=${brut}, ebitda=${ebitda} (budget ${budEbitda}), ebit=${ebit}`)
+    }
+  }
+
+  // YTD per BV
+  const ytdRows = BVS.map(bv => {
+    const a = ctx.ytd[bv]
+    const b = ctx.ytdBud[bv]
+    return `${bv} YTD Q1: omzet=${a.netto_omzet ?? 0} (budget ${b.netto_omzet ?? 0}, Δ ${(a.netto_omzet ?? 0) - (b.netto_omzet ?? 0)}), brutomarge=${a.brutomarge ?? 0}, ebitda=${a.ebitda ?? 0} (budget ${b.ebitda ?? 0}), ebit=${a.ebit ?? 0}`
+  })
+
+  // OHW per BV per maand
+  const ohwRows: string[] = []
+  for (const e of ohw.entities) {
+    for (const m of months) {
+      ohwRows.push(`OHW ${e.entity} ${m}: totaal onderhanden=${e.totaalOnderhanden[m] ?? 0}, mutatie=${e.mutatieOhw[m] ?? 0}, IC=${e.totaalIC[m] ?? 0}`)
+    }
+  }
+
+  // FTE & headcount
+  const fteRows = fteEntries
+    .filter(e => months.includes(e.month))
+    .map(e => `FTE ${e.bv} ${e.month}: fte=${e.fte}, headcount=${e.headcount}${e.fteBudget != null ? ` (budget ${e.fteBudget})` : ' (budget nog niet ingevuld)'}`)
+
+  // Imports
+  const importsRows = rawEntries.length > 0
+    ? rawEntries.slice(0, 20).map(r => `Geïmporteerd: ${r.slotLabel} voor ${r.month} (${r.rows.length} rijen, ${r.fileName})`)
+    : ['Geen geïmporteerde bestanden']
+
+  return `Je bent de financieel analist-assistent voor TPG (The People Group), een Nederlandse groep bestaande uit drie BV's: ${bvList}.
+
+Je gebruiker is de CFO. Antwoord altijd in het **Nederlands**, kort en zakelijk.
+- Wees concreet en feitelijk; noem getallen uit de data hieronder wanneer relevant.
+- Als je iets NIET kunt afleiden uit de context, zeg dat eerlijk ("dat staat niet in de data") in plaats van te gissen.
+- Redeneer stap-voor-stap bij complexe vragen (waarom daalt iets, wat zijn de drivers).
+- Bedragen in €, duizendtallen met punt ("€ 1.234.567").
+- Gebruik Markdown (**vet**, lijsten, korte tabellen) voor leesbaarheid.
+- Wijs actief op mogelijke problemen, onnatuurlijke verschillen, ontbrekende data.
+- Leg graag verbanden: bv. tussen OPEX-daling en FTE-daling, of tussen OHW-mutatie en omzet-allocatie.
+
+## FINANCIËLE DATA 2026 Q1 (Jan-Mar)
+
+### P&L per BV per maand
+${plRows.join('\n')}
+
+### YTD totalen per BV
+${ytdRows.join('\n')}
+
+### Onderhanden Werk per BV per maand
+${ohwRows.join('\n')}
+
+### FTE & Headcount per BV per maand
+${fteRows.length > 0 ? fteRows.join('\n') : 'Geen FTE data ingevuld voor Q1 2026.'}
+
+### Geüploade bestanden
+${importsRows.join('\n')}
+
+## STIJL-RICHTLIJNEN
+- Ga niet in herhaling; herhaal vraag niet.
+- Geen disclaimers over 'ik ben een AI' of 'ik kan niet garanderen'.
+- Bij getal-vragen geef je het getal + korte toelichting wat het betekent.
+- Bij analyse-vragen: geef 2-4 bullet points met de drivers, niet één generieke zin.
+- Bij budgetten die op 0 staan: noem dat het budget nog niet is ingevuld.`
+}
+
+// Call de Claude-backend via /api/chat. Retourneert de antwoord-tekst.
+async function callClaude(
+  systemPrompt: string,
+  history: Message[],
+  userMessage: string,
+): Promise<string> {
+  const apiMessages = [
+    ...history.slice(-10).map(m => ({ role: m.role, content: m.text })),  // beperk geschiedenis
+    { role: 'user' as const, content: userMessage },
+  ]
+
+  const resp = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      system: systemPrompt,
+      messages: apiMessages,
+      max_tokens: 2048,
+    }),
+  })
+
+  if (!resp.ok) {
+    const err = await resp.text()
+    throw new Error(`API-fout (${resp.status}): ${err}`)
+  }
+  const data = await resp.json()
+
+  // Claude messages API: content is een array van blocks, pak alle text-blocks
+  if (data?.error) throw new Error(data.error?.message ?? JSON.stringify(data.error))
+  if (!Array.isArray(data?.content)) throw new Error(`Onverwachte response van Claude: ${JSON.stringify(data).slice(0, 200)}`)
+  const textBlocks = data.content
+    .filter((b: { type?: string }) => b?.type === 'text')
+    .map((b: { text?: string }) => b.text ?? '')
+    .join('\n')
+    .trim()
+  if (!textBlocks) throw new Error('Claude gaf een lege response terug')
+  return textBlocks
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export function AiChat() {
   const [open, setOpen] = useState(false)
@@ -406,23 +536,47 @@ export function AiChat() {
 
   const { getMonthly, getYtd } = useAdjustedActuals()
   const ohwData2026 = useOhwStore(s => s.data2026)
+  const fteEntries = useFteStore(s => s.entries)
+  const rawEntries = useRawDataStore(s => s.entries)
   const ctx = buildCtx(getMonthly, getYtd, ohwData2026)
 
   // Toon badge als er goedgekeurde importdata is
-  const hasData = useRawDataStore(s => s.entries.some(e => e.status === 'approved'))
+  const hasData = rawEntries.some(e => e.status === 'approved')
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 100) }, [open])
 
-  const send = (text: string) => {
+  const send = async (text: string) => {
     if (!text.trim() || loading) return
-    setMessages(p => [...p, { role: 'user', text }])
+    const userMsg = text.trim()
+    setMessages(p => [...p, { role: 'user', text: userMsg }])
     setInput('')
     setLoading(true)
-    setTimeout(() => {
-      setMessages(p => [...p, { role: 'assistant', text: respond(text, ctx) }])
+
+    // Bouw systeemprompt met alle huidige context (live data uit stores)
+    const systemPrompt = buildSystemPrompt(
+      ctx,
+      ohwData2026,
+      fteEntries,
+      rawEntries
+        .filter(e => e.status === 'approved')
+        .map(e => ({ slotLabel: e.slotLabel, month: e.month, fileName: e.fileName, rows: e.rows ?? [] })),
+    )
+
+    try {
+      const reply = await callClaude(systemPrompt, messages, userMsg)
+      setMessages(p => [...p, { role: 'assistant', text: reply }])
+    } catch (err) {
+      // Fallback naar offline rule-based response
+      const fallback = respond(userMsg, ctx)
+      const errMsg = err instanceof Error ? err.message : String(err)
+      setMessages(p => [...p, {
+        role: 'assistant',
+        text: `⚠ _AI-service niet bereikbaar (${errMsg}). Ik toon een eenvoudige samenvatting op basis van de zichtbare data:_\n\n${fallback}`,
+      }])
+    } finally {
       setLoading(false)
-    }, 350)
+    }
   }
 
   return (
@@ -474,9 +628,9 @@ export function AiChat() {
             <span style={{ fontSize: 16 }}>🤖</span>
             <div>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)' }}>AI Financieel Assistent</div>
-              <div style={{ fontSize: 10, color: hasData ? 'var(--green)' : 'var(--t3)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 5, height: 5, borderRadius: '50%', background: hasData ? 'var(--green)' : 'var(--t3)', display: 'inline-block' }} />
-                {hasData ? 'Factuurdata geladen' : 'Live P&L data'}
+              <div style={{ fontSize: 10, color: 'var(--t3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green)', display: 'inline-block' }} />
+                Claude • {hasData ? 'live data + facturen' : 'live P&L data'}
               </div>
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
@@ -557,7 +711,7 @@ export function AiChat() {
                 borderRadius: 8, color: 'var(--t1)', fontSize: 12,
                 padding: '7px 10px', fontFamily: 'var(--font)', outline: 'none',
               }}
-              placeholder="Vraag iets over facturen, klanten, omzet…"
+              placeholder="Stel een complexe vraag: waarom, hoe, verband, analyse…"
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && send(input)}
