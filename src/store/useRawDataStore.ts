@@ -99,7 +99,13 @@ export const useRawDataStore = create<RawDataStore>()(
     }),
     {
       name: 'tpg-raw-data',
-      partialize: (state) => ({ entries: state.entries }) as unknown as RawDataStore,
+      // Persist alleen de metadata — rows-arrays kunnen tienduizenden
+      // records bevatten en overschrijden dan de ~5MB localStorage-quota.
+      // De volledige rows blijven beschikbaar via Supabase (fetchRawData
+      // laadt ze weer in bij loadFromDb).
+      partialize: (state) => ({
+        entries: state.entries.map(e => ({ ...e, rows: [] })),
+      }) as unknown as RawDataStore,
     },
   ),
 )

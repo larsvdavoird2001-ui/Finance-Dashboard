@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { flushSync } from 'react-dom'
 import { useFinStore, CLOSING_MONTHS } from '../../store/useFinStore'
 import { useImportStore } from '../../store/useImportStore'
 import { useOhwStore } from '../../store/useOhwStore'
@@ -471,14 +472,19 @@ export function MaandTab({ filter: _filter }: Props) {
   }
 
   const handleApprove = (record: ImportRecord) => {
-    // Sluit de modal ALTIJD eerst — voorkomt dat een uitzondering in de
-    // downstream store-updates (approveRecord / applyImportToEntries) de
-    // pop-up open laat staan na klikken.
-    setPendingRecord(null)
-    setPendingFile(null)
+    // flushSync: commit de modal-close onmiddellijk (in plaats van batched met
+    // de store-updates hieronder). Mocht een downstream store-call gooien —
+    // bv. localStorage-quota bij grote imports — dan is de modal al dicht.
+    flushSync(() => {
+      setPendingRecord(null)
+      setPendingFile(null)
+    })
+    // Elke stap in z'n eigen try/catch zodat een fout in stap X de andere
+    // stappen niet overslaat (voorbeeld: approveRawEntry faalt op localStorage
+    // quota, maar OHW-regel moet nog steeds geupdated worden).
+    try { approveRecord(record.id) } catch (err) { console.error('approveRecord faalde:', err) }
+    try { approveRawEntry(record.id) } catch (err) { console.error('approveRawEntry faalde:', err) }
     try {
-      approveRecord(record.id)
-      approveRawEntry(record.id)
       applyImportToEntries(record)
       showToast(`${record.slotLabel} goedgekeurd en toegepast`, 'g')
     } catch (err) {
@@ -487,15 +493,13 @@ export function MaandTab({ filter: _filter }: Props) {
   }
 
   const handleReject = (record: ImportRecord, reason: string) => {
-    setPendingRecord(null)
-    setPendingFile(null)
-    try {
-      rejectRecord(record.id, reason)
-      rejectRawEntry(record.id)
-      showToast(`${record.slotLabel} afgekeurd`, 'r')
-    } catch (err) {
-      showToast(`Afkeuren mislukt: ${err instanceof Error ? err.message : String(err)}`, 'r')
-    }
+    flushSync(() => {
+      setPendingRecord(null)
+      setPendingFile(null)
+    })
+    try { rejectRecord(record.id, reason) } catch (err) { console.error('rejectRecord faalde:', err) }
+    try { rejectRawEntry(record.id) } catch (err) { console.error('rejectRawEntry faalde:', err) }
+    showToast(`${record.slotLabel} afgekeurd`, 'r')
   }
 
   /** Verwijder een import record — als het record goedgekeurd was, maak ook
@@ -557,32 +561,33 @@ export function MaandTab({ filter: _filter }: Props) {
   const handleGenericWizardConfirm = (result: ParseResult) => {
     const wizState = genericWizardState
     if (!wizState) return
-    // Sluit de wizard ALTIJD, ook als de downstream state-updates falen —
-    // voorkomt dat een onverwachte exception (bv. tijdelijke store-fout) de
-    // modal open laat en de gebruiker vastzet op stap 4.
-    setGenericWizardState(null)
+    // flushSync: commit wizard-close onmiddellijk, nog vóór store-updates.
+    flushSync(() => { setGenericWizardState(null) })
+
+    const slot = UPLOAD_SLOTS.find(s => s.id === wizState.slotId)!
+    const record: ImportRecord = {
+      id: `${wizState.slotId}-${Date.now()}`,
+      slotId: wizState.slotId,
+      slotLabel: slot.label,
+      month: uploadMonth,
+      fileName: wizState.fileName,
+      uploadedAt: new Date().toLocaleString('nl-NL'),
+      perBv: result.perBv,
+      totalAmount: result.totalAmount,
+      rowCount: result.rowCount,
+      parsedCount: result.parsedCount,
+      skippedCount: result.skippedCount,
+      detectedAmountCol: result.detectedAmountCol,
+      detectedBvCol: result.detectedBvCol,
+      headers: result.headers,
+      preview: result.preview,
+      status: 'pending',
+      warnings: result.warnings,
+    }
+    // Elke store-operatie in eigen try/catch zodat localStorage-quota of
+    // netwerk-issues de approval-modal niet blokkeren.
+    try { addRecord(record) } catch (err) { console.error('addRecord faalde:', err) }
     try {
-      const slot = UPLOAD_SLOTS.find(s => s.id === wizState.slotId)!
-      const record: ImportRecord = {
-        id: `${wizState.slotId}-${Date.now()}`,
-        slotId: wizState.slotId,
-        slotLabel: slot.label,
-        month: uploadMonth,
-        fileName: wizState.fileName,
-        uploadedAt: new Date().toLocaleString('nl-NL'),
-        perBv: result.perBv,
-        totalAmount: result.totalAmount,
-        rowCount: result.rowCount,
-        parsedCount: result.parsedCount,
-        skippedCount: result.skippedCount,
-        detectedAmountCol: result.detectedAmountCol,
-        detectedBvCol: result.detectedBvCol,
-        headers: result.headers,
-        preview: result.preview,
-        status: 'pending',
-        warnings: result.warnings,
-      }
-      addRecord(record)
       addRawEntry({
         recordId: record.id,
         slotId: wizState.slotId,
@@ -595,11 +600,10 @@ export function MaandTab({ filter: _filter }: Props) {
         bvCol: result.detectedBvCol,
         status: 'pending',
       })
-      setPendingFile(wizState.file)
-      setPendingRecord(record)
-    } catch (err) {
-      showToast(`Bevestigen mislukt: ${err instanceof Error ? err.message : String(err)}`, 'r')
-    }
+    } catch (err) { console.error('addRawEntry faalde:', err) }
+
+    setPendingFile(wizState.file)
+    setPendingRecord(record)
   }
 
   // ── Wizard callback: gebruiker heeft bestand-config bevestigd ──
