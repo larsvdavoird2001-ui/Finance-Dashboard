@@ -5,6 +5,15 @@ import { useNavStore } from '../../store/useNavStore'
 import { useEvidenceStore, downloadEvidence, fileIcon, formatFileSize } from '../../store/useEvidenceStore'
 import { useOhwStore } from '../../store/useOhwStore'
 import { CellCommentPopover } from './CellCommentPopover'
+import { OhwCellInput } from './OhwCellInput'
+import { useImportStore } from '../../store/useImportStore'
+
+// Mapping: welk import-slot landt bij welke OHW-rij. Multi-BV slots hebben
+// per-BV targets, single-BV slots hebben één vaste entity/rowId. Gebruikt
+// voor de per-cel sync-indicator (toont "↻" als de OHW-waarde afwijkt van
+// de geïmporteerde waarde).
+const MULTI_BV_SOURCE_SLOTS = new Set(['uren_lijst'])
+const SINGLE_BV_SOURCE_SLOTS = new Set(['d_lijst', 'conceptfacturen', 'missing_hours', 'ohw'])
 
 interface Props {
   section: OhwSectionType
@@ -145,6 +154,22 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
   const updateRowContactStore = useOhwStore(s => s.updateRowContact)
   const deleteRowStore = useOhwStore(s => s.deleteRow)
   const removeSectionStore = useOhwStore(s => s.removeSection)
+  const importRecords = useImportStore(s => s.records)
+
+  /** Zoek het verwachte bedrag voor een locked rij in een specifieke maand,
+   *  op basis van de laatste goedgekeurde ImportRecord voor die (slot, maand).
+   *  Retourneert null als er geen import-record is (dan is er niks om tegen
+   *  te vergelijken). */
+  const getExpectedValue = (sourceSlot: string | undefined, month: string): number | null => {
+    if (!sourceSlot || !entity) return null
+    const approved = importRecords
+      .filter(r => r.slotId === sourceSlot && r.month === month && r.status === 'approved')
+    if (approved.length === 0) return null
+    const latest = approved[approved.length - 1]
+    if (MULTI_BV_SOURCE_SLOTS.has(sourceSlot)) return Math.round(latest.perBv[entity] ?? 0)
+    if (SINGLE_BV_SOURCE_SLOTS.has(sourceSlot)) return Math.round(latest.totalAmount)
+    return null
+  }
 
   const startOverride = (row: OhwRow, month: string) => {
     const currentValue = gv(row.values, month)
@@ -172,13 +197,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
     updateRowRemarkStore('2026', entity, rowId, month, '')
   }
 
-  const updateCell = useCallback((rowId: string, month: string, raw: string) => {
-    const v = parseNL(raw)
-    onChange({
-      ...section,
-      rows: section.rows.map(r => r.id === rowId ? { ...r, values: { ...r.values, [month]: v } } : r),
-    })
-  }, [section, onChange])
+  // updateCell is nu inline in de cell-input; deze helper is niet meer nodig
 
   const addRow = useCallback(() => {
     const newRow: OhwRow = { id: `new-${Date.now()}`, description: '', values: {} }
@@ -295,10 +314,13 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                 // Locked rows: read-only maar met optionele handmatige override
                 if (row.locked) {
                   const clickable = !!row.sourceSlot && v !== 0
+                  // Sync-check: wijkt huidige waarde af van het laatste import-bestand?
+                  const expected = getExpectedValue(row.sourceSlot, m)
+                  const outOfSync = expected !== null && Math.abs(v - expected) > 1
                   return (
                     <td key={m} className="mono r" style={{
                       padding: '4px 8px',
-                      background: cellRemark ? 'rgba(245,166,35,0.07)' : 'var(--bg2)',
+                      background: cellRemark ? 'rgba(245,166,35,0.07)' : outOfSync ? 'rgba(245,166,35,0.05)' : 'var(--bg2)',
                       fontSize: 12, color: v !== 0 ? 'var(--t1)' : 'var(--t3)',
                       position: 'relative',
                     }}>
@@ -309,6 +331,21 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                             title={`Handmatige toelichting: ${cellRemark}\n(klik ✏ om te wijzigen, klik 💬 om toelichting te verwijderen)`}
                             onClick={(e) => { e.stopPropagation(); clearOverride(row.id, m) }}
                           >💬</span>
+                        )}
+                        {outOfSync && expected !== null && entity && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (!confirm(`Huidige waarde: ${fmt(v)}\nImport-waarde: ${fmt(expected)}\n\nTerugzetten naar de waarde uit het geïmporteerde bestand?`)) return
+                              updateRowValueStore(year, entity, row.id, m, expected)
+                            }}
+                            style={{
+                              background: 'var(--bd-amber)', border: '1px solid var(--amber)',
+                              borderRadius: 3, color: 'var(--amber)', cursor: 'pointer',
+                              fontSize: 10, padding: '0 4px', lineHeight: 1.4, fontWeight: 700,
+                            }}
+                            title={`⚠ Afwijking: huidige waarde (${fmt(v)}) komt niet overeen met import (${fmt(expected)}). Klik om te synchroniseren met het geüploade bestand.`}
+                          >↻</button>
                         )}
                         {clickable ? (
                           <button
@@ -349,13 +386,14 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                     style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)', position: 'relative' }}
                     className="ohw-cell-hoverable"
                   >
-                    <input
-                      key={`${row.id}-${m}`}
-                      className="ohw-inp"
-                      defaultValue={v !== 0 ? fmt(v) : ''}
-                      placeholder="—"
-                      onBlur={e => updateCell(row.id, m, e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                    <OhwCellInput
+                      value={v}
+                      onCommit={next => onChange({
+                        ...section,
+                        rows: section.rows.map(r => r.id === row.id ? { ...r, values: { ...r.values, [m]: next } } : r),
+                      })}
+                      navRow={row.id}
+                      navCol={m}
                     />
                     {entity && (
                       <CellCommentPopover

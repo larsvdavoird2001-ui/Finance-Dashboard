@@ -1,9 +1,10 @@
 import { memo, useState, useCallback, useEffect, useRef } from 'react'
 import type { OhwEntityData } from '../../data/types'
-import { fmt, gv, parseNL } from '../../lib/format'
+import { fmt, gv } from '../../lib/format'
 import { OhwSection } from './OhwSection'
 import { IcSection } from './IcSection'
 import { MetricRow } from './MetricRow'
+import { OhwCellInput } from './OhwCellInput'
 import { useOhwStore } from '../../store/useOhwStore'
 
 interface Props {
@@ -302,16 +303,11 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                         const v = gv(row.values, m)
                         return (
                           <td key={m} style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)' }}>
-                            <input
-                              key={`${row.id}-${m}`}
-                              className="ohw-inp"
-                              defaultValue={v !== 0 ? fmt(v) : ''}
-                              placeholder="—"
-                              onBlur={e => {
-                                const next = parseNL(e.target.value || '0')
-                                updateRowValueStore(year, entity.entity, row.id, m, isNaN(next) ? 0 : next)
-                              }}
-                              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                            <OhwCellInput
+                              value={v}
+                              onCommit={next => updateRowValueStore(year, entity.entity, row.id, m, next)}
+                              navRow={`vf-${row.id}`}
+                              navCol={m}
                             />
                           </td>
                         )

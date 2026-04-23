@@ -575,22 +575,6 @@ export function MaandTab({ filter: _filter }: Props) {
     else showToast('Geen BV-verdeling beschikbaar — vul handmatig in', 'r')
   }
 
-  /** Her-apply ALLE goedgekeurde imports naar de OHW / closing entries.
-   *  Handig na een OHW-reset of wanneer de OHW rij waardes kwijt zijn maar
-   *  de goedgekeurde records nog steeds bestaan. */
-  const reapplyAllApprovedImports = () => {
-    const approved = importRecords.filter(r => r.status === 'approved')
-    if (approved.length === 0) {
-      showToast('Geen goedgekeurde imports om opnieuw toe te passen', 'r')
-      return
-    }
-    let count = 0
-    for (const rec of approved) {
-      try { applyImportToEntries(rec); count++ } catch (err) { console.error('reapply faalde voor', rec.id, err) }
-    }
-    showToast(`${count} goedgekeurde import${count === 1 ? '' : 's'} opnieuw toegepast op OHW / closing entries`, 'g')
-  }
-
   const handleApprove = (record: ImportRecord) => {
     // flushSync: commit de modal-close onmiddellijk (in plaats van batched met
     // de store-updates hieronder). Mocht een downstream store-call gooien —
@@ -1056,23 +1040,10 @@ export function MaandTab({ filter: _filter }: Props) {
         {/* ── IMPORT SECTION ──────────────────────────────────────────────── */}
         {activeSection === 'import' && (
           <>
-            <div style={{ background: 'var(--bd-blue)', border: '1px solid var(--blue)', borderRadius: 8, padding: '10px 14px', fontSize: 11, color: 'var(--t2)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 280 }}>
-                <strong style={{ color: 'var(--blue)' }}>ℹ Bestandsimport voor {uploadMonth}</strong> — Upload SAP-exports of de OHW-Excel.
-                Na het inlezen zie je een pop-up met de gedetecteerde bedragen per BV. Jij keurt goed of af vóór de cijfers worden doorgezet.
-                Je kunt ook altijd handmatig invullen in de Maandafsluiting — dan verschijnt wel een waarschuwing dat onderbouwing ontbreekt.
-              </div>
-              <button
-                className="btn sm"
-                style={{
-                  background: 'var(--bd-green)', color: 'var(--green)', border: '1px solid var(--green)',
-                  fontSize: 11, padding: '6px 12px', whiteSpace: 'nowrap',
-                }}
-                onClick={reapplyAllApprovedImports}
-                title="Pas alle reeds goedgekeurde imports opnieuw toe op OHW/closing entries. Handig als de OHW-rijen na een reset leeg zijn."
-              >
-                ↻ Her-apply goedgekeurde imports naar OHW
-              </button>
+            <div style={{ background: 'var(--bd-blue)', border: '1px solid var(--blue)', borderRadius: 8, padding: '10px 14px', fontSize: 11, color: 'var(--t2)' }}>
+              <strong style={{ color: 'var(--blue)' }}>ℹ Bestandsimport voor {uploadMonth}</strong> — Upload SAP-exports of de OHW-Excel.
+              Na het inlezen zie je een pop-up met de gedetecteerde bedragen per BV. Jij keurt goed of af vóór de cijfers worden doorgezet.
+              Je kunt ook altijd handmatig invullen in de Maandafsluiting — dan verschijnt wel een waarschuwing dat onderbouwing ontbreekt.
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>

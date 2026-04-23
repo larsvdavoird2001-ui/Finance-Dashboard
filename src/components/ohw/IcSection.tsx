@@ -1,7 +1,8 @@
 import { memo, useState, useCallback } from 'react'
 import type { OhwRow } from '../../data/types'
-import { fmt, parseNL, gv } from '../../lib/format'
+import { fmt, gv } from '../../lib/format'
 import { useOhwStore } from '../../store/useOhwStore'
+import { OhwCellInput } from './OhwCellInput'
 
 type BvName = 'Consultancy' | 'Projects' | 'Software'
 const BVS: BvName[] = ['Consultancy', 'Projects', 'Software']
@@ -251,17 +252,7 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
 
   const updateRowContactStore = useOhwStore(s => s.updateRowContact)
 
-  const updateCell = useCallback((row: OhwRow, month: string, raw: string) => {
-    const v = parseNL(raw)
-    if (row.icPairId) {
-      // Pair: via store-actie zodat de mirror ook geupdate wordt
-      updateIcPairValue(year, currentBv, row.id, month, v)
-    } else {
-      // Gewone IC-rij zonder pair
-      onChange(rows.map(r => r.id === row.id ? { ...r, values: { ...r.values, [month]: v } } : r))
-    }
-  }, [rows, onChange, updateIcPairValue, year, currentBv])
-
+  // updateCell is nu inline in de OhwCellInput
   const updateDescription = useCallback((row: OhwRow, desc: string) => {
     if (row.icPairId) {
       updateIcPairDescription(year, row.icPairId, desc)
@@ -348,15 +339,16 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
               const v = gv(row.values, m)
               return (
                 <td key={m} style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)' }}>
-                  <input
-                    key={`${row.id}-${m}-${v}`}
-                    className="ohw-inp"
+                  <OhwCellInput
+                    value={v}
+                    onCommit={next => {
+                      if (row.icPairId) updateIcPairValue(year, currentBv, row.id, m, next)
+                      else onChange(rows.map(r => r.id === row.id ? { ...r, values: { ...r.values, [m]: next } } : r))
+                    }}
+                    navRow={`ic-${row.id}`}
+                    navCol={m}
                     style={{ fontSize: 11, color: v < 0 ? 'var(--red)' : v > 0 ? 'var(--green)' : 'var(--t3)' }}
-                    defaultValue={v !== 0 ? fmt(v) : ''}
-                    placeholder="—"
                     title={isPaired ? `Pair — spiegelt naar ${row.icFromBv === currentBv ? row.icToBv : row.icFromBv} met omgekeerd teken` : undefined}
-                    onBlur={e => updateCell(row, m, e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                   />
                 </td>
               )
