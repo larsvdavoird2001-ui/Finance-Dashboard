@@ -6,7 +6,6 @@ import { PL_STRUCTURE, ytdBudget2026, ytdActuals2025, ytdBudget2025, monthlyActu
 import type { EntityName } from '../../data/plData'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
-import { useOhwStore } from '../../store/useOhwStore'
 import { useFteStore } from '../../store/useFteStore'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
@@ -37,7 +36,6 @@ type EditTarget = { kind: 'budget' | 'le'; e: EntityName; m: string; k: string }
 
 export function BudgetsTab({ filter: _filter }: Props) {
   const store = useBudgetStore()
-  const ohwData2026 = useOhwStore(s => s.data2026)
   const fteGetEntry = useFteStore(s => s.getEntry)
   // Trigger re-render bij FTE wijzigingen
   useFteStore(s => s.entries)
