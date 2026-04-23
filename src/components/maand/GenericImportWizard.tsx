@@ -175,12 +175,35 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
     if (step === 1) return !!sheetName
     if (step === 2) return headerRow >= 0 && headers.length > 0
     if (step === 3) return !!amountCol && (isSingleBv || !!bvCol) && !!livePreview
-    if (step === 4) return !!livePreview
+    // Op stap 4 is de gebruiker al langs de validatie van stap 3 — de
+    // Bevestigen-knop moet klikbaar blijven zelfs als livePreview tijdelijk
+    // null is (handleConfirm heeft een fallback die opnieuw berekent).
+    if (step === 4) return !!amountCol && (isSingleBv || !!bvCol)
     return false
   }
 
   const handleConfirm = () => {
-    if (!livePreview) return
+    if (!livePreview) {
+      // Defensieve fallback — mocht de live preview onverwacht leeg zijn,
+      // nog steeds zelf opnieuw berekenen zodat de modal niet vastloopt.
+      console.warn('[GenericImportWizard] handleConfirm: livePreview ontbreekt — opnieuw berekenen')
+      try {
+        const cfg: GenericImportConfig = {
+          amountCol,
+          bvCol: bvCol || undefined,
+          bvFilter: bvFilter || undefined,
+          filterCol: filterCol || undefined,
+          filterValue: filterCol && filterValue ? filterValue : undefined,
+          excludedRowIndices: excludedRows,
+        }
+        const r = computeGenericImport(headers, dataRows, slotId, cfg)
+        onConfirm(r, { sheetName, headerRow, amountCol, bvCol: bvCol || undefined, bvFilter: (bvFilter || undefined) as BvId | undefined })
+      } catch (err) {
+        console.error('[GenericImportWizard] compute fallback mislukt:', err)
+        onCancel()
+      }
+      return
+    }
     onConfirm(livePreview, {
       sheetName,
       headerRow,

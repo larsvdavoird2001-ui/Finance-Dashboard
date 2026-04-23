@@ -544,43 +544,51 @@ export function MaandTab({ filter: _filter }: Props) {
 
   // ── Generic wizard callback: factuurvolume / geschreven_uren / etc ──
   const handleGenericWizardConfirm = (result: ParseResult) => {
-    if (!genericWizardState) return
-    const slot = UPLOAD_SLOTS.find(s => s.id === genericWizardState.slotId)!
-    const record: ImportRecord = {
-      id: `${genericWizardState.slotId}-${Date.now()}`,
-      slotId: genericWizardState.slotId,
-      slotLabel: slot.label,
-      month: uploadMonth,
-      fileName: genericWizardState.fileName,
-      uploadedAt: new Date().toLocaleString('nl-NL'),
-      perBv: result.perBv,
-      totalAmount: result.totalAmount,
-      rowCount: result.rowCount,
-      parsedCount: result.parsedCount,
-      skippedCount: result.skippedCount,
-      detectedAmountCol: result.detectedAmountCol,
-      detectedBvCol: result.detectedBvCol,
-      headers: result.headers,
-      preview: result.preview,
-      status: 'pending',
-      warnings: result.warnings,
-    }
-    addRecord(record)
-    addRawEntry({
-      recordId: record.id,
-      slotId: genericWizardState.slotId,
-      slotLabel: slot.label,
-      month: uploadMonth,
-      fileName: genericWizardState.fileName,
-      uploadedAt: record.uploadedAt,
-      rows: result.rawRows,
-      amountCol: result.detectedAmountCol,
-      bvCol: result.detectedBvCol,
-      status: 'pending',
-    })
-    setPendingFile(genericWizardState.file)
-    setPendingRecord(record)
+    const wizState = genericWizardState
+    if (!wizState) return
+    // Sluit de wizard ALTIJD, ook als de downstream state-updates falen —
+    // voorkomt dat een onverwachte exception (bv. tijdelijke store-fout) de
+    // modal open laat en de gebruiker vastzet op stap 4.
     setGenericWizardState(null)
+    try {
+      const slot = UPLOAD_SLOTS.find(s => s.id === wizState.slotId)!
+      const record: ImportRecord = {
+        id: `${wizState.slotId}-${Date.now()}`,
+        slotId: wizState.slotId,
+        slotLabel: slot.label,
+        month: uploadMonth,
+        fileName: wizState.fileName,
+        uploadedAt: new Date().toLocaleString('nl-NL'),
+        perBv: result.perBv,
+        totalAmount: result.totalAmount,
+        rowCount: result.rowCount,
+        parsedCount: result.parsedCount,
+        skippedCount: result.skippedCount,
+        detectedAmountCol: result.detectedAmountCol,
+        detectedBvCol: result.detectedBvCol,
+        headers: result.headers,
+        preview: result.preview,
+        status: 'pending',
+        warnings: result.warnings,
+      }
+      addRecord(record)
+      addRawEntry({
+        recordId: record.id,
+        slotId: wizState.slotId,
+        slotLabel: slot.label,
+        month: uploadMonth,
+        fileName: wizState.fileName,
+        uploadedAt: record.uploadedAt,
+        rows: result.rawRows,
+        amountCol: result.detectedAmountCol,
+        bvCol: result.detectedBvCol,
+        status: 'pending',
+      })
+      setPendingFile(wizState.file)
+      setPendingRecord(record)
+    } catch (err) {
+      showToast(`Bevestigen mislukt: ${err instanceof Error ? err.message : String(err)}`, 'r')
+    }
   }
 
   // ── Wizard callback: gebruiker heeft bestand-config bevestigd ──
