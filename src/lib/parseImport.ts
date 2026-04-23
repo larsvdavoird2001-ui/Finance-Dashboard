@@ -1813,6 +1813,33 @@ export function suggestGenericImportColumns(
     }
   }
 
+  // Voor single-BV slots (d_lijst, conceptfacturen) die de fuzzy `detectBv`
+  // niet betrouwbaar op kostenplaats-codes (C00001 / P15000) kunnen uitvoeren:
+  // suggereer de BV-kolom als STRICT filter-kolom. Zo ziet de gebruiker de
+  // distinct waardes in de UI en kan zelf exact filteren. Als we ook nog een
+  // waarde kunnen matchen aan target-BV, vullen we die alvast als default.
+  if (!filterCol && slotConfig.targetBv && bvCol) {
+    const targetBv = slotConfig.targetBv
+    filterCol = bvCol   // altijd voorstellen — user ziet distinct list
+    const distinct = new Map<string, number>()
+    for (const row of sample) {
+      const raw = String(row[bvCol] ?? '').trim()
+      if (!raw) continue
+      distinct.set(raw, (distinct.get(raw) ?? 0) + 1)
+    }
+    // Pak de meest-voorkomende waarde die detectBv als target-BV classificeert
+    // als default filterwaarde. Anders laat default leeg (user kiest zelf).
+    let bestValue = ''
+    let bestCount = 0
+    for (const [val, count] of distinct.entries()) {
+      if (detectBvFromValue(val) === targetBv && count > bestCount) {
+        bestValue = val
+        bestCount = count
+      }
+    }
+    if (bestValue) filterValue = bestValue
+  }
+
   return { amountCol, bvCol, bvFilterSuggestion, filterCol, filterValue }
 }
 
