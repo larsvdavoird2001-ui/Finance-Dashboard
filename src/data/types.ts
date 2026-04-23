@@ -11,6 +11,14 @@ export interface OhwRow {
   /** Per-maand toelichtingen bij handmatige override op een locked-rij.
    *  Key = maand (bv. 'Mar-26'), value = reden-tekst ingevoerd door user. */
   remarks?: Record<string, string>
+  /** IC-pair link: gedeeld tussen de twee gekoppelde rijen (één per BV).
+   *  Wijzigingen aan de ene rij worden automatisch gespiegeld naar de
+   *  rij met dezelfde icPairId in de andere BV (met omgekeerd teken). */
+  icPairId?: string
+  /** BV die betaalt (ziet de waarde met minteken). Alleen gezet op IC-pair rijen. */
+  icFromBv?: 'Consultancy' | 'Projects' | 'Software'
+  /** BV die ontvangt (ziet de waarde met plusteken). Alleen gezet op IC-pair rijen. */
+  icToBv?: 'Consultancy' | 'Projects' | 'Software'
 }
 
 export interface OhwSection {

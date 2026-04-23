@@ -117,6 +117,7 @@ export function OhwTab({ data2025, data2026, onEntityChange, showToast }: Props)
           key={entity.entity}
           entity={entity}
           displayMonths={displayMonths}
+          year={year}
           onChange={updated => onEntityChange(year, updated)}
           onSave={() => showToast(`OHW ${entity.entity} opgeslagen`, 'g')}
         />

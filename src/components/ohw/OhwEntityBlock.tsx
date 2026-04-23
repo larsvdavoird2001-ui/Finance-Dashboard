@@ -9,6 +9,8 @@ interface Props {
   entity: OhwEntityData
   displayMonths: string[]
   onChange: (updated: OhwEntityData) => void
+  /** Jaar waar deze entity bij hoort (voor IC-pair store-acties). */
+  year: '2025' | '2026'
   /** @deprecated auto-opslaan is nu actief; dit is kosmetisch */
   onSave?: () => void
 }
@@ -20,7 +22,7 @@ const STICKY: React.CSSProperties = {
   boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.08)',
 }
 
-export const OhwEntityBlock = memo(function OhwEntityBlock({ entity, displayMonths, onChange, onSave: _onSave }: Props) {
+export const OhwEntityBlock = memo(function OhwEntityBlock({ entity, displayMonths, onChange, year, onSave: _onSave }: Props) {
   const [open, setOpen] = useState(true)
   const isSoftware = entity.entity === 'Software'
   const nc = displayMonths.length
@@ -147,7 +149,14 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({ entity, displayMont
               <MetricRow label="Netto Omzet voor IC" dict={entity.nettoOmzetVoorIC} months={displayMonths} rowBg="var(--bg2)" />
 
               {/* ── IC Verrekening ─────────────────────────────── */}
-              <IcSection rows={entity.icVerrekening} totaalIC={entity.totaalIC} months={displayMonths} onChange={handleICChange} />
+              <IcSection
+                rows={entity.icVerrekening}
+                totaalIC={entity.totaalIC}
+                months={displayMonths}
+                onChange={handleICChange}
+                currentBv={entity.entity as 'Consultancy' | 'Projects' | 'Software'}
+                year={year}
+              />
 
               {/* ── Totals & summary ──────────────────────────── */}
               <MetricRow label="Totaal IC" dict={entity.totaalIC} months={displayMonths} bold colorize rowBg="var(--bg3)" />
