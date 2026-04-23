@@ -34,6 +34,8 @@ export default function App() {
   useEffect(() => {
     if (navPending?.tab === 'maand') {
       setTab('maand')
+    } else if (navPending?.tab === 'ohw') {
+      setTab('ohw')
     }
   }, [navPending])
 

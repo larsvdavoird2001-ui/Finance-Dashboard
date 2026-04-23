@@ -10,6 +10,16 @@ interface Props {
   entity?: string  // BV (Consultancy / Projects / Software) — voor bijlagen-lookup
   months: string[]
   onChange: (updated: OhwSectionType) => void
+  /** Breedte van de omschrijving-kolom (resizable via drag-handle in header) */
+  descColWidth?: number
+  /** Row-id die tijdelijk gehighlight moet worden (voor nav-deep-link) */
+  flashRowId?: string | null
+}
+
+/** Heeft de rij ÉÉN cel met een niet-null, niet-0 waarde? Dan mag verwijderen
+ *  niet. Per-cel remarks tellen niet als "waarde". */
+function rowHasAnyValue(row: OhwRow): boolean {
+  return Object.values(row.values ?? {}).some(v => v !== null && v !== undefined && v !== 0)
 }
 
 // Source slot labels for locked rows
@@ -21,11 +31,22 @@ const SOURCE_LABELS: Record<string, string> = {
   conceptfacturen: 'Conceptfacturen',
 }
 
-// Description cell: tekst afgekapt met ellipsis, schuift open bij focus
-// ✕ zit in de eigen last column, niet hier
-function DescCell({ row, onSave }: { row: OhwRow; onSave: (desc: string) => void }) {
+// Description cell: tekst afgekapt met ellipsis, schuift open bij focus.
+// ✕ zit in de eigen last column, niet hier.
+// Breedte volgt descColWidth zodat de header-resize door de hele tabel heen werkt.
+function DescCell({
+  row,
+  onSave,
+  width,
+}: {
+  row: OhwRow
+  onSave: (desc: string) => void
+  width: number
+}) {
   const [expanded, setExpanded] = useState(false)
-  const isTruncatable = (row.description?.length ?? 0) > 38
+  // Effectieve input-breedte: houd wat marge tov de cell
+  const inputWidth = Math.max(180, width - 40)
+  const isTruncatable = (row.description?.length ?? 0) > (width / 8)
 
   // Locked rows: toon alleen tekst, geen input
   if (row.locked) {
@@ -36,13 +57,14 @@ function DescCell({ row, onSave }: { row: OhwRow; onSave: (desc: string) => void
         background: 'var(--bg2)',
         zIndex: 1,
         boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
+        width, minWidth: width, maxWidth: width,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: inputWidth }}>
           <span style={{ fontSize: 10, color: 'var(--t3)', flexShrink: 0 }} title="Vast veld — wordt gevuld vanuit import">🔒</span>
           <span style={{
             fontSize: 12, color: 'var(--t1)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            maxWidth: 280,
+            flex: 1, minWidth: 0,
           }} title={row.description}>
             {row.description}
           </span>
@@ -66,6 +88,7 @@ function DescCell({ row, onSave }: { row: OhwRow; onSave: (desc: string) => void
       background: 'var(--bg2)',
       zIndex: expanded ? 6 : 1,
       boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
+      width, minWidth: width, maxWidth: width,
     }}>
       {/* Wrapper voor de expand-pijl overlay */}
       <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
@@ -73,15 +96,13 @@ function DescCell({ row, onSave }: { row: OhwRow; onSave: (desc: string) => void
           key={row.id}
           className="ohw-inp"
           style={{
-            width: expanded ? 520 : 260,
+            width: expanded ? Math.max(inputWidth, 520) : inputWidth,
             textAlign: 'left',
             background: expanded ? 'var(--bg4)' : 'transparent',
             border: expanded ? '1px solid var(--blue)' : 'none',
-            // Ellipsis wanneer niet expanded
             overflow: expanded ? 'visible' : 'hidden',
             textOverflow: expanded ? 'clip' : 'ellipsis',
             whiteSpace: 'nowrap',
-            // Ruimte voor expand-pijl rechts
             paddingRight: isTruncatable && !expanded ? 20 : 7,
             transition: 'width 0.18s ease, background 0.12s',
             boxShadow: expanded ? '0 4px 16px rgba(0,0,0,0.4)' : 'none',
@@ -93,7 +114,6 @@ function DescCell({ row, onSave }: { row: OhwRow; onSave: (desc: string) => void
           onFocus={() => setExpanded(true)}
           onBlur={e => { setExpanded(false); onSave(e.target.value) }}
         />
-        {/* Expand-pijl: overlaid rechts in het inputveld */}
         {isTruncatable && !expanded && (
           <span style={{
             position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)',
@@ -106,7 +126,7 @@ function DescCell({ row, onSave }: { row: OhwRow; onSave: (desc: string) => void
   )
 }
 
-export const OhwSection = memo(function OhwSection({ section, entity, months, onChange }: Props) {
+export const OhwSection = memo(function OhwSection({ section, entity, months, onChange, descColWidth = 340, flashRowId }: Props) {
   const [open, setOpen] = useState(true)
   const navigateTo = useNavStore(s => s.navigateTo)
   const evidenceEntries = useEvidenceStore(s => s.entries)
@@ -156,9 +176,10 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
   }, [section, onChange])
 
   const removeRow = useCallback((id: string) => {
-    // Voorkom verwijdering van locked rows
+    // Voorkom verwijdering van locked rows OF rijen met ingevulde waardes
     const row = section.rows.find(r => r.id === id)
-    if (row?.locked) return
+    if (!row || row.locked) return
+    if (rowHasAnyValue(row)) return
     onChange({ ...section, rows: section.rows.filter(r => r.id !== id) })
   }, [section, onChange])
 
@@ -200,8 +221,12 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
             const isEvidenceOpen = expandedEvidenceRow === row.id
             return (
           <Fragment key={row.id}>
-          <tr className="sub">
-              <DescCell row={row} onSave={desc => updateDescription(row.id, desc)} />
+          <tr
+            id={`ohw-row-${entity}-${row.id}`}
+            className="sub"
+            style={flashRowId === row.id ? { outline: '2px solid var(--blue)', outlineOffset: '-2px', background: 'rgba(0,169,224,0.08)' } : undefined}
+          >
+              <DescCell row={row} onSave={desc => updateDescription(row.id, desc)} width={descColWidth} />
               {months.map(m => {
                 const v = gv(row.values, m)
                 const cellRemark = row.remarks?.[m]
@@ -282,9 +307,22 @@ export const OhwSection = memo(function OhwSection({ section, entity, months, on
                       📎 {rowEvidence.length}
                     </button>
                   )}
-                  {!row.locked && (
-                    <button className="btn sm ghost" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removeRow(row.id)}>✕</button>
-                  )}
+                  {!row.locked && (() => {
+                    const hasValue = rowHasAnyValue(row)
+                    return (
+                      <button
+                        className="btn sm ghost"
+                        style={{
+                          color: hasValue ? 'var(--t3)' : 'var(--red)',
+                          padding: '2px 6px',
+                          cursor: hasValue ? 'not-allowed' : 'pointer',
+                          opacity: hasValue ? 0.4 : 1,
+                        }}
+                        onClick={() => !hasValue && removeRow(row.id)}
+                        title={hasValue ? 'Maak eerst alle cellen leeg om deze rij te kunnen verwijderen' : 'Verwijder deze regel'}
+                      >✕</button>
+                    )
+                  })()}
                 </div>
               </td>
             </tr>

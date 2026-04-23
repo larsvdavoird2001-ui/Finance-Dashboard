@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { OhwYearData, OhwEntityData } from '../../data/types'
 import { fmt, gv } from '../../lib/format'
 import { OhwEntityBlock } from './OhwEntityBlock'
+import { useNavStore } from '../../store/useNavStore'
 
 interface Props {
   data2025: OhwYearData
@@ -20,6 +21,25 @@ export function OhwTab({ data2025, data2026, onEntityChange, showToast }: Props)
   const [year, setYear] = useState<'2025' | '2026'>('2026')
   const yearData = year === '2025' ? data2025 : data2026
   const { displayMonths, entities } = yearData
+
+  // Deep-link navigatie vanuit Maandafsluiting (of andere tabs). Als er een
+  // pending nav-target is voor tab='ohw', consumeer hem: switch jaar indien
+  // nodig en geef `highlightRowId` door aan het juiste BV-blok.
+  const navPending = useNavStore(s => s.pending)
+  const navConsume = useNavStore(s => s.consume)
+  const [highlight, setHighlight] = useState<{ entity: string; rowId: string } | null>(null)
+  useEffect(() => {
+    if (navPending?.tab !== 'ohw') return
+    const target = navConsume()
+    if (!target) return
+    if (target.year && target.year !== year) setYear(target.year)
+    if (target.entity && target.rowId) {
+      setHighlight({ entity: target.entity, rowId: target.rowId })
+      // Reset highlight na animatie zodat re-navigatie naar zelfde rij weer flasht
+      setTimeout(() => setHighlight(null), 3000)
+    }
+    void showToast  // unused in nav effect — silence lint
+  }, [navPending, year, navConsume, showToast])
 
   const summaryRows = ['Consultancy', 'Projects', 'Software']
 
@@ -120,6 +140,7 @@ export function OhwTab({ data2025, data2026, onEntityChange, showToast }: Props)
           year={year}
           onChange={updated => onEntityChange(year, updated)}
           onSave={() => showToast(`OHW ${entity.entity} opgeslagen`, 'g')}
+          highlightRowId={highlight?.entity === entity.entity ? highlight.rowId : null}
         />
       ))}
     </div>

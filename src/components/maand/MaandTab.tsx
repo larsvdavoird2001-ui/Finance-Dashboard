@@ -151,6 +151,7 @@ export function MaandTab({ filter: _filter }: Props) {
   // Navigatie vanuit andere tabs (bijv. OHW → klik op getal → ga naar import)
   const navPending = useNavStore(s => s.pending)
   const navConsume = useNavStore(s => s.consume)
+  const navigateTo = useNavStore(s => s.navigateTo)
   useEffect(() => {
     const target = navConsume()
     if (target?.section === 'import') {
@@ -1175,41 +1176,58 @@ export function MaandTab({ filter: _filter }: Props) {
                       </>
                     )}
 
-                    {sectionRow('OHW mutatie (periode-allocatie)',
-                      <>
-                        {BVS.map(bv => {
-                          const mut = getOhwMutatie(bv)
-                          const hasData = ohwData2026.entities.some(e => e.entity === bv && e.mutatieOhw[month] != null)
-                          return (
-                            <td key={bv} className="r" style={{ padding: '4px 8px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                                <span
-                                  title="Automatisch ingevuld vanuit OHW Overzicht — wijzig dit in de OHW tab"
-                                  style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    background: 'var(--bg3)', border: '1px solid var(--bd2)',
-                                    borderRadius: 6, padding: '4px 10px',
-                                    fontFamily: 'var(--mono)', fontSize: 12,
-                                    color: mut >= 0 ? 'var(--green)' : 'var(--red)',
-                                    cursor: 'default', userSelect: 'none',
-                                    width: 130, justifyContent: 'flex-end',
-                                  }}
-                                >
-                                  {hasData ? fmt(mut) : <span style={{ color: 'var(--t3)' }}>—</span>}
-                                  <span style={{ fontSize: 10, color: 'var(--t3)', flexShrink: 0 }} title="Automatisch vanuit OHW Overzicht">🔒</span>
-                                </span>
+                    <tr>
+                      <td style={{ padding: '6px 12px', minWidth: 240, position: 'sticky', left: 0, background: 'var(--bg1)', zIndex: 1 }}>
+                        <button
+                          onClick={() => navigateTo({ tab: 'ohw', year: '2026', rowId: 'mutatieOhw' })}
+                          title="Klik om naar OHW Overzicht te springen (rij 'Mutatie OHW' wordt gehighlight)"
+                          style={{
+                            background: 'none', border: 'none', padding: 0,
+                            color: 'var(--blue)', cursor: 'pointer',
+                            font: 'inherit', textAlign: 'left',
+                            textDecoration: 'underline', textDecorationStyle: 'dotted',
+                            textUnderlineOffset: 3,
+                          }}
+                        >
+                          OHW mutatie (periode-allocatie) <span style={{ fontSize: 9, color: 'var(--t3)', marginLeft: 2 }}>↗</span>
+                        </button>
+                      </td>
+                      {BVS.map(bv => {
+                        const mut = getOhwMutatie(bv)
+                        const hasData = ohwData2026.entities.some(e => e.entity === bv && e.mutatieOhw[month] != null)
+                        return (
+                          <td key={bv} className="r" style={{ padding: '4px 8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                              <button
+                                title={`Klik om naar OHW Overzicht → ${bv} → Mutatie OHW te springen`}
+                                onClick={() => navigateTo({ tab: 'ohw', year: '2026', entity: bv, rowId: 'mutatieOhw' })}
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  background: 'var(--bg3)', border: '1px solid var(--bd2)',
+                                  borderRadius: 6, padding: '4px 10px',
+                                  fontFamily: 'var(--mono)', fontSize: 12,
+                                  color: mut >= 0 ? 'var(--green)' : 'var(--red)',
+                                  cursor: 'pointer', userSelect: 'none',
+                                  width: 130, justifyContent: 'flex-end',
+                                  transition: 'border-color 0.15s',
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--blue)' }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--bd2)' }}
+                              >
+                                {hasData ? fmt(mut) : <span style={{ color: 'var(--t3)' }}>—</span>}
+                                <span style={{ fontSize: 10, color: 'var(--t3)', flexShrink: 0 }}>↗</span>
+                              </button>
+                            </div>
+                            {!hasData && (
+                              <div style={{ fontSize: 9, color: 'var(--t3)', textAlign: 'right', marginTop: 2 }}>
+                                Geen OHW-data
                               </div>
-                              {!hasData && (
-                                <div style={{ fontSize: 9, color: 'var(--t3)', textAlign: 'right', marginTop: 2 }}>
-                                  Geen OHW-data
-                                </div>
-                              )}
-                            </td>
-                          )
-                        })}
-                        <td className="mono r" style={{ color: totOhw >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmt(totOhw)}</td>
-                      </>
-                    )}
+                            )}
+                          </td>
+                        )
+                      })}
+                      <td className="mono r" style={{ color: totOhw >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmt(totOhw)}</td>
+                    </tr>
 
                     {sectionRow('Netto-omzet voor IC verrekening',
                       <>
@@ -1580,97 +1598,6 @@ export function MaandTab({ filter: _filter }: Props) {
                 </div>
               </div>
             )}
-
-            {/* ── OHW Overzicht ─────────────────────────────────────────── */}
-            {(() => {
-              const BV_COLORS: Record<BvId, string> = { Consultancy: '#00a9e0', Projects: '#26c997', Software: '#8b5cf6' }
-              const ohwMonthKey = month // 'Jan-26', 'Feb-26', 'Mar-26'
-              const hasOhwData = ohwData2026.entities.some(e => e.nettoOmzet[ohwMonthKey] != null)
-              return (
-                <div className="card">
-                  <div className="card-hdr">
-                    <span className="card-title">OHW Overzicht — {month}</span>
-                    <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--green)', background: 'var(--bd-green)', padding: '2px 7px', borderRadius: 4 }}>
-                      ● Live vanuit OHW tab
-                    </span>
-                  </div>
-                  {!hasOhwData ? (
-                    <div style={{ padding: '20px 16px', fontSize: 12, color: 'var(--t3)', textAlign: 'center' }}>
-                      Geen OHW-data beschikbaar voor {month}.
-                    </div>
-                  ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table className="tbl">
-                        <thead>
-                          <tr>
-                            <th style={{ minWidth: 220, position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 2 }}>Metric</th>
-                            {BVS.map(bv => (
-                              <th key={bv} className="r" style={{ minWidth: 150 }}>
-                                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: BV_COLORS[bv], marginRight: 6 }} />
-                                {bv}
-                              </th>
-                            ))}
-                            <th className="r" style={{ minWidth: 150, fontWeight: 700 }}>Totaal</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[
-                            { key: 'totaalOnderhanden',    label: 'Totaal OHW (saldo)',       bold: true },
-                            { key: 'mutatieOhw',           label: 'Mutatie OHW',              bold: false },
-                            { key: 'totaalIC',             label: 'IC-verrekening',           bold: false },
-                            { key: 'nettoOmzet',           label: 'Netto-omzet (OHW-bijdrage)', bold: true },
-                            { key: 'budget',               label: 'Budget',                   bold: false },
-                            { key: 'delta',                label: 'Delta (Actuals vs Budget)', bold: false },
-                          ].map(row => {
-                            const vals = BVS.map(bv => {
-                              const entity = ohwData2026.entities.find(e => e.entity === bv)
-                              const v = entity?.[row.key as keyof typeof entity] as Record<string, number | null> | undefined
-                              return v?.[ohwMonthKey] ?? null
-                            })
-                            const tot = vals.reduce<number>((s, v) => s + (v ?? 0), 0)
-                            const isMatchRow = row.key === 'nettoOmzet'
-                            return (
-                              <tr key={row.key} style={{ background: row.bold ? 'var(--bg3)' : undefined }}>
-                                <td style={{ padding: '5px 12px', fontWeight: row.bold ? 700 : 400, position: 'sticky', left: 0, background: row.bold ? 'var(--bg3)' : 'var(--bg2)', zIndex: 1 }}>
-                                  {row.label}
-                                </td>
-                                {vals.map((v, i) => {
-                                  const bv = BVS[i]
-                                  const closingVal = entry(bv) ? (row.key === 'nettoOmzet' ? netRevenue(entry(bv)!, bv) : null) : null
-                                  const diff = isMatchRow && closingVal != null && v != null ? closingVal - v : null
-                                  return (
-                                    <td key={bv} className="mono r" style={{ padding: '5px 8px', fontWeight: row.bold ? 700 : 400 }}>
-                                      {v != null ? (
-                                        <>
-                                          <span style={{ color: row.key === 'delta' ? (v >= 0 ? 'var(--green)' : 'var(--red)') : undefined }}>
-                                            {row.key === 'delta' && v >= 0 ? '+' : ''}{fmt(v)}
-                                          </span>
-                                          {isMatchRow && diff != null && Math.abs(diff) > 1 && (
-                                            <span style={{ fontSize: 9, color: 'var(--amber)', marginLeft: 4 }} title="Verschil t.o.v. closing invoer">
-                                              ⚠ Δ{fmt(diff)}
-                                            </span>
-                                          )}
-                                        </>
-                                      ) : <span style={{ color: 'var(--t3)' }}>—</span>}
-                                    </td>
-                                  )
-                                })}
-                                <td className="mono r" style={{ padding: '5px 8px', fontWeight: row.bold ? 700 : 400, color: row.key === 'delta' ? (tot >= 0 ? 'var(--green)' : 'var(--red)') : undefined }}>
-                                  {row.key === 'delta' && tot >= 0 ? '+' : ''}{fmt(tot)}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <div style={{ padding: '8px 14px', fontSize: 10, color: 'var(--t3)', borderTop: '1px solid var(--bd)' }}>
-                    ⚠ Discrepanties (Δ) tussen OHW-tab en Closing invoer duiden op een afwijking — gebruik "🔄 Sync OHW" om te synchroniseren.
-                  </div>
-                </div>
-              )
-            })()}
 
             {/* ── FTE & Headcount ───────────────────────────────────────── */}
             {FTE_MONTHS.includes(month) && (

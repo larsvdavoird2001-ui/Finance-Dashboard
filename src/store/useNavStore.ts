@@ -1,10 +1,21 @@
 import { create } from 'zustand'
 
-interface NavTarget {
-  tab: 'maand'
-  section: 'import'
-  month: string
-  slotId: string
+/** Algemene nav-target voor cross-tab deep-linking.
+ *  - `tab: 'maand'`  → springen naar Maandafsluiting (sub-section via `section`)
+ *  - `tab: 'ohw'`    → springen naar OHW Overzicht met optionele entity + rowId
+ *                      zodat een specifieke rij in view komt en knippert.
+ */
+export interface NavTarget {
+  tab: 'maand' | 'ohw'
+  /** Voor tab='maand' */
+  section?: 'import' | 'afsluiting' | 'tarieven' | 'fte' | 'export'
+  /** Voor tab='maand' met section='import' (slot-highlight in importoverzicht) */
+  month?: string
+  slotId?: string
+  /** Voor tab='ohw' — welk jaar en BV + welke rij gehighlight moet worden */
+  year?: '2025' | '2026'
+  entity?: 'Consultancy' | 'Projects' | 'Software'
+  rowId?: string
 }
 
 interface NavStore {
