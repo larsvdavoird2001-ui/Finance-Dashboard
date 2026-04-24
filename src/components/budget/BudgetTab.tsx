@@ -77,9 +77,12 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
     setPeriod(filter.year === '2025' ? 'ytd25' : 'ytd26')
   }, [filter.year])
 
+  // Holdings zit alleen in de totalen / analyse wanneer geen specifieke BV
+  // is geselecteerd. Bij een BV-filter toon je ALLEEN die BV — Holdings
+  // vervuilt anders de driver-analyse (grote amortisatie-post etc.).
   const visibleEntities: EntityName[] = filter.bv === 'all'
     ? ALL_ENTITIES
-    : [filter.bv as EntityName, 'Holdings'].filter(e => ALL_ENTITIES.includes(e as EntityName)) as EntityName[]
+    : [filter.bv as EntityName].filter(e => ALL_ENTITIES.includes(e as EntityName)) as EntityName[]
 
   const currentPeriod = periods.find(p => p.id === period) ?? periods[periods.length - 1]
 
