@@ -136,6 +136,21 @@ interface FinStore {
   updateEntry: (id: string, patch: Partial<Omit<ClosingEntry, 'id'>>) => void
   getEntry: (bv: ClosingBv, month: string) => ClosingEntry | undefined
   getMonthEntries: (month: string) => ClosingEntry[]
+  /** Zorgt dat er een entry bestaat voor (bv, month). Returned de entry.
+   *  Nodig voor gevallen waar de persisted state een oude versie was
+   *  (bv. voor Holdings werd toegevoegd). Lazy create maakt een lege
+   *  entry met INITIAL_ENTRIES-defaults. */
+  ensureEntry: (bv: ClosingBv, month: string) => ClosingEntry
+}
+
+/** Merge: voeg ontbrekende INITIAL_ENTRIES toe aan de gegeven lijst.
+ *  Critical voor migraties — users met oudere persisted state (bv. zonder
+ *  Holdings) krijgen de nieuwe entries er automatisch bij. Hiermee bailt
+ *  updateKosten niet meer uit bij Holdings-cellen. */
+function mergeWithInitialEntries(existing: ClosingEntry[]): ClosingEntry[] {
+  const existingIds = new Set(existing.map(e => e.id))
+  const missing = INITIAL_ENTRIES.filter(e => !existingIds.has(e.id))
+  return missing.length > 0 ? [...existing, ...missing] : existing
 }
 
 export const useFinStore = create<FinStore>()(
@@ -152,7 +167,15 @@ export const useFinStore = create<FinStore>()(
         try {
           const rows = await fetchClosingEntries()
           if (rows.length > 0) {
-            set({ entries: rows, loaded: true })
+            // Merge ontbrekende entries (bv. Holdings) aan met de db-rows
+            // zodat migraties van nieuwe BVs/maanden niet verloren gaan.
+            const merged = mergeWithInitialEntries(rows)
+            set({ entries: merged, loaded: true })
+            // Sync ontbrekende default-entries terug naar Supabase
+            if (merged.length > rows.length) {
+              const newOnes = merged.slice(rows.length)
+              await upsertAllClosingEntries(newOnes)
+            }
           } else {
             // Alleen seeden als er lokaal ook niks aangepast is (initial set)
             const current = get().entries
@@ -182,11 +205,40 @@ export const useFinStore = create<FinStore>()(
 
       getMonthEntries: (month) =>
         get().entries.filter(e => e.month === month),
+
+      ensureEntry: (bv, month) => {
+        const existing = get().entries.find(e => e.bv === bv && e.month === month)
+        if (existing) return existing
+        // Fallback op een INITIAL_ENTRIES-template voor (bv, month) of
+        // anders een minimale lege entry.
+        const template = INITIAL_ENTRIES.find(e => e.bv === bv && e.month === month)
+        const fresh: ClosingEntry = template
+          ? { ...template, kostenOverrides: { ...(template.kostenOverrides ?? {}) } }
+          : {
+              id: `${bv[0].toLowerCase()}-${month.replace('-', '').toLowerCase()}`,
+              bv, month,
+              factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+              kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+              operationeleKosten: 0, amortisatieAfschrijvingen: 0,
+              kostenOverrides: {}, remark: '',
+            }
+        set(s => ({ entries: [...s.entries, fresh] }))
+        upsertClosingEntry(fresh)
+        return fresh
+      },
     }),
     {
       name: 'tpg-closing-entries',
       // Alleen entries persisten; `loaded` blijft lokaal bij elke reload false
       partialize: (state) => ({ entries: state.entries }) as unknown as FinStore,
+      // Bij rehydratie: merge ontbrekende default-entries. Zonder deze stap
+      // missen users met oudere localStorage de Holdings-entries, waardoor
+      // updateKosten voor Holdings silently failt (entry niet gevonden → bail).
+      onRehydrateStorage: () => (state) => {
+        if (state && Array.isArray(state.entries)) {
+          state.entries = mergeWithInitialEntries(state.entries)
+        }
+      },
     },
   ),
 )

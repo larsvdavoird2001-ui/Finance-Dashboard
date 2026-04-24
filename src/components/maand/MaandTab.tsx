@@ -241,6 +241,7 @@ export function MaandTab({ filter: _filter }: Props) {
   }, [navPending])
 
   const { entries, updateEntry } = useFinStore()
+  const ensureEntry = useFinStore(s => s.ensureEntry)
   const { records: importRecords, addRecord, approveRecord, rejectRecord, removeRecord, updateRecordValues, exportPeriod } = useImportStore()
   const { addEntry: addRawEntry, approveEntry: approveRawEntry, rejectEntry: rejectRawEntry, entries: rawDataEntries } = useRawDataStore()
   const { toasts, showToast } = useToast()
@@ -307,13 +308,14 @@ export function MaandTab({ filter: _filter }: Props) {
 
   /** Slaat een override op; 0 wist de override (fallback naar actuals) */
   const updateKosten = (bv: ClosingBv, key: string, val: number) => {
-    const e = entry(bv)
-    if (!e) return
+    // ensureEntry garandeert dat er een entry bestaat voor (bv, month) — ook
+    // voor Holdings met een oudere persisted state waar die entry nog
+    // ontbrak. Zonder deze guard ging de invoer stilletjes verloren en
+    // viel de cel bij re-render terug op de plData-fallback ("verspringen").
+    const e = entry(bv) ?? ensureEntry(bv, month)
     // Altijd de ingevulde waarde bewaren — óók 0. Eerder werd 0 geïnterpreteerd
-    // als "override wissen" waardoor de cel terugsprong naar de plData-fallback
-    // (bv. Jan-26 Holdings overige_personeelskosten = 171.515). Dat is
-    // verwarrend: als de user 0 intypt, bedoelt-ie 0.
-    const next = { ...e.kostenOverrides, [key]: val }
+    // als "override wissen" waardoor de cel terugsprong naar de plData-fallback.
+    const next = { ...(e.kostenOverrides ?? {}), [key]: val }
     updateEntry(e.id, { kostenOverrides: next })
   }
 
