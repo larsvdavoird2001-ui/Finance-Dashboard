@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Bar, Line } from 'react-chartjs-2'
 import '../../lib/chartSetup'
-import { monthlyBudget2026, ytdBudget2026, ytdActuals2025 } from '../../data/plData'
+import { ytdActuals2025 } from '../../data/plData'
 import { monthlyActuals2025, monthlyBudget2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import type { EntityName } from '../../data/plData'
 import { hoursData2026, hoursData2025, MONTHS_2025, ACTUAL_MONTHS } from '../../data/hoursData'
@@ -9,6 +9,8 @@ import { fmt } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useOhwStore } from '../../store/useOhwStore'
+import { useBudgetStore } from '../../store/useBudgetStore'
+import { derivePL } from '../../lib/plDerive'
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
@@ -57,14 +59,40 @@ export function DashboardTab({ filter, onNav }: Props) {
   // Live-adjusted actuals (OHW + closing entries)
   const { getMonthly, getYtd } = useAdjustedActuals()
 
+  // Budget-store: zorgt dat edits in Budgetten-tab live doorwerken.
+  const getBudgetMonth = useBudgetStore(s => s.getMonth)
+  useBudgetStore(s => s.overrides) // re-render bij overrides wijziging
+  // Store-merged budget voor een BV/maand, mét derivation (aggregate keys
+  // gesommeerd uit subs — zie lib/plDerive).
+  const budget2026 = (bv: BvId, month: string, key: string): number => {
+    const raw = getBudgetMonth(bv as EntityName, month)
+    return derivePL(k => raw[k] ?? 0, key)
+  }
+
   // Live OHW totaal per maand — respecteert BV-filter zodat de widget alleen
   // de geselecteerde BV(s) toont en niet altijd de geconsolideerde som.
   const ohwData2026 = useOhwStore(s => s.data2026)
+  // Calendar-closed detectie: alleen tot en met de afgelopen (afgesloten)
+  // maand. Bv. op 24-apr-2026 → t/m Mar-26. Voorkomt dat de executive-view
+  // toekomstige OHW-projecties toont.
+  const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const nowDate = new Date()
+  const nowMonthIdx = nowDate.getMonth()
+  const nowYear     = nowDate.getFullYear()
+  const isClosedOhwMonth = (m: string): boolean => {
+    const [mmm, yy] = m.split('-')
+    const y = 2000 + Number(yy)
+    const mi = MONTH_CODES.indexOf(mmm)
+    if (y < nowYear) return true
+    if (y > nowYear) return false
+    return mi < nowMonthIdx
+  }
+  const closedOhwMonths = ohwData2026.allMonths.filter(isClosedOhwMonth)
   const wipByMonth: Record<string, number> = {}
   const ohwEntitiesFiltered = filter.bv === 'all'
     ? ohwData2026.entities
     : ohwData2026.entities.filter(e => e.entity === filter.bv)
-  for (const m of ohwData2026.allMonths) {
+  for (const m of closedOhwMonths) {
     wipByMonth[m] = ohwEntitiesFiltered.reduce((sum, e) => sum + (e.totaalOnderhanden[m] ?? 0), 0)
   }
 
@@ -82,8 +110,12 @@ export function DashboardTab({ filter, onNav }: Props) {
       if (viewMode === 'ytd') return ytdActuals2025[bv as EntityName]?.[key] ?? 0  // use actuals as budget proxy for 2025
       return monthlyBudget2025[bv as EntityName]?.[period]?.[key] ?? 0
     }
-    if (viewMode === 'ytd') return ytdBudget2026[bv as EntityName]?.[key] ?? 0
-    return monthlyBudget2026[bv as EntityName]?.[period]?.[key] ?? 0
+    // 2026: via store + derivation zodat Budgetten-tab edits direct
+    // doorwerken in deze executive-view.
+    if (viewMode === 'ytd') {
+      return ACTUAL_MONTHS.reduce((s, m) => s + budget2026(bv, m, key), 0)
+    }
+    return budget2026(bv, period, key)
   }
   const getPY = (bv: BvId, key: string): number => {
     if (is2025) return 0  // geen 2024 data beschikbaar
