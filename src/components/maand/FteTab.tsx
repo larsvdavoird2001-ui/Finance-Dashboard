@@ -299,8 +299,13 @@ export function FteTab() {
                             defaultValue={v != null ? (isFte ? fmtFte(v) : fmtHc(v)) : ''}
                             placeholder="—"
                             onBlur={e => {
-                              const parsed = parseNumber(e.target.value)
-                              if (parsed === null && !e.target.value.trim()) return
+                              const raw = e.target.value.trim()
+                              if (raw === '') {
+                                // Leeg → clear deze waarde (als die gezet was).
+                                if (v != null) upsertEntry(bv, m, { [actualKey]: undefined })
+                                return
+                              }
+                              const parsed = parseNumber(raw)
                               if (parsed === null) return
                               upsertEntry(bv, m, { [actualKey]: parsed })
                             }}
@@ -327,8 +332,12 @@ export function FteTab() {
                             defaultValue={v != null ? (isFte ? fmtFte(v) : fmtHc(v)) : ''}
                             placeholder="—"
                             onBlur={e => {
-                              const parsed = parseNumber(e.target.value)
-                              if (parsed === null && !e.target.value.trim()) return
+                              const raw = e.target.value.trim()
+                              if (raw === '') {
+                                if (v != null) upsertEntry(bv, m, { [budgetKey]: undefined })
+                                return
+                              }
+                              const parsed = parseNumber(raw)
                               if (parsed === null) return
                               upsertEntry(bv, m, { [budgetKey]: parsed })
                             }}

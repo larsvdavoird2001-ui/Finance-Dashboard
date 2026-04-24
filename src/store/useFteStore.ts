@@ -44,14 +44,18 @@ function entryId(bv: BvId, month: string): string {
   return `${bv[0].toLowerCase()}-fte-${month.replace('-', '').toLowerCase()}`
 }
 
+/** Patch-type voor upsertEntry/updateEntry. Waardes kunnen undefined zijn om
+ *  een veld te clearen (empty input → entry zonder dat veld). */
+type FteFieldPatch = { [K in 'fte' | 'headcount' | 'fteBudget' | 'headcountBudget']?: number | undefined }
+
 interface FteStore {
   entries: FteEntry[]
   loaded: boolean
   loadFromDb: () => Promise<void>
   /** Update een bestaand entry OF creëer 'm als hij nog niet bestaat. */
-  upsertEntry: (bv: BvId, month: string, patch: Partial<Pick<FteEntry, 'fte' | 'headcount' | 'fteBudget' | 'headcountBudget'>>) => void
+  upsertEntry: (bv: BvId, month: string, patch: FteFieldPatch) => void
   /** Legacy — updatet via record-id (wordt nu nog gebruikt door inline blok) */
-  updateEntry: (id: string, patch: Partial<Pick<FteEntry, 'fte' | 'headcount' | 'fteBudget' | 'headcountBudget'>>) => void
+  updateEntry: (id: string, patch: FteFieldPatch) => void
   getEntry:    (bv: BvId, month: string) => FteEntry | undefined
 }
 

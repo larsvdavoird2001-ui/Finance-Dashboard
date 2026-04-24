@@ -187,7 +187,47 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return getMonthly(e as BvId, m)
   }
 
+  // ── FTE forward-fill: voor een toekomstige maand de recentste ingevulde
+  // FTE (binnen 2026), of fallback naar laatste gesloten maand. Hiermee
+  // werkt een FTE-invulling in bv. Apr door naar Mei/Jun/... tot er een
+  // nieuwe waarde staat.
+  const getPlannedFte = (e: BvId, target: string): { fte: number; firstIdx: number; lastClosedIdx: number } => {
+    const tIdx = BUDGET_MONTHS_2026.indexOf(target)
+    const cIdx = lastClosedMonth ? BUDGET_MONTHS_2026.indexOf(lastClosedMonth) : -1
+    const fteLast = lastClosedMonth ? (fteGetEntry(e, lastClosedMonth)?.fte ?? 0) : 0
+    // Zoek binnen (closed-idx, target-idx] naar meest recente ingevulde FTE.
+    // De eerste maand waarop de FTE van fteLast afwijkt is onze "hire-datum"
+    // voor de ramp-up.
+    let firstChangeIdx = -1
+    let plannedFte = fteLast
+    for (let i = cIdx + 1; i <= tIdx && i >= 0; i++) {
+      const mm = BUDGET_MONTHS_2026[i]
+      const f = fteGetEntry(e, mm)?.fte
+      if (f != null) {
+        plannedFte = f
+        if (firstChangeIdx < 0 && f !== fteLast) firstChangeIdx = i
+      }
+    }
+    return { fte: plannedFte, firstIdx: firstChangeIdx, lastClosedIdx: cIdx }
+  }
+
+  /** Ramp-factor voor nieuwe hires: 40% productief in de maand van aanname,
+   *  +20% per maand daarna tot max 100%. Dus m+0=40%, m+1=60%, m+2=80%, m+3=100%.
+   *  Voor bestaande FTE (fteDelta ≤ 0) geldt ramp = 1 (volle impact van
+   *  ontslag / besparing).  */
+  const rampFactor = (monthsSinceFirstHire: number): number => {
+    if (monthsSinceFirstHire < 0) return 0
+    return Math.min(0.4 + 0.2 * monthsSinceFirstHire, 1.0)
+  }
+
   // ── Forecast voor toekomstige maanden ──
+  // Model:
+  //   baselineRev = blend(0.6 * 2025-seizoen × perf_YTD, 0.4 * run-rate Mar-26)
+  //   fte-adj     = (fteLast + fteDelta × ramp(monthsSinceHire)) / fteLast
+  //   forecast    = baselineRev × fte-adj
+  //
+  // Ramp: nieuwe hires zijn niet direct 100% declarabel; ze bouwen productie
+  // op over ~4 maanden. Cuts tellen wel direct 100% mee.
   const getForecastFor = (e: EntityName, m: string, k: string): number => {
     const v2025 = (month26: string) => monthlyActuals2025[e]?.[toPY(month26)]?.[k] ?? 0
     const v2026 = (month26: string) => getActualsFor(e, month26)[k] ?? 0
@@ -199,12 +239,27 @@ export function BudgetsTab({ filter: _filter }: Props) {
     }
     const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
     const lastActual = lastClosedMonth ? v2026(lastClosedMonth) : 0
+
     let fteAdj = 1
     if (e !== 'Holdings' && lastClosedMonth) {
-      const fteLast   = fteGetEntry(e as BvId, lastClosedMonth)?.fte ?? 0
-      const fteFuture = fteGetEntry(e as BvId, m)?.fte ?? fteLast
-      if (fteLast > 0) fteAdj = fteFuture / fteLast
+      const fteLast = fteGetEntry(e as BvId, lastClosedMonth)?.fte ?? 0
+      if (fteLast > 0) {
+        const planned = getPlannedFte(e as BvId, m)
+        const fteDelta = planned.fte - fteLast
+        if (fteDelta <= 0) {
+          // Ontslag / krimp: volle impact direct (fteFuture / fteLast).
+          fteAdj = planned.fte / fteLast
+        } else {
+          // Nieuwe hires: ramp-up vanaf firstChangeIdx.
+          const tIdx = BUDGET_MONTHS_2026.indexOf(m)
+          const monthsSinceHire = planned.firstIdx >= 0 ? tIdx - planned.firstIdx : 0
+          const ramp = rampFactor(monthsSinceHire)
+          const effectiveFte = fteLast + fteDelta * ramp
+          fteAdj = effectiveFte / fteLast
+        }
+      }
     }
+
     const seasonalForecast = sameMonth2025 * perfMult * fteAdj
     const runRateForecast  = lastActual * fteAdj
     if (seasonalForecast === 0 && runRateForecast === 0) return 0
