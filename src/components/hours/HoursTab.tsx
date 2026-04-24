@@ -65,26 +65,158 @@ export function HoursTab({ filter }: Props) {
     return m
   }, [hoursStoreEntries])
 
+  // ── Kalender-status per maand ──────────────────────────────────────────
+  // 'closed'  = maand is volledig verstreken (t/m de afgelopen maand)
+  // 'current' = de huidige kalendermaand (gedeeltelijk verstreken)
+  // 'future'  = nog te komen
+  const now = new Date()
+  const nowY = now.getFullYear()
+  const nowM = now.getMonth()   // 0-11
+  const nowD = now.getDate()
+  const daysInCur = new Date(nowY, nowM + 1, 0).getDate()
+  // Fractie van de huidige kalendermaand die al verstreken is (24-apr ≈ 0.80).
+  const curMonthFraction = Math.min(1, nowD / daysInCur)
+  const MMM = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const monthStatus = (m: string): 'closed' | 'current' | 'future' => {
+    const [mmm, yy] = m.split('-')
+    const y = 2000 + Number(yy)
+    const idx = MMM.indexOf(mmm)
+    if (y < nowY) return 'closed'
+    if (y > nowY) return 'future'
+    if (idx < nowM) return 'closed'
+    if (idx === nowM) return 'current'
+    return 'future'
+  }
+  const MONTH_TO_PY = (m: string) => m.replace('-26', '-25')
+
+  // ── LE-forecast voor hours: zelfde patroon als BudgetsTab.getForecastFor ──
+  // blend = 0.6 × (2025-seizoen × perf_YTD) + 0.4 × run-rate, × leave-adj.
+  // Voor hours gebruiken we hoursData2025 als seizoensbasis; run-rate is het
+  // gemiddelde van de closed SAP-maanden in 2026.
+  type Metric = 'written' | 'declarable'
+  const getMetricVal = (r: HoursRecord, key: Metric): number =>
+    key === 'written' ? r.written : r.declarable
+
+  const forecastHours = (bv: BvId, month: string, key: Metric): number => {
+    // Seizoen (2025 actual zelfde maand)
+    const sameMonth2025 = hoursData2025.find(r => r.bv === bv && r.month === MONTH_TO_PY(month))
+    const seasonal = sameMonth2025 ? getMetricVal(sameMonth2025, key) : 0
+
+    // Run-rate: gemiddelde over gesloten 2026-maanden met SAP-data
+    let runRateSum = 0, runRateCount = 0
+    let ytd2026 = 0, ytd2025 = 0
+    for (const closedM of MONTHS_2026) {
+      if (monthStatus(closedM) !== 'closed') continue
+      const e = storeMap.get(`${bv}-${closedM}`)
+      if (e && e.declarable + e.internal > 0) {
+        const val = key === 'written' ? (e.declarable + e.internal) : e.declarable
+        runRateSum += val
+        runRateCount++
+        ytd2026 += val
+      }
+      // 2025 YTD voor perf-multiplier
+      const py2025 = hoursData2025.find(r => r.bv === bv && r.month === MONTH_TO_PY(closedM))
+      if (py2025) ytd2025 += getMetricVal(py2025, key)
+    }
+    const avgRunRate = runRateCount > 0 ? runRateSum / runRateCount : 0
+    const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
+
+    // Leave dampening: geplande vakantie in deze specifieke maand (uit store)
+    const storeEntry = storeMap.get(`${bv}-${month}`)
+    const plannedVak = storeEntry?.vakantie ?? 0
+    let leaveAdj = 1
+    if (plannedVak > 0 && avgRunRate > 0) {
+      leaveAdj = 1 - Math.min(plannedVak / avgRunRate, 0.5)
+    }
+
+    const seasonalForecast = seasonal * perfMult * leaveAdj
+    const runRateForecast  = avgRunRate * leaveAdj
+
+    if (seasonalForecast === 0 && runRateForecast === 0) return 0
+    if (seasonalForecast === 0) return Math.round(runRateForecast)
+    if (runRateForecast === 0)  return Math.round(seasonalForecast)
+    return Math.round(0.6 * seasonalForecast + 0.4 * runRateForecast)
+  }
+
+  // Bepaalt per (bv, maand) de effective HoursRecord:
+  //  - closed maand met SAP-data → 'actual' uit store
+  //  - closed maand zonder SAP-data → 'actual' uit hardcoded fallback
+  //  - current maand met SAP-partial → registered + prorated rest = 'current'
+  //  - current maand zonder data → hardcoded 'current' of forecast
+  //  - future maand → LE-forecast
   const mergedHours2026: HoursRecord[] = useMemo(() => {
     return hoursData2026.map(rec => {
+      const status = monthStatus(rec.month)
       const storeEntry = storeMap.get(`${rec.bv}-${rec.month}`)
-      if (!storeEntry) return rec
-      const work = storeEntry.declarable + storeEntry.internal
-      const leave = totalLeave(storeEntry)
-      // Werkuren > 0 betekent daadwerkelijk geregistreerd → markeer als actual
-      // en gebruik de SAP-cijfers. Alleen-verlof rijen (toekomstige vakantie)
-      // laten we de forecast-baseline ongemoeid, maar we mergen wel leave
-      // terug via getPlannedLeave (zie LE-flow).
-      if (work <= 0) return rec
-      return {
-        ...rec,
-        written: work,
-        declarable: storeEntry.declarable,
-        nonDeclarable: storeEntry.internal,
-        capacity: Math.max(rec.capacity, work + leave),
-        type: 'actual',
+      const work = storeEntry ? storeEntry.declarable + storeEntry.internal : 0
+      const leave = storeEntry ? totalLeave(storeEntry) : 0
+
+      if (status === 'closed') {
+        if (storeEntry && work > 0) {
+          return {
+            ...rec,
+            written: work,
+            declarable: storeEntry.declarable,
+            nonDeclarable: storeEntry.internal,
+            capacity: Math.max(rec.capacity, work + leave),
+            type: 'actual',
+          }
+        }
+        return { ...rec, type: 'actual' }  // hardcoded fallback
       }
+
+      if (status === 'current') {
+        // LE-forecast voor de hele maand
+        const fcWritten = forecastHours(rec.bv, rec.month, 'written')
+        const fcDecl    = forecastHours(rec.bv, rec.month, 'declarable')
+        if (storeEntry && work > 0) {
+          // SAP heeft partial data voor huidige maand (bv. gedeelte april
+          // geregistreerd). Behoud de registered hours en blend met forecast
+          // voor de resterende fractie van de maand.
+          const remainFrac = Math.max(0, 1 - curMonthFraction)
+          const combinedWritten   = Math.round(work + fcWritten * remainFrac)
+          const combinedDecl      = Math.round(storeEntry.declarable + fcDecl * remainFrac)
+          const combinedNonDecl   = Math.round(storeEntry.internal + (fcWritten - fcDecl) * remainFrac)
+          return {
+            ...rec,
+            written: combinedWritten,
+            declarable: combinedDecl,
+            nonDeclarable: combinedNonDecl,
+            capacity: Math.max(rec.capacity, combinedWritten + leave),
+            type: 'current',
+          }
+        }
+        // Geen SAP-partial: gebruik pure forecast voor huidige maand, gemarkeerd als current.
+        if (fcWritten > 0) {
+          return {
+            ...rec,
+            written: fcWritten,
+            declarable: fcDecl,
+            nonDeclarable: Math.max(0, fcWritten - fcDecl),
+            type: 'current',
+          }
+        }
+        return { ...rec, type: 'current' }
+      }
+
+      // Future: puur LE-forecast
+      const fcWritten = forecastHours(rec.bv, rec.month, 'written')
+      const fcDecl    = forecastHours(rec.bv, rec.month, 'declarable')
+      if (fcWritten > 0) {
+        return {
+          ...rec,
+          written: fcWritten,
+          declarable: fcDecl,
+          nonDeclarable: Math.max(0, fcWritten - fcDecl),
+          // Capacity: behoud hardcoded baseline (capaciteitsplan), anders
+          // fallback op forecasted werkuren + geplande verlof.
+          capacity: Math.max(rec.capacity, fcWritten + leave),
+          type: 'forecast',
+        }
+      }
+      return { ...rec, type: 'forecast' }
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeMap])
 
   const hoursData = is2025 ? hoursData2025 : mergedHours2026
