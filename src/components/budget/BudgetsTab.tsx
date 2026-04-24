@@ -607,12 +607,12 @@ export function BudgetsTab({ filter: _filter }: Props) {
                 const b26 = activeEntities.reduce((s, e) => s + months.reduce((ss, m) => ss + (store.getMonth(e, m)[item.key] ?? 0), 0), 0)
                 const d   = b26 - a25
                 const pct = a25 !== 0 ? d / Math.abs(a25) * 100 : 0
-                const isCost = item.key.includes('kosten') || item.key.includes('amortisatie') || item.key.includes('afschrijving')
+                // Costs zijn in plData opgeslagen als negatieve waarden. Daardoor
+                // geldt voor omzet- én kostenregels: d > 0 = gunstig (meer
+                // omzet of minder negatieve kosten).
                 const deltaColor = d === 0
                   ? 'var(--t3)'
-                  : isCost
-                    ? d < 0 ? 'var(--green)' : 'var(--red)'
-                    : d > 0 ? 'var(--green)' : 'var(--red)'
+                  : d > 0 ? 'var(--green)' : 'var(--red)'
                 return (
                   <tr key={item.key} style={{ background: item.isBold ? 'var(--bg3)' : undefined }}>
                     <td style={{

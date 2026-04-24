@@ -42,11 +42,12 @@ function pctStr(key: string, data: Record<string, number>): string {
   return (val / nom * 100).toFixed(1) + '%'
 }
 
-function deltaColor(d: number, key: string): string {
-  // For cost lines (negative values), inverse the color logic
-  const isCost = key.includes('kosten') || key.includes('amortisatie') || key.includes('afschrijving')
+function deltaColor(d: number, _key: string): string {
+  // Costs zijn in plData met negatief teken opgeslagen (bv. directe_kosten: -739500).
+  // Daardoor geldt voor zowel omzet- als kostenregels: d = a − b > 0 betekent
+  // dat actual gunstiger is dan budget (meer omzet OF minder negatieve kosten).
+  // Geen aparte inversie nodig.
   if (d === 0) return 'var(--t3)'
-  if (isCost) return d < 0 ? 'var(--green)' : 'var(--red)'
   return d > 0 ? 'var(--green)' : 'var(--red)'
 }
 
@@ -238,18 +239,19 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
       isCost: true,
     },
   ]
-  // "Gunstig" = groen. Voor kosten-regels (waarde is negatief in P&L) betekent
-  // een NEGATIEVE delta (lagere kosten dan budget) gunstig.
-  const isFavourable = (delta: number, isCost: boolean) => isCost ? delta < 0 : delta > 0
+  // "Gunstig" = actuals beter dan budget. Omdat kosten als NEGATIEVE waarden
+  // in plData staan (bv. directe_kosten: -739.500), geldt voor alle regels
+  // dezelfde regel: delta > 0 → gunstig (meer omzet of minder negatieve kosten).
+  const isFavourable = (delta: number) => delta > 0
   const deltaEbitda = deltaOf('ebitda')
   const deltaEbit   = deltaOf('ebit')
   const deltaBrut   = deltaOf('brutomarge')
 
-  // Sorteer drivers op impact op EBITDA (absoluut). Kosten-delta's gaan IN op
-  // EBITDA met omgekeerd teken (lager = gunstig), daarom nemen we -delta als
-  // EBITDA-impact voor kosten.
+  // EBITDA-impact = delta van de component zelf (linear combi: ebitda = omzet +
+  // directe_kosten + operationele_kosten, allemaal met hun eigen teken).
+  // Geen sign-flip meer voor kosten — die waren al negatief opgeslagen.
   const driversWithImpact = varianceDrivers
-    .map(d => ({ ...d, ebitdaImpact: d.isCost ? -d.delta : d.delta }))
+    .map(d => ({ ...d, ebitdaImpact: d.delta }))
     .sort((a, b) => Math.abs(b.ebitdaImpact) - Math.abs(a.ebitdaImpact))
 
   // FTE: check of er een relevante FTE-afwijking is per BV over de periode
@@ -275,50 +277,28 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
     return { actual: sumActual, budget: sumBudget, delta: sumActual - sumBudget }
   })()
 
-  // Bepaal hoofdboodschap + hypothese-lijst. Rekening houdend met
-  // ontbrekende data: als actuals OF budget voor een component niet
-  // gevuld is, geven we GEEN conclusie maar een status-melding.
-  const reasonFor = (d: typeof driversWithImpact[number]): string => {
-    const actualsZero = !anyEntityHas(d.key, allActuals)
-    const budgetZero  = !anyEntityHas(d.key, allBudgets)
-    if (actualsZero && budgetZero) {
-      return 'Nog geen actuals én geen budget voor deze component — geen variance-analyse mogelijk.'
-    }
-    if (budgetZero) {
-      return `Actuals gevuld (${fmt(totalActuals[d.key] ?? 0)}), maar budget voor deze component is nog niet ingevuld. Ga naar Budgetten om sturing mogelijk te maken.`
-    }
-    if (actualsZero) {
-      return `Budget staat op ${fmt(totalBudget[d.key] ?? 0)}, maar actuals zijn nog niet geboekt voor deze periode. Wacht tot closing afgerond is voor een betrouwbare analyse.`
-    }
-    const fav = isFavourable(d.delta, d.isCost)
-    if (d.key === 'netto_omzet') {
-      return fav ? 'Meer omzet gerealiseerd dan begroot — duidt op sterkere vraag of hogere tarieven.'
-                 : 'Minder omzet dan begroot — mogelijk lagere bezetting, uitgestelde projecten of prijsdruk.'
-    }
-    if (d.key === 'directe_kosten') {
-      return fav ? 'Lagere directe kosten dan begroot — efficiëntere inzet of lagere inkoopkosten.'
-                 : 'Hogere directe kosten dan begroot — mogelijk meer inhuur, inflatie op materialen of onverwachte overwerk.'
-    }
-    if (d.key === 'operationele_kosten') {
-      if (fteDelta && fteDelta.delta < -0.5) {
-        return fav
-          ? `Lagere OPEX — loopt samen met lagere bezetting (Δ FTE ${fteDelta.delta.toFixed(1)}). Kostenreductie voornamelijk door personele onderbezetting.`
-          : `Hogere OPEX ondanks lagere FTE (Δ ${fteDelta.delta.toFixed(1)}) — duidt op niet-personele lastenverhogingen (ICT, huur, marketing).`
-      }
-      if (fteDelta && fteDelta.delta > 0.5) {
-        return fav
-          ? `Lagere OPEX ondanks hogere bezetting (Δ FTE +${fteDelta.delta.toFixed(1)}) — operationele efficiëntieverbetering.`
-          : `Hogere OPEX — mogelijk verklaard door hogere bezetting (Δ FTE +${fteDelta.delta.toFixed(1)}).`
-      }
-      return fav ? 'Lagere operationele kosten dan begroot — efficiëntiewinst of uitgestelde uitgaven.'
-                 : 'Hogere operationele kosten dan begroot — onderzoek inflatie, marketing, ICT of algemene kosten.'
-    }
-    if (d.key === 'amortisatie_afschrijvingen') {
-      return fav ? 'Lagere afschrijvingen dan begroot — uitgestelde investeringen of langere afschrijvingstermijn.'
-                 : 'Hogere afschrijvingen dan begroot — extra investeringen of kortere termijn.'
-    }
-    return ''
+  // ── Calendar-closed detectie ───────────────────────────────────
+  // Een maand geldt als closed zodra de kalender voorbij is (bv. op 24 apr
+  // zijn Jan/Feb/Mar-26 gesloten). Voor closed periodes is 0 een legitieme
+  // waarde — dan geen "nog niet ingevuld" melding tonen.
+  const MONTH_IDX: Record<string, number> = {
+    Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+    Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
   }
+  const now = new Date()
+  const nowY = now.getFullYear()
+  const nowM = now.getMonth()
+  const isCalendarClosedMonth = (label: string): boolean => {
+    const [mmm, yy] = label.split('-')
+    const y = 2000 + Number(yy)
+    const m = MONTH_IDX[mmm] ?? 0
+    if (y < nowY) return true
+    if (y > nowY) return false
+    return m < nowM
+  }
+  const periodIsClosed = currentPeriod.month
+    ? isCalendarClosedMonth(currentPeriod.month)
+    : (currentPeriod.ytdMonths ?? []).every(isCalendarClosedMonth)
 
   // ── Missing-data detectie per component ────────────────────────
   // Bepaal per P&L-key of de actuals en/of budget daadwerkelijk gevuld zijn
@@ -330,6 +310,132 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
       const v = src[e]?.[key]
       return v != null && v !== 0
     })
+
+  // Als de kern-actuals voor deze periode meaningful zijn (omzet of brutomarge
+  // non-zero), dan is de closing effectief gedaan en is 0 op een sub-regel
+  // een echte 0 — niet een gap.
+  const periodHasMeaningfulActuals =
+    anyEntityHas('netto_omzet', allActuals) ||
+    anyEntityHas('brutomarge',  allActuals) ||
+    anyEntityHas('ebitda',      allActuals)
+
+  // Percentage delta: delta / |budget| × 100 — alleen zinvol als budget != 0
+  const pctOf = (delta: number, base: number): string => {
+    if (base === 0) return ''
+    const p = delta / Math.abs(base) * 100
+    return `${p > 0 ? '+' : ''}${p.toFixed(1)}%`
+  }
+
+  // ── Omzet/kosten-koppeling: volume- vs efficiency-effect ────────
+  // Bij lagere omzet zouden directe kosten proportioneel mee moeten dalen
+  // (variabele component). We splitsen volume-effect (kosten volgen omzet)
+  // en efficiency/mix-effect (afwijking van de ratio).
+  const omzetActual = totalActuals['netto_omzet']    ?? 0
+  const omzetBudget = totalBudget['netto_omzet']     ?? 0
+  const omzetPct    = omzetBudget !== 0 ? omzetActual / omzetBudget : 1
+  const dirKostenActual = totalActuals['directe_kosten'] ?? 0
+  const dirKostenBudget = totalBudget['directe_kosten']  ?? 0
+  // Verwachte directe_kosten bij proportioneel meeschalen met omzet:
+  const dirKostenExpected = dirKostenBudget * omzetPct
+  // Efficiency-delta: extra/minder kosten bovenop het volume-effect. >0 =
+  // gunstiger dan op omzet-geschaalde verwachting, <0 = ongunstiger.
+  const dirKostenEffDelta = dirKostenActual - dirKostenExpected
+
+  // Brutomarge-% actuals vs budget (percentage-points, niet euro's).
+  // Costs zijn negatief dus brutomarge = rev + directe_kosten.
+  const gm = (rev: number, dc: number) => rev !== 0 ? ((rev + dc) / rev * 100) : NaN
+  const gmActual = gm(omzetActual, dirKostenActual)
+  const gmBudget = gm(omzetBudget, dirKostenBudget)
+  const gmDelta  = (isFinite(gmActual) && isFinite(gmBudget)) ? gmActual - gmBudget : NaN
+
+  // Bepaal hoofdboodschap + hypothese-lijst. Rekening houdend met
+  // ontbrekende data: als actuals OF budget voor een component niet
+  // gevuld is, geven we GEEN conclusie maar een status-melding — maar
+  // alleen voor open, niet-afgesloten periodes.
+  const reasonFor = (d: typeof driversWithImpact[number]): string => {
+    const actualsZero = !anyEntityHas(d.key, allActuals)
+    const budgetZero  = !anyEntityHas(d.key, allBudgets)
+    const canFlagMissing = !periodIsClosed && !periodHasMeaningfulActuals
+
+    if (canFlagMissing) {
+      if (actualsZero && budgetZero) {
+        return 'Nog geen actuals én geen budget voor deze component — geen variance-analyse mogelijk.'
+      }
+      if (budgetZero) {
+        return `Actuals gevuld (${fmt(totalActuals[d.key] ?? 0)}), maar budget is nog niet ingevuld. Ga naar Budgetten om sturing mogelijk te maken.`
+      }
+      if (actualsZero) {
+        return `Budget staat op ${fmt(totalBudget[d.key] ?? 0)}, maar actuals zijn nog niet geboekt. Wacht tot closing afgerond is voor een betrouwbare analyse.`
+      }
+    }
+    // Budget volledig afwezig terwijl actuals er wel zijn → geen basis voor variance.
+    if (budgetZero && !actualsZero) {
+      return 'Budget voor deze component is 0 — geen vergelijkingsbasis. Leg een target vast in Budgetten.'
+    }
+
+    const fav   = isFavourable(d.delta)
+    const pct   = pctOf(d.delta, totalBudget[d.key] ?? 0)
+    const pctTxt = pct ? ` (${pct} vs budget)` : ''
+
+    if (d.key === 'netto_omzet') {
+      if (fav) {
+        return `Meer omzet gerealiseerd dan begroot${pctTxt} — sterkere vraag, hogere bezetting of gunstigere mix/tarieven.`
+      }
+      if (fteDelta && fteDelta.delta < -0.5) {
+        return `Minder omzet dan begroot${pctTxt} — loopt samen met onderbezetting (Δ FTE ${fteDelta.delta.toFixed(1)}). Lagere declarabele capaciteit is een plausibele hoofdoorzaak.`
+      }
+      return `Minder omzet dan begroot${pctTxt} — check bezetting, uitgestelde projecten of prijsdruk. Controleer OHW-mutaties voor timing-effecten.`
+    }
+
+    if (d.key === 'directe_kosten') {
+      // Efficiency-correctie: hebben de kosten zich bovenop het volume-effect bewogen?
+      const effMeaningful = Math.abs(dirKostenEffDelta) > Math.abs(dirKostenBudget || 1) * 0.01
+      if (fav) {
+        if (effMeaningful && dirKostenEffDelta > 0) {
+          return `Lagere directe kosten${pctTxt} — ook gecorrigeerd voor omzet-volume ${fmt(dirKostenEffDelta)} efficiency-winst: goedkopere inkoop of minder inhuur.`
+        }
+        if (omzetPct < 0.98 && omzetActual !== 0) {
+          return `Lagere directe kosten${pctTxt} — grotendeels volume-effect (omzet ${((omzetPct - 1) * 100).toFixed(1)}% vs budget). Weinig structurele efficiency-winst.`
+        }
+        return `Lagere directe kosten${pctTxt} — efficiëntere inzet, gunstigere inkoop of minder onderaanneming.`
+      }
+      if (effMeaningful && dirKostenEffDelta < 0) {
+        return `Hogere directe kosten${pctTxt} — ook na correctie voor omzet-volume (${fmt(dirKostenEffDelta)} extra) duidt dit op inkoopinflatie of meer inhuur.`
+      }
+      if (omzetPct > 1.02) {
+        return `Hogere directe kosten${pctTxt} — grotendeels volume-effect (omzet +${((omzetPct - 1) * 100).toFixed(1)}% vs budget). Kostenratio lijkt onder controle.`
+      }
+      return `Hogere directe kosten${pctTxt} — onderzoek inkoopinflatie, overwerk of extra inhuur.`
+    }
+
+    if (d.key === 'operationele_kosten') {
+      const fteTxt = fteDelta ? `(Δ FTE ${fteDelta.delta >= 0 ? '+' : ''}${fteDelta.delta.toFixed(1)})` : ''
+      if (fav) {
+        if (fteDelta && fteDelta.delta < -0.5) {
+          return `Lagere OPEX${pctTxt} — loopt samen met onderbezetting ${fteTxt}. Groot deel van de besparing is toe te schrijven aan indirecte personeelskosten.`
+        }
+        if (fteDelta && fteDelta.delta > 0.5) {
+          return `Lagere OPEX${pctTxt} ondanks overbezetting ${fteTxt} — echte operationele efficiëntiewinst (huur/ICT/marketing onder budget).`
+        }
+        return `Lagere OPEX${pctTxt} — efficiëntiewinst of uitgestelde uitgaven (marketing, ICT, training).`
+      }
+      if (fteDelta && fteDelta.delta > 0.5) {
+        return `Hogere OPEX${pctTxt} — mede verklaard door overbezetting ${fteTxt}. Toename deels personeelsgerelateerd.`
+      }
+      if (fteDelta && fteDelta.delta < -0.5) {
+        return `Hogere OPEX${pctTxt} ondanks onderbezetting ${fteTxt} — wijst op niet-personele lastenverhoging (ICT, marketing, huur, accruals).`
+      }
+      return `Hogere OPEX${pctTxt} — onderzoek inflatie, marketing-pieken, ICT-contracten of algemene kosten.`
+    }
+
+    if (d.key === 'amortisatie_afschrijvingen') {
+      if (fav) {
+        return `Lagere afschrijvingen${pctTxt} — uitgestelde investeringen of langere afschrijvingstermijn. Let op: timing-effect, geen structurele winst.`
+      }
+      return `Hogere afschrijvingen${pctTxt} — extra capex geactiveerd of kortere afschrijvingstermijn dan begroot.`
+    }
+    return ''
+  }
 
   return (
     <div className="page">
@@ -430,7 +536,7 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
         </div>
         <div style={{ padding: '14px 18px' }}>
 
-          {/* Top-line: Δ EBITDA samengevat */}
+          {/* Top-line: Δ EBITDA samengevat — met %-referentie en brutomarge-margin */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
             <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: '1px solid var(--bd2)' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
@@ -438,7 +544,19 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: deltaBrut >= 0 ? 'var(--green)' : 'var(--red)' }}>
                 {deltaBrut >= 0 ? '+' : ''}{fmt(deltaBrut)}
+                <span style={{ fontSize: 11, marginLeft: 6, color: 'var(--t3)', fontWeight: 400 }}>
+                  {(totalBudget['brutomarge'] ?? 0) !== 0 ? `(${deltaBrut >= 0 ? '+' : ''}${(deltaBrut / Math.abs(totalBudget['brutomarge']) * 100).toFixed(1)}%)` : ''}
+                </span>
               </div>
+              {isFinite(gmDelta) && (
+                <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 3 }}>
+                  Marge-% {gmBudget.toFixed(1)} → {gmActual.toFixed(1)}
+                  {' '}
+                  <span style={{ color: gmDelta >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                    ({gmDelta >= 0 ? '+' : ''}{gmDelta.toFixed(1)}pp)
+                  </span>
+                </div>
+              )}
             </div>
             <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: `1px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--red)'}` }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
@@ -450,6 +568,9 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
                   {(totalBudget['ebitda'] ?? 0) !== 0 ? `(${deltaEbitda >= 0 ? '+' : ''}${(deltaEbitda / Math.abs(totalBudget['ebitda']) * 100).toFixed(1)}%)` : ''}
                 </span>
               </div>
+              <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 3 }}>
+                actuals {fmt(totalActuals['ebitda'] ?? 0)} · budget {fmt(totalBudget['ebitda'] ?? 0)}
+              </div>
             </div>
             <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: '1px solid var(--bd2)' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
@@ -457,28 +578,57 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: deltaEbit >= 0 ? 'var(--green)' : 'var(--red)' }}>
                 {deltaEbit >= 0 ? '+' : ''}{fmt(deltaEbit)}
+                <span style={{ fontSize: 11, marginLeft: 6, color: 'var(--t3)', fontWeight: 400 }}>
+                  {(totalBudget['ebit'] ?? 0) !== 0 ? `(${deltaEbit >= 0 ? '+' : ''}${(deltaEbit / Math.abs(totalBudget['ebit']) * 100).toFixed(1)}%)` : ''}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Kernboodschap */}
-          <div style={{
-            padding: '10px 12px', borderRadius: 7, marginBottom: 14,
-            background: deltaEbitda >= 0 ? 'var(--bd-green)' : 'var(--bd-amber)',
-            border: `1px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--amber)'}`,
-            fontSize: 12, color: 'var(--t1)',
-          }}>
-            <strong>{deltaEbitda >= 0 ? '▲' : '▼'} EBITDA {deltaEbitda >= 0 ? 'boven' : 'onder'} budget</strong>
-            {' — '}
-            De grootste driver van dit resultaat is <strong>{driversWithImpact[0].label.toLowerCase()}</strong>
-            {' ('}
-            <span style={{ fontFamily: 'var(--mono)' }}>{driversWithImpact[0].delta >= 0 ? '+' : ''}{fmt(driversWithImpact[0].delta)}</span>
-            {' → EBITDA-impact '}
-            <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: driversWithImpact[0].ebitdaImpact >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {driversWithImpact[0].ebitdaImpact >= 0 ? '+' : ''}{fmt(driversWithImpact[0].ebitdaImpact)}
-            </span>
-            {').'}
-          </div>
+          {/* Kernboodschap — samenhang tussen drivers ────────────────── */}
+          {(() => {
+            const topDriver = driversWithImpact[0]
+            const revDelta  = deltaOf('netto_omzet')
+            const ebitdaPct = (totalBudget['ebitda'] ?? 0) !== 0
+              ? ` (${deltaEbitda >= 0 ? '+' : ''}${(deltaEbitda / Math.abs(totalBudget['ebitda']) * 100).toFixed(1)}%)`
+              : ''
+            const topDriverPct = (totalBudget[topDriver.key] ?? 0) !== 0
+              ? ` (${topDriver.delta >= 0 ? '+' : ''}${(topDriver.delta / Math.abs(totalBudget[topDriver.key]) * 100).toFixed(1)}%)`
+              : ''
+            // Tweede-orde: beweegt de marge? Is de omzet de echte driver?
+            const marginMoved = isFinite(gmDelta) && Math.abs(gmDelta) >= 0.5
+            const revenueIsDriver =
+              topDriver.key !== 'netto_omzet' &&
+              Math.abs(revDelta) > Math.abs(topDriver.delta) * 0.6 &&
+              omzetBudget !== 0
+            return (
+              <div style={{
+                padding: '10px 12px', borderRadius: 7, marginBottom: 14,
+                background: deltaEbitda >= 0 ? 'var(--bd-green)' : 'var(--bd-amber)',
+                border: `1px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--amber)'}`,
+                fontSize: 12, color: 'var(--t1)', lineHeight: 1.5,
+              }}>
+                <strong>{deltaEbitda >= 0 ? '▲' : '▼'} EBITDA {deltaEbitda >= 0 ? 'boven' : 'onder'} budget{ebitdaPct}</strong>
+                {' — '}
+                Grootste driver: <strong>{topDriver.label.toLowerCase()}</strong>
+                {' ('}
+                <span style={{ fontFamily: 'var(--mono)' }}>{topDriver.delta >= 0 ? '+' : ''}{fmt(topDriver.delta)}{topDriverPct}</span>
+                {').'}
+                {marginMoved && (
+                  <> Brutomarge-% beweegt <strong style={{ color: gmDelta >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                    {gmDelta >= 0 ? '+' : ''}{gmDelta.toFixed(1)}pp
+                  </strong> — {gmDelta >= 0
+                    ? 'mix of efficiency verbetert de ratio.'
+                    : 'kostenratio loopt op: controleer inkoopprijzen of tariefdruk.'}</>
+                )}
+                {revenueIsDriver && (
+                  <> Let op: omzet wijkt <span style={{ fontFamily: 'var(--mono)' }}>
+                    {((omzetPct - 1) * 100 >= 0 ? '+' : '')}{((omzetPct - 1) * 100).toFixed(1)}%
+                  </span> af — een deel van de variance in kosten schuift mee met volume.</>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Driver-lijst met redenen */}
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>
@@ -486,7 +636,7 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
             {driversWithImpact.map(d => {
-              const fav = isFavourable(d.delta, d.isCost)
+              const fav = isFavourable(d.delta)
               const reason = reasonFor(d)
               const absImpact = Math.abs(d.ebitdaImpact)
               const maxImpact = Math.max(...driversWithImpact.map(x => Math.abs(x.ebitdaImpact)), 1)

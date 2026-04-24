@@ -826,10 +826,11 @@ function slideBvFull(pptx: PptxGenJS, bv: BvId, monthLabel: string, month: strin
     const y_b = ytdValue(bv, ytdMonths, k.key, 'budget')
     const y_ly = ytdValue(bv, ytd25MEq, k.key, 'actual2025')
     const deltaM = m_a - m_b
-    const isCost = k.key.includes('kosten') || k.key.includes('amortisatie') || k.key.includes('afschrijving')
+    // Costs staan als negatieve waarden in plData; delta > 0 betekent voor
+    // zowel omzet als kosten dat de actuals gunstiger zijn dan budget.
     const deltaColor = deltaM === 0
       ? BRAND.subtle
-      : (isCost ? (deltaM < 0 ? BRAND.green : BRAND.red) : (deltaM > 0 ? BRAND.green : BRAND.red))
+      : (deltaM > 0 ? BRAND.green : BRAND.red)
     rowsPl.push([
       { text: k.label, options: { color: BRAND.text, bold: k.bold, fontSize: 10 } },
       { text: fmtEur(m_a), options: { color: BRAND.text, bold: k.bold, align: 'right', fontSize: 10 } },
