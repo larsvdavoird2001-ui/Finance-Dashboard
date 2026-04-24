@@ -6,8 +6,7 @@ import type { EntityName } from '../data/plData'
 import type { BvId } from '../data/types'
 
 // Sub-sleutels die samen de kosten-totals vormen. Zelfde indeling als MaandTab
-// zodat getMonthly (deze hook) én MaandTab één waarheid delen. Als deze lijsten
-// in MaandTab wijzigen, pas ze hier ook aan (kleine set, bewust gedupliceerd).
+// zodat getMonthly (deze hook) én MaandTab één waarheid delen.
 const DIRECTE_KOSTEN_SUBS = [
   'directe_inkoopkosten',
   'directe_personeelskosten',
@@ -30,91 +29,94 @@ const AMORTISATIE_SUBS = [
   'afschrijvingen',
 ] as const
 
+const ALL_SUBS: readonly string[] = [
+  ...DIRECTE_KOSTEN_SUBS,
+  ...OPERATIONELE_KOSTEN_SUBS,
+  ...AMORTISATIE_SUBS,
+]
+
 /**
  * Returns P&L actuals that incorporate live OHW edits + FinStore adjustments +
  * MaandTab kosten-specificaties (kostenOverrides + useCostBreakdownStore).
  *
- * Priority model:
- * 1. OHW mutatieOhw is ALWAYS live (ook voor closed months)
- * 2. FinStore factuurvolume overschrijft OHW factuurvolume wanneer gezet
- * 3. Manual FinStore adjustments (accruals, handmatige correctie) worden
- *    bovenop OHW-revenue opgeteld
- * 4. Kosten: per sub-key — breakdowns-sum > kostenOverrides > base (plData)
- * 5. Fallback: alleen FinStore als OHW leeg is; anders pure base-actuals
+ * Priority voor elke sub-kostensleutel:
+ *   breakdowns-sum > entry.kostenOverrides[sub] > |base[sub]|
  *
  * Sign convention: costs worden teruggegeven als NEGATIEVE getallen
  * (plData-conventie). MaandTab slaat overrides/breakdowns positief op; hier
  * flippen we naar negatief bij het samenvoegen.
  */
 export function useAdjustedActuals() {
-  const entries        = useFinStore(s => s.entries)
-  const ohwData2026    = useOhwStore(s => s.data2026)
-  const breakdowns     = useCostBreakdownStore(s => s.entries)
+  const entries     = useFinStore(s => s.entries)
+  const ohwData2026 = useOhwStore(s => s.data2026)
+  const breakdowns  = useCostBreakdownStore(s => s.entries)
 
   /** Som van breakdowns voor (month, category, bv). Null = geen breakdowns. */
   const sumBreakdowns = (month: string, category: string, bv: BvId): number | null => {
-    const rows = breakdowns.filter(b => b.month === month && b.category === category)
-    if (rows.length === 0) return null
-    return rows.reduce((s, r) => s + (r.values[bv] ?? 0), 0)
+    let sum = 0
+    let found = false
+    for (const b of breakdowns) {
+      if (b.month === month && b.category === category) {
+        sum += b.values[bv] ?? 0
+        found = true
+      }
+    }
+    return found ? sum : null
   }
 
-  /** Positieve waarde voor een sub-kostensleutel: breakdowns > override > |base|. */
+  /** Positieve waarde voor één sub-kostensleutel: breakdowns > override > |base|. */
   const getSubCostPositive = (
     bv: BvId,
     month: string,
     subKey: string,
-    entry: { kostenOverrides: Record<string, number> } | undefined,
+    kostenOverrides: Record<string, number> | undefined,
     base: Record<string, number>,
   ): number => {
     const bd = sumBreakdowns(month, subKey, bv)
     if (bd != null) return bd
-    if (entry && entry.kostenOverrides && entry.kostenOverrides[subKey] !== undefined) {
-      return entry.kostenOverrides[subKey]
+    if (kostenOverrides && kostenOverrides[subKey] !== undefined) {
+      return kostenOverrides[subKey]
     }
     return Math.abs(base[subKey] ?? 0)
-  }
-
-  /** Som van sub-keys als negatief totaal (plData-conventie). */
-  const sumSubsNegative = (
-    bv: BvId,
-    month: string,
-    subs: readonly string[],
-    entry: { kostenOverrides: Record<string, number> } | undefined,
-    base: Record<string, number>,
-  ): number => {
-    let pos = 0
-    for (const k of subs) pos += getSubCostPositive(bv, month, k, entry, base)
-    return -pos
   }
 
   function getMonthly(bv: BvId, month: string): Record<string, number> {
     const base: Record<string, number> = { ...(monthlyActuals2026[bv as EntityName]?.[month] ?? {}) }
     const entry     = entries.find(e => e.bv === bv && e.month === month)
     const ohwEntity = ohwData2026.entities.find(e => e.entity === bv)
+    // Defensieve unwrap: oude persisted entries kunnen kostenOverrides missen.
+    const kostenOv: Record<string, number> = entry?.kostenOverrides ?? {}
 
-    // Per-sub details (altijd berekend zodat ze ook in de fallback-tak
-    // meegenomen kunnen worden voor maanden zonder OHW-data).
-    const subPositives: Record<string, number> = {}
-    for (const k of [...DIRECTE_KOSTEN_SUBS, ...OPERATIONELE_KOSTEN_SUBS, ...AMORTISATIE_SUBS]) {
-      subPositives[k] = getSubCostPositive(bv, month, k, entry, base)
+    // Stap 1: per-sub positief. Eerst breakdowns, dan override, dan |base|.
+    const subPos: Record<string, number> = {}
+    for (const k of ALL_SUBS) {
+      subPos[k] = getSubCostPositive(bv, month, k, kostenOv, base)
     }
-    const directeKosten       = -DIRECTE_KOSTEN_SUBS.reduce((s, k) => s + subPositives[k], 0)
-    const operationeleKosten  = -OPERATIONELE_KOSTEN_SUBS.reduce((s, k) => s + subPositives[k], 0)
-    const amortisatie         = -AMORTISATIE_SUBS.reduce((s, k) => s + subPositives[k], 0)
-    const subKeysSignedSpread: Record<string, number> = {}
-    for (const k of DIRECTE_KOSTEN_SUBS) subKeysSignedSpread[k] = -subPositives[k]
-    for (const k of OPERATIONELE_KOSTEN_SUBS) subKeysSignedSpread[k] = -subPositives[k]
-    for (const k of AMORTISATIE_SUBS) subKeysSignedSpread[k] = -subPositives[k]
 
-    // Oude `kostencorrectie` werkt als aanpassing op directe_kosten (negatief
-    // getal = extra last). Preserve voor back-compat als er géén sub-specs zijn.
-    const hasAnySubCustom = [...DIRECTE_KOSTEN_SUBS, ...OPERATIONELE_KOSTEN_SUBS, ...AMORTISATIE_SUBS]
-      .some(k => sumBreakdowns(month, k, bv) != null ||
-                 (entry && entry.kostenOverrides && entry.kostenOverrides[k] !== undefined))
+    // Stap 2: aggregate negatieven (plData-conventie).
+    const sumSubs = (subs: readonly string[]) =>
+      -subs.reduce((s, k) => s + (subPos[k] ?? 0), 0)
+    const directeKosten      = sumSubs(DIRECTE_KOSTEN_SUBS)
+    const operationeleKosten = sumSubs(OPERATIONELE_KOSTEN_SUBS)
+    const amortisatie        = sumSubs(AMORTISATIE_SUBS)
+
+    // Stap 3: per-sub negatief (spread naar return object) zodat detail-rijen
+    // in Budget vs Actuals direct werken — ook voor Mar-26 zonder plData.
+    const subSigned: Record<string, number> = {}
+    for (const k of ALL_SUBS) subSigned[k] = -(subPos[k] ?? 0)
+
+    // Heeft de user écht sub-kosten ingevuld (breakdown of override)?
+    const hasAnySubCustom = ALL_SUBS.some(k =>
+      sumBreakdowns(month, k, bv) != null ||
+      kostenOv[k] !== undefined,
+    )
+
+    // Oude kostencorrectie: alleen toepassen als er geen sub-specs zijn,
+    // anders dubbel aftrekken.
     const kostencorrectie = entry?.kostencorrectie ?? 0
     const adjDirecteKosten = hasAnySubCustom ? directeKosten : directeKosten - kostencorrectie
 
-    // ── OHW-first: use live OHW data when available ────────────────────────
+    // ── OHW-first: live OHW + sub-cost spec ─────────────────────────────────
     if (ohwEntity && ohwEntity.nettoOmzet[month] != null) {
       const ohwFv      = ohwEntity.factuurvolume[month] ?? 0
       const ohwMut     = ohwEntity.mutatieOhw[month]    ?? 0
@@ -122,11 +124,9 @@ export function useAdjustedActuals() {
       const factuurvolume = (entry?.factuurvolume && entry.factuurvolume !== 0)
         ? entry.factuurvolume
         : ohwFv
-
-      const accruals          = entry?.accruals           ?? 0
-      const handmatigeCorr    = entry?.handmatigeCorrectie ?? 0
-
-      const mutatieVf        = ohwEntity.mutatieVooruitgefactureerd?.[month] ?? 0
+      const accruals       = entry?.accruals            ?? 0
+      const handmatigeCorr = entry?.handmatigeCorrectie ?? 0
+      const mutatieVf      = ohwEntity.mutatieVooruitgefactureerd?.[month] ?? 0
       const netRevenueVoorIC = factuurvolume + ohwMut + mutatieVf
       const netRevenue       = netRevenueVoorIC + ohwIC + accruals + handmatigeCorr
 
@@ -136,7 +136,7 @@ export function useAdjustedActuals() {
 
       return {
         ...base,
-        ...subKeysSignedSpread,
+        ...subSigned,
         gefactureerde_omzet:        factuurvolume,
         omzet_periode_allocatie:    ohwMut,
         netto_omzet:                netRevenue,
@@ -150,11 +150,12 @@ export function useAdjustedActuals() {
       }
     }
 
-    // ── Fallback: FinStore only (no OHW data for this month) ───────────────
+    // ── Fallback: FinStore only (geen OHW voor deze maand) ──────────────────
     if (entry) {
-      const touched = entry.factuurvolume !== 0 || entry.ohwMutatie !== 0 ||
-                      entry.accruals !== 0 || entry.handmatigeCorrectie !== 0 ||
-                      entry.kostencorrectie !== 0 || hasAnySubCustom
+      const touched =
+        entry.factuurvolume !== 0 || entry.ohwMutatie !== 0 ||
+        entry.accruals !== 0 || entry.handmatigeCorrectie !== 0 ||
+        entry.kostencorrectie !== 0 || hasAnySubCustom
       const isClosed = month === 'Jan-26' || month === 'Feb-26'
       if (touched || isClosed) {
         const netRevenue =
@@ -164,7 +165,7 @@ export function useAdjustedActuals() {
         const ebit       = ebitda + amortisatie
         return {
           ...base,
-          ...subKeysSignedSpread,
+          ...subSigned,
           gefactureerde_omzet:        entry.factuurvolume,
           omzet_periode_allocatie:    entry.ohwMutatie,
           netto_omzet:                netRevenue,
@@ -175,6 +176,25 @@ export function useAdjustedActuals() {
           ebitda,
           ebit,
         }
+      }
+    }
+
+    // Laatste fallback: als er sub-specs zijn maar geen OHW/entry-touched,
+    // nog steeds de kosten teruggeven (voorkomt "altijd 0" bij pure cost-only
+    // maanden).
+    if (hasAnySubCustom) {
+      const brutomarge = (base['netto_omzet'] ?? 0) + adjDirecteKosten
+      const ebitda     = brutomarge + operationeleKosten
+      const ebit       = ebitda + amortisatie
+      return {
+        ...base,
+        ...subSigned,
+        directe_kosten:             adjDirecteKosten,
+        brutomarge,
+        operationele_kosten:        operationeleKosten,
+        amortisatie_afschrijvingen: amortisatie,
+        ebitda,
+        ebit,
       }
     }
 
