@@ -118,6 +118,15 @@ const COL_MONTH       = 110  // elke maand-kolom
 const COL_FY_TOTAL    = 130  // FY Totaal / FY LE
 const COL_METHODIEK   = 260  // alleen in LE-tabel
 
+// Totaalbreedtes. De .tbl CSS-klasse zet width: 100%, dat in combinatie met
+// tableLayout: fixed zou resulteren in proportioneel geschaalde kolommen.
+// Daarom overrulen we met een vaste pixel-breedte per tabel — dan blijft de
+// Budget-tabel (14 kolommen) exact onder de LE-tabel (15 kolommen) uitgelijnd
+// voor de eerste 14 kolommen, en ontstaat de extra methodiek-kolom alleen aan
+// de rechterkant in de LE-tabel.
+const TABLE_BASE_WIDTH = COL_PL_LABEL + 12 * COL_MONTH + COL_FY_TOTAL // 1690
+const TABLE_LE_WIDTH   = TABLE_BASE_WIDTH + COL_METHODIEK             // 1950
+
 // Genereer <colgroup> voor de maand-tabellen. hasMethodiek toont de extra
 // rechter-kolom in de LE-tabel.
 function MonthTableColgroup({ hasMethodiek = false }: { hasMethodiek?: boolean }) {
@@ -647,7 +656,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
                   </span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
-                  <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                  <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse', width: TABLE_BASE_WIDTH }}>
                     <MonthTableColgroup />
                     <thead>
                       <tr>
@@ -709,7 +718,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
                   <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(245,158,11,.15)', border: '1px solid var(--amber)', marginRight: 4, verticalAlign: 'middle' }} /> forecast (60% seizoen + 40% run-rate × FTE)</span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
-                  <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                  <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse', width: TABLE_LE_WIDTH }}>
                     <MonthTableColgroup hasMethodiek />
                     <thead>
                       <tr>
