@@ -62,6 +62,11 @@ export type TabId = 'dashboard' | 'hours' | 'financials' | 'ohw' | 'budget' | 'b
 
 export type BvId = 'Consultancy' | 'Projects' | 'Software'
 
+/** BVs die ook bij de maand-afsluiting / Budget vs Actuals meedoen.
+ *  Holdings staat los van OHW (daar heeft het geen eigen flow), maar wel
+ *  in de FinStore (closing entries + kosten-overrides) en in de P&L. */
+export type ClosingBv = BvId | 'Holdings'
+
 export interface HoursRecord {
   bv: BvId
   month: string
@@ -96,7 +101,7 @@ export interface ImportRecord {
 
 export interface ClosingEntry {
   id: string
-  bv: BvId
+  bv: ClosingBv
   month: string
   factuurvolume: number
   debiteuren: number

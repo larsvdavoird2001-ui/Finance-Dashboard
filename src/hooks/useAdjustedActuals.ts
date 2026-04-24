@@ -3,7 +3,7 @@ import { useOhwStore } from '../store/useOhwStore'
 import { useCostBreakdownStore } from '../store/useCostBreakdownStore'
 import { monthlyActuals2026 } from '../data/plData'
 import type { EntityName } from '../data/plData'
-import type { BvId } from '../data/types'
+import type { ClosingBv } from '../data/types'
 
 // Sub-sleutels die samen de kosten-totals vormen. Zelfde indeling als MaandTab
 // zodat getMonthly (deze hook) én MaandTab één waarheid delen.
@@ -52,7 +52,7 @@ export function useAdjustedActuals() {
   const breakdowns  = useCostBreakdownStore(s => s.entries)
 
   /** Som van breakdowns voor (month, category, bv). Null = geen breakdowns. */
-  const sumBreakdowns = (month: string, category: string, bv: BvId): number | null => {
+  const sumBreakdowns = (month: string, category: string, bv: ClosingBv): number | null => {
     let sum = 0
     let found = false
     for (const b of breakdowns) {
@@ -66,7 +66,7 @@ export function useAdjustedActuals() {
 
   /** Positieve waarde voor één sub-kostensleutel: breakdowns > override > |base|. */
   const getSubCostPositive = (
-    bv: BvId,
+    bv: ClosingBv,
     month: string,
     subKey: string,
     kostenOverrides: Record<string, number> | undefined,
@@ -80,7 +80,7 @@ export function useAdjustedActuals() {
     return Math.abs(base[subKey] ?? 0)
   }
 
-  function getMonthly(bv: BvId, month: string): Record<string, number> {
+  function getMonthly(bv: ClosingBv, month: string): Record<string, number> {
     const base: Record<string, number> = { ...(monthlyActuals2026[bv as EntityName]?.[month] ?? {}) }
     const entry     = entries.find(e => e.bv === bv && e.month === month)
     const ohwEntity = ohwData2026.entities.find(e => e.entity === bv)
@@ -218,7 +218,7 @@ export function useAdjustedActuals() {
   }
 
   /** Sum monthly actuals across a list of months (for YTD) */
-  function getYtd(bv: BvId, months: string[]): Record<string, number> {
+  function getYtd(bv: ClosingBv, months: string[]): Record<string, number> {
     const result: Record<string, number> = {}
     for (const m of months) {
       const d = getMonthly(bv, m)

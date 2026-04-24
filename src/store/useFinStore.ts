@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { ClosingEntry, BvId } from '../data/types'
+import type { ClosingEntry, ClosingBv } from '../data/types'
 import { fetchClosingEntries, upsertClosingEntry, upsertAllClosingEntries } from '../lib/db'
 
 // Initial closing data sourced from P02.2026 Maandrapportage actuals
@@ -62,6 +62,25 @@ const INITIAL_ENTRIES: ClosingEntry[] = [
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {}, remark: '',
   },
+  // ── Holdings: geen OHW/factuurvolume flow, alleen kosten-invoer ─────
+  {
+    id: 'h-jan26', bv: 'Holdings', month: 'Jan-26',
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {}, remark: '',
+  },
+  {
+    id: 'h-feb26', bv: 'Holdings', month: 'Feb-26',
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {}, remark: '',
+  },
+  {
+    id: 'h-mar26', bv: 'Holdings', month: 'Mar-26',
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {}, remark: '',
+  },
 ]
 
 interface FinStore {
@@ -69,7 +88,7 @@ interface FinStore {
   loaded: boolean
   loadFromDb: () => Promise<void>
   updateEntry: (id: string, patch: Partial<Omit<ClosingEntry, 'id'>>) => void
-  getEntry: (bv: BvId, month: string) => ClosingEntry | undefined
+  getEntry: (bv: ClosingBv, month: string) => ClosingEntry | undefined
   getMonthEntries: (month: string) => ClosingEntry[]
 }
 

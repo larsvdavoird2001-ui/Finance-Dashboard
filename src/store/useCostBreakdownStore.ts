@@ -5,14 +5,14 @@
 // van die breakdowns per BV het effectieve bedrag voor die categorie.
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { BvId } from '../data/types'
+import type { ClosingBv } from '../data/types'
 
 export interface CostBreakdown {
   id: string
   month: string
   category: string                        // sub.key, bv. 'directe_inkoopkosten'
   label: string
-  values: Record<BvId, number>            // altijd positief opgeslagen
+  values: Record<ClosingBv, number>       // altijd positief opgeslagen
 }
 
 interface CostBreakdownStore {
@@ -22,7 +22,7 @@ interface CostBreakdownStore {
   /** Update de label van een breakdown. */
   updateLabel: (id: string, label: string) => void
   /** Update één BV-waarde van een breakdown. */
-  updateValue: (id: string, bv: BvId, value: number) => void
+  updateValue: (id: string, bv: ClosingBv, value: number) => void
   /** Verwijder een breakdown. */
   remove: (id: string) => void
   /** Alle breakdowns voor (month, category), gesorteerd op creatievolgorde. */
@@ -30,13 +30,13 @@ interface CostBreakdownStore {
   /** Som van alle breakdowns per BV voor (month, category). Als er geen
    *  breakdowns zijn, wordt `null` teruggegeven zodat de caller kan
    *  terugvallen op overrides of actuals. */
-  sumForCategoryBv: (month: string, category: string, bv: BvId) => number | null
+  sumForCategoryBv: (month: string, category: string, bv: ClosingBv) => number | null
   /** Zijn er breakdowns voor (month, category)? Triggert fallback-gedrag. */
   hasBreakdowns: (month: string, category: string) => boolean
 }
 
-function emptyValues(): Record<BvId, number> {
-  return { Consultancy: 0, Projects: 0, Software: 0 }
+function emptyValues(): Record<ClosingBv, number> {
+  return { Consultancy: 0, Projects: 0, Software: 0, Holdings: 0 }
 }
 
 export const useCostBreakdownStore = create<CostBreakdownStore>()(

@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import {
   PL_STRUCTURE,
-  monthlyActuals2026,
-  ytdActuals2026,
   ytdActuals2025, ytdBudget2025,
 } from '../../data/plData'
 import { monthlyActuals2025, monthlyBudget2025, MONTHS_2025_LABELS } from '../../data/plData2025'
@@ -89,13 +87,10 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
       if (p.month) return monthlyActuals2025[e]?.[p.month] ?? {}
       return ytdActuals2025[e] ?? {}
     }
-    // 2026
-    if (e === 'Holdings') {
-      if (p.month) return monthlyActuals2026[e]?.[p.month] ?? {}
-      return ytdActuals2026[e] ?? {}
-    }
-    if (p.month) return getMonthly(e as BvId, p.month)
-    return getYtd(e as BvId, p.ytdMonths ?? [])
+    // 2026: via useAdjustedActuals — die pakt voor alle 4 entities (inclusief
+    // Holdings) base plData + live kosten-overrides/breakdowns uit MaandTab.
+    if (p.month) return getMonthly(e, p.month)
+    return getYtd(e, p.ytdMonths ?? [])
   }
 
   const getBudget = (p: Period, e: EntityName): Record<string, number> => {

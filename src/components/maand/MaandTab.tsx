@@ -29,7 +29,7 @@ import { useRawDataStore as useRawDataStoreFull } from '../../store/useRawDataSt
 const GENERIC_WIZARD_SLOTS = new Set(['factuurvolume', 'geschreven_uren', 'uren_lijst', 'd_lijst', 'conceptfacturen'])
 import { useTariffStore } from '../../store/useTariffStore'
 import { useRawDataStore } from '../../store/useRawDataStore'
-import type { BvId, ClosingEntry, ImportRecord, GlobalFilter } from '../../data/types'
+import type { BvId, ClosingBv, ClosingEntry, ImportRecord, GlobalFilter } from '../../data/types'
 import { useToast } from '../../hooks/useToast'
 import { Toast } from '../common/Toast'
 import { ImportApprovalModal } from './ImportApprovalModal'
@@ -38,12 +38,16 @@ import { TariffTable } from './TariffTable'
 import { FteTab } from './FteTab'
 import { useCostBreakdownStore } from '../../store/useCostBreakdownStore'
 
-const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
+// OHW-gerelateerde flows blijven op de 3 "productie" BVs (OHW heeft geen
+// Holdings-entity). Maar de maandafsluiting en derived P&L-flow nemen
+// Holdings wél mee als 4e kolom — daar is-ie beschikbaar voor kosten-invoer.
+const BVS: ClosingBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 
-const BV_COLORS: Record<BvId, string> = {
+const BV_COLORS: Record<ClosingBv, string> = {
   Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
+  Holdings:    '#8fa3c0',
 }
 
 interface UploadSlot {
@@ -245,18 +249,18 @@ export function MaandTab({ filter: _filter }: Props) {
   // FTE/Headcount zit nu in FteTab (eigen subtab). Geen inline gebruik meer.
 
   const monthEntries = entries.filter(e => e.month === month)
-  const entry = (bv: BvId): ClosingEntry | undefined => monthEntries.find(e => e.bv === bv)
+  const entry = (bv: ClosingBv): ClosingEntry | undefined => monthEntries.find(e => e.bv === bv)
   const update = (id: string, field: keyof Omit<ClosingEntry, 'id'>, val: number | string) => {
     updateEntry(id, { [field]: val } as Partial<Omit<ClosingEntry, 'id'>>)
   }
 
   // ── OHW-afkomstige waarden: altijd read-only uit OHW store ────────────────
-  const getOhwMutatie = (bv: BvId): number => {
+  const getOhwMutatie = (bv: ClosingBv): number => {
     const ohwEntity = ohwData2026.entities.find(e => e.entity === bv)
     return ohwEntity?.mutatieOhw[month] ?? 0
   }
 
-  const getIcVerrekening = (bv: BvId): number => {
+  const getIcVerrekening = (bv: ClosingBv): number => {
     const ohwEntity = ohwData2026.entities.find(e => e.entity === bv)
     return ohwEntity?.totaalIC[month] ?? 0
   }
@@ -272,7 +276,7 @@ export function MaandTab({ filter: _filter }: Props) {
   const hasBreakdowns = (key: string) =>
     costBreakdownEntries.some(e => e.month === month && e.category === key)
   /** Som van alle breakdowns voor (maand, categorie) per BV. */
-  const sumBreakdowns = (bv: BvId, key: string): number => {
+  const sumBreakdowns = (bv: ClosingBv, key: string): number => {
     let sum = 0
     for (const e of costBreakdownEntries) {
       if (e.month === month && e.category === key) sum += e.values[bv] ?? 0
@@ -282,7 +286,7 @@ export function MaandTab({ filter: _filter }: Props) {
 
   /** Geeft de positieve waarde voor een kosten-sleutel:
    *  breakdowns-sum > override > actuals (fallback). */
-  const getKostenVal = (bv: BvId, key: string): number => {
+  const getKostenVal = (bv: ClosingBv, key: string): number => {
     if (hasBreakdowns(key)) return sumBreakdowns(bv, key)
     const e = entry(bv)
     if (e && e.kostenOverrides[key] !== undefined) return e.kostenOverrides[key]
@@ -290,7 +294,7 @@ export function MaandTab({ filter: _filter }: Props) {
   }
 
   /** Slaat een override op; 0 wist de override (fallback naar actuals) */
-  const updateKosten = (bv: BvId, key: string, val: number) => {
+  const updateKosten = (bv: ClosingBv, key: string, val: number) => {
     const e = entry(bv)
     if (!e) return
     const next = { ...e.kostenOverrides }
@@ -301,7 +305,7 @@ export function MaandTab({ filter: _filter }: Props) {
 
   // ── Derived totals ──────────────────────────────────────────────────────
   /** Netto-omzet voor IC = factuurvolume + OHW mutatie [+ mutatie vooruitgefactureerd voor Software] (= rij 52 in de Excel) */
-  const getNettoomzetVoorIC = (bv: BvId): number => {
+  const getNettoomzetVoorIC = (bv: ClosingBv): number => {
     const ohwEntity = ohwData2026.entities.find(e => e.entity === bv)
     const fv   = entry(bv)?.factuurvolume ?? (ohwEntity?.factuurvolume[month] ?? 0)
     const mut  = ohwEntity?.mutatieOhw[month] ?? 0
@@ -310,40 +314,40 @@ export function MaandTab({ filter: _filter }: Props) {
   }
 
   /** Netto-omzet definitief = netto-omzet voor IC + IC + accruals + handmatige correctie */
-  const netRevenue = (e: ClosingEntry, bv: BvId) =>
+  const netRevenue = (e: ClosingEntry, bv: ClosingBv) =>
     getNettoomzetVoorIC(bv) + getIcVerrekening(bv) + e.accruals + e.handmatigeCorrectie
 
-  const finalCosts = (bv: BvId) =>
+  const finalCosts = (bv: ClosingBv) =>
     DIRECTE_KOSTEN_SUBS.reduce((s, sub) => s + getKostenVal(bv, sub.key), 0)
 
-  const grossMargin = (bv: BvId) => {
+  const grossMargin = (bv: ClosingBv) => {
     const e = entry(bv)
     if (!e) return 0
     return netRevenue(e, bv) - finalCosts(bv)
   }
 
-  const opKosten = (bv: BvId) =>
+  const opKosten = (bv: ClosingBv) =>
     OPERATIONELE_KOSTEN_SUBS.reduce((s, sub) => s + getKostenVal(bv, sub.key), 0)
 
-  const amortisatie = (bv: BvId) =>
+  const amortisatie = (bv: ClosingBv) =>
     AMORTISATIE_SUBS.reduce((s, sub) => s + getKostenVal(bv, sub.key), 0)
 
-  const ebitda = (bv: BvId) => grossMargin(bv) - opKosten(bv)
-  const ebit   = (bv: BvId) => ebitda(bv) - amortisatie(bv)
+  const ebitda = (bv: ClosingBv) => grossMargin(bv) - opKosten(bv)
+  const ebit   = (bv: ClosingBv) => ebitda(bv) - amortisatie(bv)
 
   // ── Budget lookups (monthlyBudget2026) ──────────────────────────────────
   // Gebruikt voor EBITDA/EBIT analyse tegen budget. Budget-waardes in plData
   // zijn ALTIJD zoals in de P&L-structuur: kosten negatief, omzet positief.
-  const budgetVal = (bv: BvId, key: string): number => {
+  const budgetVal = (bv: ClosingBv, key: string): number => {
     return monthlyBudget2026[bv as EntityName]?.[month]?.[key] ?? 0
   }
-  const budgetNetRevenue  = (bv: BvId) => budgetVal(bv, 'netto_omzet')
-  const budgetDirCosts    = (bv: BvId) => Math.abs(budgetVal(bv, 'directe_kosten'))
-  const budgetBrutomarge  = (bv: BvId) => budgetVal(bv, 'brutomarge')
-  const budgetOpKosten    = (bv: BvId) => Math.abs(budgetVal(bv, 'operationele_kosten'))
-  const budgetAmortisatie = (bv: BvId) => Math.abs(budgetVal(bv, 'amortisatie_afschrijvingen'))
-  const budgetEbitda      = (bv: BvId) => budgetVal(bv, 'ebitda')
-  const budgetEbit        = (bv: BvId) => budgetVal(bv, 'ebit')
+  const budgetNetRevenue  = (bv: ClosingBv) => budgetVal(bv, 'netto_omzet')
+  const budgetDirCosts    = (bv: ClosingBv) => Math.abs(budgetVal(bv, 'directe_kosten'))
+  const budgetBrutomarge  = (bv: ClosingBv) => budgetVal(bv, 'brutomarge')
+  const budgetOpKosten    = (bv: ClosingBv) => Math.abs(budgetVal(bv, 'operationele_kosten'))
+  const budgetAmortisatie = (bv: ClosingBv) => Math.abs(budgetVal(bv, 'amortisatie_afschrijvingen'))
+  const budgetEbitda      = (bv: ClosingBv) => budgetVal(bv, 'ebitda')
+  const budgetEbit        = (bv: ClosingBv) => budgetVal(bv, 'ebit')
 
   const totFactuur       = BVS.reduce((a, bv) => a + (entry(bv)?.factuurvolume       ?? 0), 0)
   const totDebiteuren    = BVS.reduce((a, bv) => a + (entry(bv)?.debiteuren          ?? 0), 0)
@@ -385,7 +389,7 @@ export function MaandTab({ filter: _filter }: Props) {
   if (!hasOhwUpload && Math.abs(totOhw) > 0)
     warnings.push('⚠ Geen goedgekeurd OHW-bestand voor deze maand — onderbouwing ontbreekt.')
 
-  const actualsCheck = (bv: BvId) => {
+  const actualsCheck = (bv: ClosingBv) => {
     const a = monthlyActuals2026[bv as EntityName]?.[month]?.['netto_omzet'] ?? 0
     const e = entry(bv)
     if (!e || a === 0) return null
@@ -527,15 +531,17 @@ export function MaandTab({ filter: _filter }: Props) {
     let applied = 0
 
     // Multi-BV OHW target: per BV een eigen rij (bijv. uren_lijst)
+    // Holdings doet niet mee met OHW — skip daar expliciet voor type-safety.
     if (slot.targetRowByBv) {
       let total = 0
       const bvLabels: string[] = []
       for (const bv of BVS) {
-        const rowId = slot.targetRowByBv[bv]
+        if (bv === 'Holdings') continue
+        const rowId = slot.targetRowByBv[bv as BvId]
         if (!rowId) continue
         const amount = record.perBv[bv] ?? 0
         if (amount === 0) continue
-        updateRowValue('2026', bv, rowId, record.month, amount)
+        updateRowValue('2026', bv as BvId, rowId, record.month, amount)
         total += amount
         applied++
         bvLabels.push(`${bv}: ${fmt(amount)}`)
@@ -711,13 +717,15 @@ export function MaandTab({ filter: _filter }: Props) {
       )
 
       if (slot) {
-        // Multi-BV OHW target (bv. uren_lijst → c_ul/p1/s_ul)
+        // Multi-BV OHW target (bv. uren_lijst → c_ul/p1/s_ul). Holdings doet
+        // niet mee met OHW, dus skip die voor type-safety.
         if (slot.targetRowByBv) {
           for (const bv of BVS) {
-            const rowId = slot.targetRowByBv[bv]
+            if (bv === 'Holdings') continue
+            const rowId = slot.targetRowByBv[bv as BvId]
             if (!rowId) continue
             const restoreAmount = fallback ? (fallback.perBv[bv] ?? 0) : 0
-            updateRowValue('2026', bv, rowId, record.month, restoreAmount)
+            updateRowValue('2026', bv as BvId, rowId, record.month, restoreAmount)
           }
         }
         // Single-BV OHW target (d_lijst, conceptfacturen, missing_hours, ohw)
@@ -1429,13 +1437,16 @@ export function MaandTab({ filter: _filter }: Props) {
                       </td>
                       {BVS.map(bv => {
                         const mut = getOhwMutatie(bv)
-                        const hasData = ohwData2026.entities.some(e => e.entity === bv && e.mutatieOhw[month] != null)
+                        const hasData = bv !== 'Holdings' && ohwData2026.entities.some(e => e.entity === bv && e.mutatieOhw[month] != null)
                         return (
                           <td key={bv} className="r" style={{ padding: '4px 8px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                               <button
                                 title={`Klik om naar OHW Overzicht → ${bv} → Mutatie OHW te springen`}
-                                onClick={() => navigateTo({ tab: 'ohw', year: '2026', entity: bv, rowId: 'mutatieOhw' })}
+                                onClick={() => {
+                                  if (bv === 'Holdings') return
+                                  navigateTo({ tab: 'ohw', year: '2026', entity: bv as BvId, rowId: 'mutatieOhw' })
+                                }}
                                 style={{
                                   display: 'inline-flex', alignItems: 'center', gap: 4,
                                   background: 'var(--bg3)', border: '1px solid var(--bd2)',
