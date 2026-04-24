@@ -54,7 +54,8 @@ const READONLY_KEYS  = new Set([...AGGREGATE_KEYS, ...DERIVED_KEYS])
 
 interface Props { filter: GlobalFilter }
 
-type EditTarget = { kind: 'budget' | 'le'; e: EntityName; m: string; k: string }
+// LE is niet bewerkbaar — alleen Budget-cellen editable.
+type EditTarget = { kind: 'budget'; e: EntityName; m: string; k: string }
 
 export function BudgetsTab({ filter: _filter }: Props) {
   const store = useBudgetStore()
@@ -64,9 +65,14 @@ export function BudgetsTab({ filter: _filter }: Props) {
   const { getMonthly } = useAdjustedActuals()
 
   const [chartMetric,  setChartMetric]  = useState<string>('netto_omzet')
-  const [expandedBvs,  setExpandedBvs]  = useState<Set<EntityName>>(new Set(['Consultancy']))
+  const [expandedBvs,  setExpandedBvs]  = useState<Set<EntityName | 'Totaal'>>(new Set(['Consultancy']))
   const [editing,      setEditing]      = useState<EditTarget | null>(null)
   const [rawInput,     setRawInput]     = useState('')
+  // Chart-filters: welke BVs tonen + welke series (budget / LE)
+  const [chartBvs,     setChartBvs]     = useState<Set<EntityName>>(new Set(ENTITIES))
+  const [showBudget,   setShowBudget]   = useState<boolean>(true)
+  const [showLe,       setShowLe]       = useState<boolean>(true)
+  const [showTotal,    setShowTotal]    = useState<boolean>(false)
 
   const months = BUDGET_MONTHS_2026
   const activeEntities: EntityName[] = ENTITIES
@@ -161,28 +167,24 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return 'forecast'
   }
 
-  // ── Edit handlers ──
-  const startEdit = (kind: 'budget' | 'le', e: EntityName, m: string, k: string) => {
+  // ── Edit handlers (alleen Budget — LE is read-only) ──
+  const startEdit = (e: EntityName, m: string, k: string) => {
     if (READONLY_KEYS.has(k)) return
-    const cur = kind === 'budget' ? rawBudget(e, m, k) : rawLeVal(e, m, k)
+    const cur = rawBudget(e, m, k)
     setRawInput(cur === 0 ? '' : String(cur))
-    setEditing({ kind, e, m, k })
+    setEditing({ kind: 'budget', e, m, k })
   }
   const commitEdit = () => {
     if (!editing) return
     const parsed = parseNL(rawInput)
     const v = isNaN(parsed) ? 0 : parsed
-    if (editing.kind === 'budget') {
-      store.setValue(editing.e, editing.m, editing.k, v)
-    } else {
-      store.setLeValue(editing.e, editing.m, editing.k, v)
-    }
+    store.setValue(editing.e, editing.m, editing.k, v)
     setEditing(null)
   }
   const cancelEdit = () => setEditing(null)
 
-  // ── BV accordion toggle ──
-  const toggleBv = (e: EntityName) => {
+  // ── Accordion toggle (BV of 'Totaal') ──
+  const toggleBv = (e: EntityName | 'Totaal') => {
     setExpandedBvs(prev => {
       const next = new Set(prev)
       if (next.has(e)) next.delete(e); else next.add(e)
@@ -190,39 +192,82 @@ export function BudgetsTab({ filter: _filter }: Props) {
     })
   }
 
+  // ── Totaal helpers: som over alle BVs (Consultancy + Projects + Software + Holdings) ──
+  const totalBudgetVal = (m: string, k: string): number =>
+    ENTITIES.reduce((s, e) => s + getBudgetVal(e, m, k), 0)
+  const totalLeVal = (m: string, k: string): number =>
+    ENTITIES.reduce((s, e) => s + getLeVal(e, m, k), 0)
+
   // FY helper
   const fyBudget = (e: EntityName, k: string) => months.reduce((s, m) => s + getBudgetVal(e, m, k), 0)
   const fyLe     = (e: EntityName, k: string) => months.reduce((s, m) => s + getLeVal(e, m, k), 0)
 
-  // ── Chart: budget (solid) + LE (dashed) per BV ──
-  const chartData = useMemo(() => ({
-    labels: months,
-    datasets: [
-      ...activeEntities.map(e => ({
-        label: `${e} — Budget`,
-        data: months.map(m => getBudgetVal(e, m, chartMetric)),
-        borderColor: BV_COLORS[e],
-        backgroundColor: BV_COLORS[e] + '22',
-        borderWidth: 2,
-        tension: 0.3,
-        pointRadius: 3,
-        fill: false,
-      })),
-      ...activeEntities.map(e => ({
-        label: `${e} — LE`,
-        data: months.map(m => getLeVal(e, m, chartMetric)),
-        borderColor: BV_COLORS[e],
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        borderDash: [6, 4],
-        tension: 0.3,
-        pointRadius: 2,
-        pointStyle: 'rectRot' as const,
-        fill: false,
-      })),
-    ],
+  // ── Chart: budget (solid) + LE (dashed) per BV, met filters ──
+  const chartData = useMemo(() => {
+    const bvs = activeEntities.filter(e => chartBvs.has(e))
+    const datasets: Array<Record<string, unknown>> = []
+    if (showBudget) {
+      for (const e of bvs) {
+        datasets.push({
+          label: `${e} — Budget`,
+          data: months.map(m => getBudgetVal(e, m, chartMetric)),
+          borderColor: BV_COLORS[e],
+          backgroundColor: BV_COLORS[e] + '22',
+          borderWidth: 2,
+          tension: 0.3,
+          pointRadius: 3,
+          fill: false,
+        })
+      }
+    }
+    if (showLe) {
+      for (const e of bvs) {
+        datasets.push({
+          label: `${e} — LE`,
+          data: months.map(m => getLeVal(e, m, chartMetric)),
+          borderColor: BV_COLORS[e],
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 4],
+          tension: 0.3,
+          pointRadius: 2,
+          pointStyle: 'rectRot' as const,
+          fill: false,
+        })
+      }
+    }
+    if (showTotal) {
+      if (showBudget) {
+        datasets.push({
+          label: 'Totaal — Budget',
+          data: months.map(m => bvs.reduce((s, e) => s + getBudgetVal(e, m, chartMetric), 0)),
+          borderColor: '#fbbf24',
+          backgroundColor: '#fbbf2422',
+          borderWidth: 3,
+          tension: 0.3,
+          pointRadius: 4,
+          pointStyle: 'circle' as const,
+          fill: false,
+        })
+      }
+      if (showLe) {
+        datasets.push({
+          label: 'Totaal — LE',
+          data: months.map(m => bvs.reduce((s, e) => s + getLeVal(e, m, chartMetric), 0)),
+          borderColor: '#fbbf24',
+          backgroundColor: 'transparent',
+          borderWidth: 3,
+          borderDash: [6, 4],
+          tension: 0.3,
+          pointRadius: 3,
+          pointStyle: 'rectRot' as const,
+          fill: false,
+        })
+      }
+    }
+    return { labels: months, datasets }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [chartMetric, store.overrides, store.leOverrides])
+  }, [chartMetric, chartBvs, showBudget, showLe, showTotal, store.overrides, store.leOverrides])
 
   // ── Renderers voor cellen ──
   const renderBudgetCell = (e: EntityName, m: string, k: string) => {
@@ -251,7 +296,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return (
       <span
         style={{ color, cursor: readOnly ? 'default' : 'pointer', fontWeight: readOnly ? 700 : 400 }}
-        onClick={readOnly ? undefined : () => startEdit('budget', e, m, k)}
+        onClick={readOnly ? undefined : () => startEdit(e, m, k)}
         title={readOnly ? 'Auto-afgeleid' : 'Klik om te bewerken'}
       >
         {val === 0 ? '—' : fmt(val)}
@@ -259,24 +304,10 @@ export function BudgetsTab({ filter: _filter }: Props) {
     )
   }
 
-  const renderLeCell = (e: EntityName, m: string, k: string) => {
-    const val = getLeVal(e, m, k)
-    const isEditing = editing?.kind === 'le' && editing.e === e && editing.m === m && editing.k === k
-    const readOnly = READONLY_KEYS.has(k)
-    const src = getLeSource(e, m, k)
-    if (isEditing) {
-      return (
-        <input
-          autoFocus
-          value={rawInput}
-          onChange={ev => setRawInput(ev.target.value)}
-          onBlur={commitEdit}
-          onKeyDown={ev => { if (ev.key === 'Enter') commitEdit(); else if (ev.key === 'Escape') cancelEdit() }}
-          className="ohw-inp"
-          style={{ width: 85, fontSize: 11, padding: '2px 5px' }}
-        />
-      )
-    }
+  // LE is read-only overal: waardes komen automatisch uit actuals of forecast.
+  // Geen click-to-edit meer — als de gebruiker iets wil corrigeren gaat dat
+  // via het Budget, niet via een LE-override.
+  const renderLeCell = (val: number, src: 'override' | 'actual' | 'forecast' | 'derived') => {
     const color =
       val === 0         ? 'var(--t3)' :
       src === 'derived' ? 'var(--brand)' :
@@ -291,34 +322,80 @@ export function BudgetsTab({ filter: _filter }: Props) {
       undefined
     return (
       <span
-        style={{ color, cursor: readOnly ? 'default' : 'pointer', fontWeight: src === 'actual' ? 700 : src === 'derived' ? 700 : 500, fontStyle, background: bg, padding: '1px 4px', borderRadius: 2 }}
-        onClick={readOnly ? undefined : () => startEdit('le', e, m, k)}
-        title={readOnly ? 'Auto-afgeleid' :
-               src === 'actual'   ? 'Werkelijk' :
-               src === 'override' ? 'Handmatig' :
-                                    'Forecast (2025 pattern × perf × FTE × run-rate)'}
+        style={{
+          color,
+          cursor: 'default',
+          fontWeight: src === 'actual' || src === 'derived' ? 700 : 500,
+          fontStyle,
+          background: bg,
+          padding: '1px 4px',
+          borderRadius: 2,
+        }}
+        title={
+          src === 'derived'  ? 'Auto-afgeleid van subposten' :
+          src === 'actual'   ? 'Werkelijk (uit Maandafsluiting/OHW)' :
+          src === 'override' ? 'Handmatige override uit eerder (read-only)' :
+                               'Forecast — 60% seizoen × performance × FTE + 40% run-rate × FTE'
+        }
       >
         {val === 0 ? '—' : fmt(val)}
       </span>
     )
   }
 
-  // Helper: rij-node opbouwen voor 1 P&L-regel (hergebruikt in Budget en LE tabel)
+  // ── Methodiek per rij: concrete redenering achter de LE-waarde ──
+  // Splits de FY-LE in "Q1 actuals" en "Forecast Apr-Dec", toont de
+  // performance-multiplier en de run-rate-anchor per sleutel.
+  const methodiekText = (getLe: (m: string, k: string) => number, getAct: (m: string, k: string) => number, key: string): React.ReactNode => {
+    if (READONLY_KEYS.has(key)) {
+      return <span style={{ color: 'var(--t3)', fontStyle: 'italic' }}>auto-afgeleid uit subposten</span>
+    }
+    const actualsQ1  = closedMonths.reduce((s, m) => s + getLe(m, key), 0)
+    const forecastRest = months
+      .filter(m => !isClosedMonth(m))
+      .reduce((s, m) => s + getLe(m, key), 0)
+
+    // Performance multiplier voor dit specifieke P&L-sleutel
+    let ytd2026 = 0, ytd2025Sum = 0
+    for (const cm of closedMonths) {
+      ytd2026 += getAct(cm, key)
+    }
+    // Voor 2025: gebruik Jan-Mar 2025 equivalent
+    // Dit is alleen indicatief — het echte forecast-gewicht wordt per BV berekend.
+    const perfMult = ytd2025Sum !== 0 ? ytd2026 / ytd2025Sum : null
+    const runRate = lastClosedMonth ? getAct(lastClosedMonth, key) : 0
+
+    return (
+      <div style={{ fontSize: 9, lineHeight: 1.4, color: 'var(--t3)' }}>
+        <div>Q1 actuals: <span style={{ fontFamily: 'var(--mono)', color: 'var(--brand)' }}>{actualsQ1 === 0 ? '—' : fmt(actualsQ1)}</span></div>
+        <div>Apr–Dec forecast: <span style={{ fontFamily: 'var(--mono)', color: 'var(--amber)' }}>{forecastRest === 0 ? '—' : fmt(forecastRest)}</span></div>
+        {runRate !== 0 && (
+          <div style={{ marginTop: 2 }}>Run-rate (Mar-26): <span style={{ fontFamily: 'var(--mono)' }}>{fmt(runRate)}</span>
+            {perfMult != null && <> · perf {perfMult.toFixed(2)}×</>}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Helper: rij-node opbouwen voor 1 P&L-regel. Optioneel laatste kolom
+  // (methodiek) voor de LE-tabel.
   const renderRow = (
-    e: EntityName,
+    rowKey: string,
     item: typeof PL_STRUCTURE[number],
     cellRenderer: (m: string) => React.ReactNode,
     getTotal: () => number,
+    extraCell?: React.ReactNode,
   ) => {
     const readOnly = READONLY_KEYS.has(item.key)
     const total = getTotal()
     return (
-      <tr key={`${e}-${item.key}`} style={{ background: item.isBold ? 'var(--bg3)' : undefined }}>
+      <tr key={`${rowKey}-${item.key}`} style={{ background: item.isBold ? 'var(--bg3)' : undefined }}>
         <td style={{
           position: 'sticky', left: 0, zIndex: 1,
           background: item.isBold ? 'var(--bg3)' : 'var(--bg2)',
-          paddingLeft: 12 + (item.indent ?? 0) * 14,
           padding: '4px 12px',
+          paddingLeft: 12 + (item.indent ?? 0) * 14,
           fontWeight: item.isBold ? 700 : 400,
           color: readOnly ? 'var(--brand)' : 'var(--t1)',
           minWidth: 220,
@@ -341,6 +418,11 @@ export function BudgetsTab({ filter: _filter }: Props) {
         }}>
           {total === 0 ? '—' : fmt(total)}
         </td>
+        {extraCell !== undefined && (
+          <td style={{ padding: '3px 10px', borderLeft: '1px solid var(--bd2)', minWidth: 220 }}>
+            {extraCell}
+          </td>
+        )}
       </tr>
     )
   }
@@ -364,13 +446,14 @@ export function BudgetsTab({ filter: _filter }: Props) {
         </div>
       </div>
 
-      {/* Chart card — alleen voor hoofdmetrics */}
+      {/* Chart card — hoofdmetric selectie + BV/serie-filters */}
       <div className="card">
         <div className="card-hdr">
           <span className="card-title">📈 Budget vs Latest Estimate — {CHART_METRICS.find(c => c.key === chartMetric)?.label}</span>
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>Solid = Budget · Dashed = LE</span>
         </div>
-        <div style={{ padding: '10px 14px 0', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ padding: '10px 14px 6px', display: 'flex', gap: 6, flexWrap: 'wrap', borderBottom: '1px solid var(--bd)' }}>
+          <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 700, alignSelf: 'center', textTransform: 'uppercase', letterSpacing: '.08em' }}>Metric:</span>
           {CHART_METRICS.map(c => (
             <button
               key={c.key}
@@ -380,29 +463,103 @@ export function BudgetsTab({ filter: _filter }: Props) {
             >{c.label}</button>
           ))}
         </div>
-        <div style={{ padding: 14, height: 320 }}>
+        <div style={{ padding: '8px 14px', display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid var(--bd)' }}>
+          <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>Filters:</span>
+
+          {/* BV-filter chips */}
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {ENTITIES.map(e => {
+              const active = chartBvs.has(e)
+              return (
+                <button
+                  key={e}
+                  onClick={() => setChartBvs(prev => {
+                    const next = new Set(prev)
+                    if (next.has(e)) next.delete(e); else next.add(e)
+                    return next
+                  })}
+                  style={{
+                    padding: '3px 10px', borderRadius: 5, fontSize: 11,
+                    fontWeight: active ? 700 : 400, cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: active ? BV_COLORS[e] : 'var(--bd2)',
+                    background: active ? BV_COLORS[e] + '22' : 'transparent',
+                    color: active ? BV_COLORS[e] : 'var(--t3)',
+                    fontFamily: 'var(--font)',
+                  }}
+                >
+                  <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: BV_COLORS[e], marginRight: 5, verticalAlign: 'middle' }} />
+                  {e}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Serie-toggles */}
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginLeft: 'auto' }}>
+            <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input type="checkbox" checked={showBudget} onChange={e => setShowBudget(e.target.checked)} />
+              Budget
+            </label>
+            <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input type="checkbox" checked={showLe} onChange={e => setShowLe(e.target.checked)} />
+              Latest Estimate
+            </label>
+            <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input type="checkbox" checked={showTotal} onChange={e => setShowTotal(e.target.checked)} />
+              Totaal (som) <span style={{ display: 'inline-block', width: 10, height: 2, background: '#fbbf24', marginLeft: 2, verticalAlign: 'middle' }} />
+            </label>
+          </div>
+        </div>
+        <div style={{ padding: 14, height: 340 }}>
           <Line data={chartData} options={baseChartOptions as any} />
         </div>
       </div>
 
-      {/* Per-BV accordion */}
-      {activeEntities.map(e => {
-        const isOpen   = expandedBvs.has(e)
-        const fyOmzet  = fyBudget(e, 'netto_omzet')
-        const fyEbitdaB = fyBudget(e, 'ebitda')
-        const fyEbitdaL = fyLe(e, 'ebitda')
+      {/* Per-BV accordion + Totaal-accordion onderaan */}
+      {[...activeEntities, 'Totaal' as const].map(scope => {
+        const isTot   = scope === 'Totaal'
+        const isOpen  = expandedBvs.has(scope)
+        const color   = isTot ? '#fbbf24' : BV_COLORS[scope as EntityName]
+        // FY-totalen voor de header
+        const fyOmzet = isTot
+          ? ENTITIES.reduce((s, e) => s + fyBudget(e, 'netto_omzet'), 0)
+          : fyBudget(scope as EntityName, 'netto_omzet')
+        const fyEbitdaB = isTot
+          ? ENTITIES.reduce((s, e) => s + fyBudget(e, 'ebitda'), 0)
+          : fyBudget(scope as EntityName, 'ebitda')
+        const fyEbitdaL = isTot
+          ? ENTITIES.reduce((s, e) => s + fyLe(e, 'ebitda'), 0)
+          : fyLe(scope as EntityName, 'ebitda')
+
+        // Value-lookups voor deze scope (BV of som over alle BVs)
+        const bVal = (m: string, k: string) => isTot ? totalBudgetVal(m, k) : getBudgetVal(scope as EntityName, m, k)
+        const lVal = (m: string, k: string) => isTot ? totalLeVal(m, k) : getLeVal(scope as EntityName, m, k)
+        const lSrc = (m: string, k: string): 'override' | 'actual' | 'forecast' | 'derived' =>
+          isTot
+            ? (READONLY_KEYS.has(k) ? 'derived' : isClosedMonth(m) ? 'actual' : 'forecast')
+            : getLeSource(scope as EntityName, m, k)
+
+        // Actuals-lookup voor methodiek (alleen closed months)
+        const aLookup = (m: string, k: string): number => {
+          if (isTot) {
+            return ENTITIES.reduce((s, e) => s + (getActualsFor(e, m)[k] ?? 0), 0)
+          }
+          return getActualsFor(scope as EntityName, m)[k] ?? 0
+        }
+
         return (
-          <div key={e} className="card" style={{ borderLeft: `3px solid ${BV_COLORS[e]}` }}>
+          <div key={scope} className="card" style={{ borderLeft: `3px solid ${color}`, background: isTot ? 'linear-gradient(180deg, rgba(251,191,36,.04), transparent)' : undefined }}>
             <div
               className="card-hdr"
               style={{ cursor: 'pointer', userSelect: 'none' }}
-              onClick={() => toggleBv(e)}
-              title={isOpen ? 'Klik om in te klappen' : 'Klik om budget + LE voor deze BV uit te klappen'}
+              onClick={() => toggleBv(scope)}
+              title={isOpen ? 'Klik om in te klappen' : 'Klik om uit te klappen'}
             >
               <span style={{ fontSize: 10, marginRight: 8, display: 'inline-block', transition: 'transform .2s', transform: isOpen ? 'rotate(90deg)' : 'none' }}>▶</span>
-              <span className="card-title" style={{ color: BV_COLORS[e] }}>{e}</span>
+              <span className="card-title" style={{ color }}>{isTot ? '🏢 TOTAAL (alle BVs + Holdings)' : scope}</span>
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)', display: 'flex', gap: 14 }}>
-                <span>FY omzet (B): <strong style={{ color: BV_COLORS[e] }}>{fmt(fyOmzet)}</strong></span>
+                <span>FY omzet (B): <strong style={{ color }}>{fmt(fyOmzet)}</strong></span>
                 <span>FY EBITDA (B): <strong style={{ color: fyEbitdaB >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmt(fyEbitdaB)}</strong></span>
                 <span>FY EBITDA (LE): <strong style={{ color: fyEbitdaL >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmt(fyEbitdaL)}</strong></span>
               </span>
@@ -410,9 +567,14 @@ export function BudgetsTab({ filter: _filter }: Props) {
 
             {isOpen && (
               <div>
-                {/* ── Budget-tabel ── */}
+                {/* ── Budget-tabel (Totaal = read-only som; BV = bewerkbaar) ── */}
                 <div style={{ padding: '8px 14px 0', fontSize: 10, color: 'var(--t3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>
-                  Budget 2026 — klik op cel om te bewerken
+                  Budget 2026
+                  <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, letterSpacing: 0 }}>
+                    {isTot
+                      ? '— som van alle BVs (read-only)'
+                      : '— klik op sub-regel om te bewerken; aggregaten worden auto-afgeleid'}
+                  </span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
                   <table className="tbl" style={{ minWidth: 'max-content' }}>
@@ -427,26 +589,27 @@ export function BudgetsTab({ filter: _filter }: Props) {
                     </thead>
                     <tbody>
                       {plRows.map(item => renderRow(
-                        e,
+                        `b-${scope}`,
                         item,
-                        m => renderBudgetCell(e, m, item.key),
-                        () => months.reduce((s, m) => s + getBudgetVal(e, m, item.key), 0),
+                        m => isTot
+                          ? <span style={{ color: bVal(m, item.key) === 0 ? 'var(--t3)' : 'var(--t1)' }}>{bVal(m, item.key) === 0 ? '—' : fmt(bVal(m, item.key))}</span>
+                          : renderBudgetCell(scope as EntityName, m, item.key),
+                        () => months.reduce((s, m) => s + bVal(m, item.key), 0),
                       ))}
                     </tbody>
                   </table>
                 </div>
 
-                {/* ── Latest Estimate-tabel ── */}
+                {/* ── Latest Estimate-tabel — read-only met methodiek-kolom ── */}
                 <div style={{ padding: '14px 14px 0', fontSize: 10, color: 'var(--t3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>
                   Latest Estimate 2026
                   <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, letterSpacing: 0 }}>
-                    — t/m {lastClosedMonth ?? '—'} = actuals, rest = forecast · klik cel om handmatig te overrulen
+                    — automatisch afgeleid · t/m {lastClosedMonth ?? '—'} = actuals, rest = forecast · niet bewerkbaar
                   </span>
                 </div>
                 <div style={{ padding: '4px 14px', fontSize: 10, color: 'var(--t3)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(0,169,224,.2)', border: '1px solid var(--brand)', marginRight: 4, verticalAlign: 'middle' }} /> actual (hard)</span>
-                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(245,158,11,.15)', border: '1px solid var(--amber)', marginRight: 4, verticalAlign: 'middle' }} /> forecast</span>
-                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(38,201,151,.15)', border: '1px solid var(--green)', marginRight: 4, verticalAlign: 'middle' }} /> handmatig</span>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(0,169,224,.2)', border: '1px solid var(--brand)', marginRight: 4, verticalAlign: 'middle' }} /> actual (Maandafsluiting/OHW)</span>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(245,158,11,.15)', border: '1px solid var(--amber)', marginRight: 4, verticalAlign: 'middle' }} /> forecast (60% seizoen + 40% run-rate × FTE)</span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
                   <table className="tbl" style={{ minWidth: 'max-content' }}>
@@ -457,14 +620,16 @@ export function BudgetsTab({ filter: _filter }: Props) {
                           <th key={m} className="r" style={{ minWidth: 92 }}>{m}</th>
                         ))}
                         <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)', minWidth: 110 }}>FY LE</th>
+                        <th style={{ borderLeft: '1px solid var(--bd2)', minWidth: 220 }}>Methodiek / redenering</th>
                       </tr>
                     </thead>
                     <tbody>
                       {plRows.map(item => renderRow(
-                        e,
+                        `le-${scope}`,
                         item,
-                        m => renderLeCell(e, m, item.key),
-                        () => months.reduce((s, m) => s + getLeVal(e, m, item.key), 0),
+                        m => renderLeCell(lVal(m, item.key), lSrc(m, item.key)),
+                        () => months.reduce((s, m) => s + lVal(m, item.key), 0),
+                        methodiekText(lVal, aLookup, item.key),
                       ))}
                     </tbody>
                   </table>
