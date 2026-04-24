@@ -11,7 +11,6 @@ const items: { id: TabId; ic: string; label: string; group: string }[] = [
   // CFO Dashboards
   { id: 'dashboard',  ic: '🏠', label: 'Executive Overview',   group: 'CFO Dashboard' },
   { id: 'hours',      ic: '⏱',  label: 'Uren Dashboard',       group: 'CFO Dashboard' },
-  { id: 'financials', ic: '📈', label: 'Financiële Prestatie', group: 'CFO Dashboard' },
   // Rapportage
   { id: 'budget',  ic: '🎯', label: 'Budget vs Actuals',  group: 'Rapportage' },
   { id: 'budgets', ic: '💼', label: 'Budgetten',          group: 'Rapportage' },

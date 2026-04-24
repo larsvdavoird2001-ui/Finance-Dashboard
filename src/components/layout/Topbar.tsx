@@ -3,7 +3,6 @@ import type { GlobalFilter, BvId, TabId } from '../../data/types'
 const TITLES: Record<TabId, string> = {
   dashboard:  'Executive Overview',
   hours:      'Uren Dashboard',
-  financials: 'Financiële Prestatie',
   ohw:        'OHW Overzicht',
   budget:     'Budget vs Actuals',
   budgets:    'Budgetten',
@@ -30,7 +29,7 @@ const YEAR_OPTIONS: Array<{ id: GlobalFilter['year']; label: string }> = [
 ]
 
 // Only show global filters on dashboard tabs
-const FILTER_TABS: TabId[] = ['dashboard', 'hours', 'financials', 'ohw', 'budget', 'budgets', 'maand']
+const FILTER_TABS: TabId[] = ['dashboard', 'hours', 'ohw', 'budget', 'budgets', 'maand']
 
 interface Props {
   tab: TabId

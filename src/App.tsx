@@ -5,7 +5,6 @@ import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
 import { DashboardTab } from './components/dashboard/DashboardTab'
 import { HoursTab } from './components/hours/HoursTab'
-import { FinancialsTab } from './components/financials/FinancialsTab'
 import { OhwTab } from './components/ohw/OhwTab'
 import { BudgetTab } from './components/budget/BudgetTab'
 import { BudgetsTab } from './components/budget/BudgetsTab'
@@ -78,7 +77,6 @@ export default function App() {
 
         {tab === 'dashboard'  && <DashboardTab filter={filter} onNav={(t) => setTab(t)} />}
         {tab === 'hours'      && <HoursTab filter={filter} />}
-        {tab === 'financials' && <FinancialsTab filter={filter} />}
         {tab === 'ohw' && (
           <OhwTab
             data2025={data2025}
