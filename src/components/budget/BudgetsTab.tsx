@@ -203,9 +203,13 @@ export function BudgetsTab({ filter: _filter }: Props) {
   const fyLe     = (e: EntityName, k: string) => months.reduce((s, m) => s + getLeVal(e, m, k), 0)
 
   // ── Chart: budget (solid) + LE (dashed) per BV, met filters ──
+  // Chart.js accepteert losse velden als extra options, dus we typen de
+  // datasets als `any[]` om strict mode build niet te laten struikelen op
+  // optionele props zoals borderDash / pointStyle.
   const chartData = useMemo(() => {
     const bvs = activeEntities.filter(e => chartBvs.has(e))
-    const datasets: Array<Record<string, unknown>> = []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const datasets: any[] = []
     if (showBudget) {
       for (const e of bvs) {
         datasets.push({
