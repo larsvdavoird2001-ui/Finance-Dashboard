@@ -110,6 +110,29 @@ const AGGREGATE_KEYS = new Set(Object.keys(SUBS_OF))
 const DERIVED_KEYS   = new Set(Object.keys(DERIVED_FORMULA))
 const READONLY_KEYS  = new Set([...AGGREGATE_KEYS, ...DERIVED_KEYS])
 
+// Gedeelde kolom-breedtes: zorgt dat Budget- en LE-tabellen exact onder
+// elkaar uitlijnen en grote bedragen (FY-totalen, kosten met teken) volledig
+// zichtbaar zijn.
+const COL_PL_LABEL    = 240  // eerste kolom (sticky): P&L regel
+const COL_MONTH       = 110  // elke maand-kolom
+const COL_FY_TOTAL    = 130  // FY Totaal / FY LE
+const COL_METHODIEK   = 260  // alleen in LE-tabel
+
+// Genereer <colgroup> voor de maand-tabellen. hasMethodiek toont de extra
+// rechter-kolom in de LE-tabel.
+function MonthTableColgroup({ hasMethodiek = false }: { hasMethodiek?: boolean }) {
+  return (
+    <colgroup>
+      <col style={{ width: COL_PL_LABEL }} />
+      {BUDGET_MONTHS_2026.map(m => (
+        <col key={m} style={{ width: COL_MONTH }} />
+      ))}
+      <col style={{ width: COL_FY_TOTAL }} />
+      {hasMethodiek && <col style={{ width: COL_METHODIEK }} />}
+    </colgroup>
+  )
+}
+
 interface Props { filter: GlobalFilter }
 
 export function BudgetsTab({ filter: _filter }: Props) {
@@ -442,14 +465,16 @@ export function BudgetsTab({ filter: _filter }: Props) {
           paddingLeft: 12 + (item.indent ?? 0) * 14,
           fontWeight: item.isBold ? 700 : 400,
           color: readOnly ? 'var(--brand)' : 'var(--t1)',
-          minWidth: 220,
           fontSize: item.isBold ? 12 : 11,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
         }}>
           {item.label}
           {readOnly && <span style={{ fontSize: 9, color: 'var(--t3)', marginLeft: 6, fontWeight: 400 }}>auto</span>}
         </td>
         {months.map(m => (
-          <td key={m} className="r mono" style={{ padding: '3px 6px', fontSize: 11 }}>
+          <td key={m} className="r mono" style={{ padding: '3px 6px', fontSize: 11, whiteSpace: 'nowrap' }}>
             {cellRenderer(m)}
           </td>
         ))}
@@ -459,11 +484,12 @@ export function BudgetsTab({ filter: _filter }: Props) {
           borderLeft: '1px solid var(--bd2)',
           padding: '3px 6px',
           fontSize: 11,
+          whiteSpace: 'nowrap',
         }}>
           {total === 0 ? '—' : fmt(total)}
         </td>
         {extraCell !== undefined && (
-          <td style={{ padding: '3px 10px', borderLeft: '1px solid var(--bd2)', minWidth: 220 }}>
+          <td style={{ padding: '3px 10px', borderLeft: '1px solid var(--bd2)' }}>
             {extraCell}
           </td>
         )}
@@ -621,12 +647,13 @@ export function BudgetsTab({ filter: _filter }: Props) {
                   </span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
-                  <table className="tbl" style={{ minWidth: 'max-content' }}>
+                  <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                    <MonthTableColgroup />
                     <thead>
                       <tr>
-                        <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 220 }}>P&L regel</th>
+                        <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2 }}>P&L regel</th>
                         {months.map((m, mIdx) => (
-                          <th key={m} className="r" style={{ minWidth: 92, padding: '4px 6px' }}>
+                          <th key={m} className="r" style={{ padding: '4px 6px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
                               <span>{m}</span>
                               {!isTot && mIdx > 0 && (
@@ -654,7 +681,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
                             </div>
                           </th>
                         ))}
-                        <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)', minWidth: 110 }}>FY Totaal</th>
+                        <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)' }}>FY Totaal</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -682,15 +709,16 @@ export function BudgetsTab({ filter: _filter }: Props) {
                   <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(245,158,11,.15)', border: '1px solid var(--amber)', marginRight: 4, verticalAlign: 'middle' }} /> forecast (60% seizoen + 40% run-rate × FTE)</span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
-                  <table className="tbl" style={{ minWidth: 'max-content' }}>
+                  <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                    <MonthTableColgroup hasMethodiek />
                     <thead>
                       <tr>
-                        <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 220 }}>P&L regel</th>
+                        <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2 }}>P&L regel</th>
                         {months.map(m => (
-                          <th key={m} className="r" style={{ minWidth: 92 }}>{m}</th>
+                          <th key={m} className="r">{m}</th>
                         ))}
-                        <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)', minWidth: 110 }}>FY LE</th>
-                        <th style={{ borderLeft: '1px solid var(--bd2)', minWidth: 220 }}>Methodiek / redenering</th>
+                        <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)' }}>FY LE</th>
+                        <th style={{ borderLeft: '1px solid var(--bd2)' }}>Methodiek / redenering</th>
                       </tr>
                     </thead>
                     <tbody>
