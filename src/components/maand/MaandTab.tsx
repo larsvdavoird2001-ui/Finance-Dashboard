@@ -85,6 +85,10 @@ interface NumInputProps {
    *  altijd positief opgeslagen. Heeft de user een minteken zelf ingetypt,
    *  dan wordt dat weggenomen voor opslag. */
   isCost?: boolean
+  /** Signed-mode: preserveert het teken van de ingevoerde waarde (positief
+   *  óf negatief). Voor Holdings, waar sommige "kosten"-regels natuurlijk
+   *  credits (positief) zijn. Rode kleur bij negatief, normaal bij positief. */
+  signed?: boolean
   /** data-attributes voor Enter/Tab navigatie tussen cellen */
   navRow?: string
   navCol?: string
@@ -108,34 +112,38 @@ function focusNextInColumn(current: HTMLInputElement) {
   }
 }
 
-function NumInput({ value, onChange, color, isCost, navRow, navCol }: NumInputProps) {
+function NumInput({ value, onChange, color, isCost, signed, navRow, navCol }: NumInputProps) {
   const [raw, setRaw] = useState('')
   const [editing, setEditing] = useState(false)
-  const displayColor = isCost && value !== 0 ? 'var(--red)' : color
-  // Display: bij cost altijd '−€ X' met minteken, anders '€ X'
+  const displayColor =
+    isCost && value !== 0 ? 'var(--red)' :
+    signed && value < 0   ? 'var(--red)' :
+    color
+  // Display: isCost → altijd '−€ X'; signed → '€ X' of '−€ X' naar teken; anders '€ X'
   const displayValue = editing
     ? raw
     : value === 0
       ? ''
       : isCost
         ? `−€ ${Math.abs(value).toLocaleString('nl-NL')}`
-        : `€ ${value.toLocaleString('nl-NL')}`
+        : signed
+          ? `${value < 0 ? '−' : ''}€ ${Math.abs(value).toLocaleString('nl-NL')}`
+          : `€ ${value.toLocaleString('nl-NL')}`
   const commit = () => {
     setEditing(false)
     let v = parseNL(raw || '0')
     if (isNaN(v)) v = 0
-    // Cost-mode: negeer het teken van de input en sla altijd positief op
-    // (display toont automatisch het minteken). Stored positive is de
-    // conventie die de kosten-override store al gebruikt.
+    // Cost-mode: negeer het teken en sla altijd positief op. Signed-mode:
+    // bewaar het teken zoals ingetypt.
     if (isCost) v = Math.abs(v)
     onChange(v)
   }
   return (
     <input
       className="ohw-inp"
-      style={{ width: 130, color: displayColor, fontWeight: isCost ? 600 : undefined }}
+      style={{ width: 130, color: displayColor, fontWeight: isCost || signed ? 600 : undefined }}
       value={displayValue}
-      placeholder={isCost ? '−€ 0' : '€ 0'}
+      placeholder={isCost ? '−€ 0' : signed ? '€ 0 (+/−)' : '€ 0'}
       data-nav-col={navCol}
       data-nav-row={navRow}
       onFocus={(e) => { setEditing(true); setRaw(value === 0 ? '' : String(value)); setTimeout(() => e.target.select(), 0) }}
@@ -284,13 +292,17 @@ export function MaandTab({ filter: _filter }: Props) {
     return sum
   }
 
-  /** Geeft de positieve waarde voor een kosten-sleutel:
-   *  breakdowns-sum > override > actuals (fallback). */
+  /** Geeft de waarde voor een kosten-sleutel:
+   *  breakdowns-sum > override > actuals (fallback).
+   *  - BVs: positief magnitude (cost), sign wordt bij display geflipped.
+   *  - Holdings: signed (plData heeft mixed signs — sommige subs zijn
+   *    credits i.p.v. kosten). */
   const getKostenVal = (bv: ClosingBv, key: string): number => {
     if (hasBreakdowns(key)) return sumBreakdowns(bv, key)
     const e = entry(bv)
     if (e && e.kostenOverrides[key] !== undefined) return e.kostenOverrides[key]
-    return Math.abs(monthlyActuals2026[bv as EntityName]?.[month]?.[key] ?? 0)
+    const plVal = monthlyActuals2026[bv as EntityName]?.[month]?.[key] ?? 0
+    return bv === 'Holdings' ? plVal : Math.abs(plVal)
   }
 
   /** Slaat een override op; 0 wist de override (fallback naar actuals) */
@@ -320,10 +332,18 @@ export function MaandTab({ filter: _filter }: Props) {
   const finalCosts = (bv: ClosingBv) =>
     DIRECTE_KOSTEN_SUBS.reduce((s, sub) => s + getKostenVal(bv, sub.key), 0)
 
+  /** Convert een finalCosts / opKosten / amortisatie naar signed P&L-waarde.
+   *  - BVs: magnitude positief → negeer (kosten zijn negatief in P&L).
+   *  - Holdings: al signed → overnemen. */
+  const signedCost = (bv: ClosingBv, magnitude: number) =>
+    bv === 'Holdings' ? magnitude : -magnitude
+
   const grossMargin = (bv: ClosingBv) => {
     const e = entry(bv)
     if (!e) return 0
-    return netRevenue(e, bv) - finalCosts(bv)
+    // netRevenue + signed directe kosten: voor BVs trek je finalCosts af,
+    // voor Holdings tel je finalCosts (signed) erbij op.
+    return netRevenue(e, bv) + signedCost(bv, finalCosts(bv))
   }
 
   const opKosten = (bv: ClosingBv) =>
@@ -332,8 +352,8 @@ export function MaandTab({ filter: _filter }: Props) {
   const amortisatie = (bv: ClosingBv) =>
     AMORTISATIE_SUBS.reduce((s, sub) => s + getKostenVal(bv, sub.key), 0)
 
-  const ebitda = (bv: ClosingBv) => grossMargin(bv) - opKosten(bv)
-  const ebit   = (bv: ClosingBv) => ebitda(bv) - amortisatie(bv)
+  const ebitda = (bv: ClosingBv) => grossMargin(bv) + signedCost(bv, opKosten(bv))
+  const ebit   = (bv: ClosingBv) => ebitda(bv) + signedCost(bv, amortisatie(bv))
 
   // Financieel resultaat & vennootschapsbelasting — per BV. Ontbrekende
   // velden (oude persisted entries) krijgen plData-defaults voor Jan/Feb.
@@ -371,11 +391,12 @@ export function MaandTab({ filter: _filter }: Props) {
   const totIc           = BVS.reduce((a, bv) => a + getIcVerrekening(bv), 0)
   const totNetRevVoorIC = BVS.reduce((a, bv) => a + getNettoomzetVoorIC(bv), 0)
   const totNetRev       = BVS.reduce((a, bv) => a + (entry(bv) ? netRevenue(entry(bv)!, bv) : getNettoomzetVoorIC(bv) + getIcVerrekening(bv)), 0)
-  const totCosts       = BVS.reduce((a, bv) => a + finalCosts(bv), 0)
   const totMargin      = BVS.reduce((a, bv) => a + grossMargin(bv), 0)
   const totMarginPct   = totNetRev > 0 ? totMargin / totNetRev * 100 : 0
-  const totOpKosten    = BVS.reduce((a, bv) => a + opKosten(bv), 0)
-  const totAmortisatie = BVS.reduce((a, bv) => a + amortisatie(bv), 0)
+  // Signed P&L-totalen — Holdings telt met real-sign mee, BVs als magnitude geflipped.
+  const totCostsSigned  = BVS.reduce((a, bv) => a + signedCost(bv, finalCosts(bv)), 0)
+  const totOpSigned     = BVS.reduce((a, bv) => a + signedCost(bv, opKosten(bv)), 0)
+  const totAmortSigned  = BVS.reduce((a, bv) => a + signedCost(bv, amortisatie(bv)), 0)
   const totEbitda      = BVS.reduce((a, bv) => a + ebitda(bv), 0)
   const totEbit        = BVS.reduce((a, bv) => a + ebit(bv), 0)
   const totFinRes      = BVS.reduce((a, bv) => a + finResultaat(bv), 0)
@@ -914,13 +935,18 @@ export function MaandTab({ filter: _filter }: Props) {
           )}
         </td>
         {BVS.map(bv => {
+          const isHld = bv === 'Holdings'
           const hasBr = breakdownCount > 0
           const val = getKostenVal(bv, sub.key)
           // Als er breakdowns zijn: toon read-only som (berekend). Anders: editable input.
           if (hasBr) {
+            // Holdings: val is signed (kan positief=credit of negatief=cost).
+            // Andere BVs: val is altijd positief magnitude → display als -val (cost).
+            const dispVal = isHld ? val : -val
+            const color = val === 0 ? 'var(--t3)' : dispVal < 0 ? 'var(--red)' : 'var(--green)'
             return (
-              <td key={bv} className="r mono" style={{ padding: '3px 8px', fontSize: 11, color: val !== 0 ? 'var(--red)' : 'var(--t3)', fontWeight: 600 }}>
-                {val !== 0 ? fmt(-val) : '—'}
+              <td key={bv} className="r mono" style={{ padding: '3px 8px', fontSize: 11, color, fontWeight: 600 }}>
+                {val !== 0 ? fmt(dispVal) : '—'}
               </td>
             )
           }
@@ -929,7 +955,7 @@ export function MaandTab({ filter: _filter }: Props) {
               <NumInput
                 value={val}
                 onChange={v => updateKosten(bv, sub.key, v)}
-                isCost
+                {...(isHld ? { signed: true } : { isCost: true })}
                 navRow={`${prefix}-${sub.key}`}
                 navCol={`${bv}`}
               />
@@ -961,7 +987,7 @@ export function MaandTab({ filter: _filter }: Props) {
                 <NumInput
                   value={br.values[bv] ?? 0}
                   onChange={v => updateBreakdownValue(br.id, bv, v)}
-                  isCost
+                  {...(bv === 'Holdings' ? { signed: true } : { isCost: true })}
                   navRow={`${prefix}-${sub.key}-br-${i}`}
                   navCol={`${bv}`}
                 />
@@ -1592,9 +1618,11 @@ export function MaandTab({ filter: _filter }: Props) {
                       </td>
                       {BVS.map(bv => {
                         const v = finalCosts(bv)
-                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: v !== 0 ? 'var(--red)' : 'var(--t2)' }}>{v !== 0 ? fmt(-v) : '—'}</td>
+                        const disp = signedCost(bv, v)
+                        const color = v === 0 ? 'var(--t2)' : disp < 0 ? 'var(--red)' : 'var(--green)'
+                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color }}>{v !== 0 ? fmt(disp) : '—'}</td>
                       })}
-                      <td className="mono r" style={{ fontWeight: 600, color: totCosts !== 0 ? 'var(--red)' : 'var(--t2)' }}>{totCosts !== 0 ? fmt(-totCosts) : '—'}</td>
+                      <td className="mono r" style={{ fontWeight: 600, color: totCostsSigned === 0 ? 'var(--t2)' : totCostsSigned < 0 ? 'var(--red)' : 'var(--green)' }}>{totCostsSigned !== 0 ? fmt(totCostsSigned) : '—'}</td>
                     </tr>
                     {expandedCosts.has('directe_kosten') && DIRECTE_KOSTEN_SUBS.flatMap(sub =>
                       renderCostSubRow(sub, 'dk')
@@ -1619,9 +1647,11 @@ export function MaandTab({ filter: _filter }: Props) {
                       </td>
                       {BVS.map(bv => {
                         const v = opKosten(bv)
-                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: v !== 0 ? 'var(--red)' : 'var(--t2)' }}>{v !== 0 ? fmt(-v) : '—'}</td>
+                        const disp = signedCost(bv, v)
+                        const color = v === 0 ? 'var(--t2)' : disp < 0 ? 'var(--red)' : 'var(--green)'
+                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color }}>{v !== 0 ? fmt(disp) : '—'}</td>
                       })}
-                      <td className="mono r" style={{ fontWeight: 600, color: totOpKosten !== 0 ? 'var(--red)' : 'var(--t2)' }}>{totOpKosten !== 0 ? fmt(-totOpKosten) : '—'}</td>
+                      <td className="mono r" style={{ fontWeight: 600, color: totOpSigned === 0 ? 'var(--t2)' : totOpSigned < 0 ? 'var(--red)' : 'var(--green)' }}>{totOpSigned !== 0 ? fmt(totOpSigned) : '—'}</td>
                     </tr>
                     {expandedCosts.has('operationele_kosten') && OPERATIONELE_KOSTEN_SUBS.flatMap(sub =>
                       renderCostSubRow(sub, 'op')
@@ -1646,9 +1676,11 @@ export function MaandTab({ filter: _filter }: Props) {
                       </td>
                       {BVS.map(bv => {
                         const v = amortisatie(bv)
-                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color: v !== 0 ? 'var(--red)' : 'var(--t2)' }}>{v !== 0 ? fmt(-v) : '—'}</td>
+                        const disp = signedCost(bv, v)
+                        const color = v === 0 ? 'var(--t2)' : disp < 0 ? 'var(--red)' : 'var(--green)'
+                        return <td key={bv} className="mono r" style={{ fontWeight: 600, color }}>{v !== 0 ? fmt(disp) : '—'}</td>
                       })}
-                      <td className="mono r" style={{ fontWeight: 600, color: totAmortisatie !== 0 ? 'var(--red)' : 'var(--t2)' }}>{totAmortisatie !== 0 ? fmt(-totAmortisatie) : '—'}</td>
+                      <td className="mono r" style={{ fontWeight: 600, color: totAmortSigned === 0 ? 'var(--t2)' : totAmortSigned < 0 ? 'var(--red)' : 'var(--green)' }}>{totAmortSigned !== 0 ? fmt(totAmortSigned) : '—'}</td>
                     </tr>
                     {expandedCosts.has('amortisatie_afschrijvingen') && AMORTISATIE_SUBS.flatMap(sub =>
                       renderCostSubRow(sub, 'am')

@@ -64,8 +64,9 @@ export function useAdjustedActuals() {
     return found ? sum : null
   }
 
-  /** Positieve waarde voor één sub-kostensleutel: breakdowns > override > |base|. */
-  const getSubCostPositive = (
+  /** Magnitude (positief) voor één sub-kostensleutel voor BV's, signed voor
+   *  Holdings: breakdowns > override > (|base| voor BVs; base als-is voor Hld). */
+  const getSubCostValue = (
     bv: ClosingBv,
     month: string,
     subKey: string,
@@ -77,7 +78,8 @@ export function useAdjustedActuals() {
     if (kostenOverrides && kostenOverrides[subKey] !== undefined) {
       return kostenOverrides[subKey]
     }
-    return Math.abs(base[subKey] ?? 0)
+    const pl = base[subKey] ?? 0
+    return bv === 'Holdings' ? pl : Math.abs(pl)
   }
 
   function getMonthly(bv: ClosingBv, month: string): Record<string, number> {
@@ -103,23 +105,28 @@ export function useAdjustedActuals() {
       )
     }
 
-    // Stap 1: per-sub positief. Eerst breakdowns, dan override, dan |base|.
+    // Stap 1: per-sub-value.
+    //  - BVs: positief (magnitude); we flippen naar negatief bij aggregatie.
+    //  - Holdings: signed (plData heeft mixed signs per sub); geen flip.
     const subPos: Record<string, number> = {}
     for (const k of ALL_SUBS) {
-      subPos[k] = getSubCostPositive(bv, month, k, kostenOv, base)
+      subPos[k] = getSubCostValue(bv, month, k, kostenOv, base)
     }
 
-    // Stap 2: aggregate negatieven (plData-conventie).
+    // Stap 2: aggregate in plData-conventie (kosten negatief).
     const sumSubs = (subs: readonly string[]) =>
-      -subs.reduce((s, k) => s + (subPos[k] ?? 0), 0)
+      bv === 'Holdings'
+        ? subs.reduce((s, k) => s + (subPos[k] ?? 0), 0)   // Holdings: al signed
+        : -subs.reduce((s, k) => s + (subPos[k] ?? 0), 0)  // BVs: flip magnitude
     const directeKosten      = sumSubs(DIRECTE_KOSTEN_SUBS)
     const operationeleKosten = sumSubs(OPERATIONELE_KOSTEN_SUBS)
     const amortisatie        = sumSubs(AMORTISATIE_SUBS)
 
-    // Stap 3: per-sub negatief (spread naar return object) zodat detail-rijen
-    // in Budget vs Actuals direct werken — ook voor Mar-26 zonder plData.
+    // Stap 3: per-sub signed in P&L-conventie (spread in return object).
     const subSigned: Record<string, number> = {}
-    for (const k of ALL_SUBS) subSigned[k] = -(subPos[k] ?? 0)
+    for (const k of ALL_SUBS) {
+      subSigned[k] = bv === 'Holdings' ? (subPos[k] ?? 0) : -(subPos[k] ?? 0)
+    }
 
     // Heeft de user écht sub-kosten ingevuld (breakdown of override)?
     const hasAnySubCustom = ALL_SUBS.some(k =>
