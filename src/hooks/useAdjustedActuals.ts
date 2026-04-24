@@ -87,6 +87,22 @@ export function useAdjustedActuals() {
     // Defensieve unwrap: oude persisted entries kunnen kostenOverrides missen.
     const kostenOv: Record<string, number> = entry?.kostenOverrides ?? {}
 
+    // ── Debug-log (alleen dev, alleen Mar-26) ──
+    // Helpt bij diagnose waarom kosten in Budget vs Actuals 0 zouden zijn
+    // terwijl ze in de Maandafsluiting wel ingevuld staan. Opent dev tools
+    // (F12) → Console om de data-flow te inspecteren.
+    if (typeof window !== 'undefined' && month === 'Mar-26') {
+      const bdCount = breakdowns.filter(b => b.month === month).length
+      const ovKeys = Object.keys(kostenOv)
+      // eslint-disable-next-line no-console
+      console.debug(
+        `[useAdjustedActuals] ${bv} ${month}:`,
+        `entry=${entry ? 'yes' : 'NO'}`,
+        `kostenOverrides=${ovKeys.length ? JSON.stringify(kostenOv) : '{}'}`,
+        `breakdowns(month)=${bdCount}`,
+      )
+    }
+
     // Stap 1: per-sub positief. Eerst breakdowns, dan override, dan |base|.
     const subPos: Record<string, number> = {}
     for (const k of ALL_SUBS) {
