@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import * as XLSX from 'xlsx'
+import * as XLSX from 'xlsx-js-style'
 import {
   PL_STRUCTURE,
   ytdActuals2025, ytdBudget2025,
@@ -169,18 +169,113 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
   // Column groups: per visible entity + total
   const entityGroups = [...visibleEntities, 'Totaal' as const]
 
-  // ── Excel export met huidige filters (periode, BV, kolomtypes) ──
+  // ── Excel export met opmaak + filter-info header ─────────────────────────
   const exportExcel = () => {
-    const header: (string | number)[] = [`${periodLabel} — Regel`]
-    for (const eg of entityGroups) {
-      for (const ct of activeCols) header.push(`${eg} — ${COL_LABELS[ct]}`)
-    }
-    const rows: (string | number)[][] = [header]
+    // Kleuren in TPG huisstijl
+    const BRAND_CYAN   = '00A9E0'
+    const HEADER_BG    = '0B1224'  // donker voor kolomheaders
+    const HEADER_TXT   = 'FFFFFF'
+    const SUB_BG       = 'E8F4FA'  // lichtblauw voor aggregaten (bold rows)
+    const INFO_BG      = 'F4F7FB'  // lichtgrijs voor info-blok
+    const DELTA_POS    = '1E7A3E'  // groen
+    const DELTA_NEG    = 'B4281E'  // rood
+    const BORDER_COLOR = 'C7D0DB'
 
+    const border = { style: 'thin', color: { rgb: BORDER_COLOR } } as const
+    const allBorders = { top: border, bottom: border, left: border, right: border }
+    const fontBase = { name: 'Calibri', sz: 10 }
+
+    const nowStr = new Date().toLocaleString('nl-NL', {
+      day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    })
+    const bvLabel   = filter.bv === 'all' ? 'Alle BVs' : filter.bv
+    const colsLabel = activeCols.map(c => COL_LABELS[c]).join(', ')
+
+    // ── Info-header bovenaan ───────────────────────────────────────────
+    const totalCols = 1 + entityGroups.length * activeCols.length
+    const rows: unknown[][] = []
+    const merges: XLSX.Range[] = []
+    const cellStyles: Record<string, XLSX.CellStyle> = {}
+
+    // Rij 0: titel
+    rows.push(['Budget vs Actuals — TPG Finance'])
+    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } })
+    cellStyles['A1'] = {
+      font: { ...fontBase, sz: 16, bold: true, color: { rgb: BRAND_CYAN } },
+      alignment: { horizontal: 'left', vertical: 'center' },
+    }
+
+    // Rij 1: Filter-samenvatting (periode | BV | kolommen | export-datum)
+    const filterLine = `Periode: ${periodLabel}   ·   BV-filter: ${bvLabel}   ·   Kolommen: ${colsLabel}   ·   Geëxporteerd: ${nowStr}`
+    rows.push([filterLine])
+    merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } })
+    cellStyles['A2'] = {
+      font: { ...fontBase, sz: 10, italic: true, color: { rgb: '52657E' } },
+      alignment: { horizontal: 'left' },
+      fill: { patternType: 'solid', fgColor: { rgb: INFO_BG } },
+    }
+
+    // Rij 2: lege scheidingsrij
+    rows.push([''])
+
+    // Rij 3: Entity-header (span over activeCols). Eerste cel leeg.
+    const entityHdrRowIdx = rows.length
+    const entityHdrRow: (string | number)[] = ['']
+    for (const eg of entityGroups) {
+      for (let i = 0; i < activeCols.length; i++) {
+        entityHdrRow.push(i === 0 ? eg : '')
+      }
+    }
+    rows.push(entityHdrRow)
+    // Merge per entity-group over z'n activeCols kolommen
+    let col = 1
+    for (const eg of entityGroups) {
+      if (activeCols.length > 1) {
+        merges.push({ s: { r: entityHdrRowIdx, c: col }, e: { r: entityHdrRowIdx, c: col + activeCols.length - 1 } })
+      }
+      // Style voor elke cel in deze groep (merged of niet)
+      for (let i = 0; i < activeCols.length; i++) {
+        const addr = XLSX.utils.encode_cell({ r: entityHdrRowIdx, c: col + i })
+        cellStyles[addr] = {
+          font: { ...fontBase, bold: true, sz: 11, color: { rgb: HEADER_TXT } },
+          alignment: { horizontal: 'center', vertical: 'center' },
+          fill: { patternType: 'solid', fgColor: { rgb: eg === 'Totaal' ? BRAND_CYAN : HEADER_BG } },
+          border: allBorders,
+        }
+      }
+      col += activeCols.length
+    }
+    // Ook de eerste cel (label kolom) in deze rij stylen
+    cellStyles[XLSX.utils.encode_cell({ r: entityHdrRowIdx, c: 0 })] = {
+      fill: { patternType: 'solid', fgColor: { rgb: HEADER_BG } },
+      border: allBorders,
+    }
+
+    // Rij 4: Sub-header (kolomtype labels: Actuals / Budget / Δ)
+    const subHdrRowIdx = rows.length
+    const subHdrRow: string[] = [`${periodLabel} — Regel`]
+    for (const eg of entityGroups) {
+      void eg
+      for (const ct of activeCols) subHdrRow.push(COL_LABELS[ct])
+    }
+    rows.push(subHdrRow)
+    for (let c = 0; c < totalCols; c++) {
+      const addr = XLSX.utils.encode_cell({ r: subHdrRowIdx, c })
+      cellStyles[addr] = {
+        font: { ...fontBase, bold: true, sz: 10, color: { rgb: HEADER_TXT } },
+        alignment: { horizontal: c === 0 ? 'left' : 'right', vertical: 'center' },
+        fill: { patternType: 'solid', fgColor: { rgb: HEADER_BG } },
+        border: allBorders,
+      }
+    }
+
+    // ── Data rows ──────────────────────────────────────────────────────
     for (const item of PL_STRUCTURE) {
       if (item.isSeparator) continue
+      const rowIdx = rows.length
       const label = '  '.repeat(item.indent ?? 0) + item.label
       const row: (string | number)[] = [label]
+
       if (item.isPercentage) {
         for (const eg of entityGroups) {
           const a = eg === 'Totaal' ? totalActuals : allActuals[eg as EntityName]
@@ -202,28 +297,80 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
         }
       }
       rows.push(row)
-    }
 
-    const ws = XLSX.utils.aoa_to_sheet(rows)
-    // Formatteer getallen: Nederlandse euro-notatie
-    const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
-    for (let r = range.s.r + 1; r <= range.e.r; r++) {
-      for (let c = range.s.c + 1; c <= range.e.c; c++) {
-        const addr = XLSX.utils.encode_cell({ r, c })
-        const cell = ws[addr]
-        if (cell && typeof cell.v === 'number') cell.z = '#,##0;-#,##0;-'
+      // Style voor deze rij
+      const isBold = item.isBold ?? false
+      const isPct  = item.isPercentage ?? false
+      const rowBg = isBold ? SUB_BG : undefined
+
+      // Label-cel (inspring via leading spaces in label-string)
+      cellStyles[XLSX.utils.encode_cell({ r: rowIdx, c: 0 })] = {
+        font: { ...fontBase, bold: isBold, italic: isPct, sz: 10 },
+        alignment: { horizontal: 'left', vertical: 'center' },
+        fill: rowBg ? { patternType: 'solid', fgColor: { rgb: rowBg } } : undefined,
+        border: allBorders,
+      }
+
+      // Data-cellen
+      let cIdx = 1
+      for (const eg of entityGroups) {
+        for (const ct of activeCols) {
+          const addr = XLSX.utils.encode_cell({ r: rowIdx, c: cIdx })
+          const val = row[cIdx]
+          let fontColor: { rgb: string } | undefined
+          if (ct === 'delta' && typeof val === 'number') {
+            if (val > 0) fontColor = { rgb: DELTA_POS }
+            else if (val < 0) fontColor = { rgb: DELTA_NEG }
+          } else if (eg === 'Totaal' && typeof val === 'number' && val !== 0) {
+            fontColor = { rgb: BRAND_CYAN }
+          }
+          cellStyles[addr] = {
+            font: { ...fontBase, bold: isBold || eg === 'Totaal', italic: isPct, sz: 10, color: fontColor },
+            alignment: { horizontal: 'right', vertical: 'center' },
+            numFmt: isPct ? undefined : '#,##0;-#,##0;"—"',
+            fill: rowBg ? { patternType: 'solid', fgColor: { rgb: rowBg } } : undefined,
+            border: allBorders,
+          }
+          cIdx++
+        }
       }
     }
-    // Auto-width per kolom
-    ws['!cols'] = header.map((h, i) => ({
-      wch: i === 0 ? 32 : Math.max(12, String(h).length + 2),
+
+    // ── Sheet opbouwen ────────────────────────────────────────────────
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+
+    // Merges
+    ws['!merges'] = merges
+
+    // Cell styles toepassen
+    for (const [addr, style] of Object.entries(cellStyles)) {
+      if (ws[addr]) ws[addr].s = style
+      else ws[addr] = { t: 's', v: '', s: style }
+    }
+
+    // Kolom-breedtes (eerste breed, rest evenredig)
+    ws['!cols'] = Array.from({ length: totalCols }, (_, i) => ({
+      wch: i === 0 ? 34 : 14,
     }))
+
+    // Rij-hoogtes (titel iets hoger, headers iets hoger)
+    ws['!rows'] = []
+    ws['!rows'][0] = { hpx: 28 }   // titel
+    ws['!rows'][1] = { hpx: 20 }   // filters
+    ws['!rows'][entityHdrRowIdx] = { hpx: 22 }
+    ws['!rows'][subHdrRowIdx] = { hpx: 20 }
+
+    // Freeze panes: label-kolom en headers
+    ws['!freeze'] = { xSplit: 1, ySplit: subHdrRowIdx + 1 }
+
+    // Page setup: landscape, fit to page width
+    ws['!pageSetup'] = { orientation: 'landscape', fitToPage: true }
 
     const bvSuffix = filter.bv === 'all' ? 'alle-BVs' : filter.bv
     const fileName = `Budget-vs-Actuals_${periodLabel.replace(/\s+/g, '-')}_${bvSuffix}.xlsx`
 
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, `Budget vs Actuals`)
+    XLSX.utils.book_append_sheet(wb, ws, 'Budget vs Actuals')
     XLSX.writeFile(wb, fileName)
   }
 
