@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ImportRecord, BvId } from '../../data/types'
+import type { ParsedHoursEntry } from '../../lib/parseImport'
 import { fmt } from '../../lib/format'
 
 const BV_COLORS: Record<string, string> = {
@@ -55,6 +56,8 @@ function colLabels(slotId: string) {
 
 interface Props {
   record: ImportRecord
+  /** SAP-timesheet entries per (BV, maand) — alleen voor geschreven_uren. */
+  hoursEntries?: ParsedHoursEntry[]
   onApprove: () => void
   onReject: (reason: string) => void
   onClose: () => void
@@ -62,7 +65,7 @@ interface Props {
   onReparse?: (amountCol: string, bvCol: string) => Promise<void>
 }
 
-export function ImportApprovalModal({ record, onApprove, onReject, onClose, onReparse }: Props) {
+export function ImportApprovalModal({ record, hoursEntries, onApprove, onReject, onClose, onReparse }: Props) {
   const [rejectReason, setRejectReason] = useState('')
   const [showReject, setShowReject] = useState(false)
   const [adjusting, setAdjusting] = useState(false)
@@ -303,6 +306,79 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
                 Er wordt geen bedrag naar de maandafsluiting geboekt.
               </div>
             )}
+
+            {/* Per-maand breakdown tabel voor SAP-timesheet uploads */}
+            {isHoursSlot && hoursEntries && hoursEntries.length > 0 && (() => {
+              // Groepeer per maand → {bv, declarable, internal, vakantie, ziekte, overig}
+              const allMonths = Array.from(new Set(hoursEntries.map(e => e.month)))
+                .sort((a, b) => {
+                  // Sort by year then month idx, handle 'Jan-26' etc.
+                  const MMM = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                  const parse = (s: string) => {
+                    const [mmm, yy] = s.split('-')
+                    return (2000 + Number(yy)) * 12 + MMM.indexOf(mmm)
+                  }
+                  return parse(a) - parse(b)
+                })
+              // Totaal kolommen over alle BVs × alle maanden
+              let tDecl = 0, tInt = 0, tVak = 0, tZk = 0, tOv = 0
+              for (const e of hoursEntries) {
+                tDecl += e.declarable; tInt += e.internal
+                tVak += e.vakantie; tZk += e.ziekte; tOv += e.overigVerlof
+              }
+              return (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>
+                    Per BV × maand — declarable, intern & verlof
+                  </div>
+                  <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: 8, overflowX: 'auto' }}>
+                    <table className="tbl" style={{ fontSize: 10, minWidth: 'max-content' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left', padding: '3px 8px' }}>BV</th>
+                          <th style={{ textAlign: 'left', padding: '3px 8px' }}>Maand</th>
+                          <th className="r" style={{ padding: '3px 8px', color: 'var(--green)' }}>Declarable</th>
+                          <th className="r" style={{ padding: '3px 8px', color: 'var(--amber)' }}>Intern TPG</th>
+                          <th className="r" style={{ padding: '3px 8px', color: 'var(--blue)' }}>Vakantie</th>
+                          <th className="r" style={{ padding: '3px 8px', color: 'var(--red)' }}>Ziekte</th>
+                          <th className="r" style={{ padding: '3px 8px', color: 'var(--t3)' }}>Overig verlof</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {BVS.flatMap(bv => allMonths.map(m => {
+                          const e = hoursEntries.find(h => h.bv === bv && h.month === m)
+                          if (!e) return null
+                          const hasAny = e.declarable || e.internal || e.vakantie || e.ziekte || e.overigVerlof
+                          if (!hasAny) return null
+                          return (
+                            <tr key={`${bv}-${m}`}>
+                              <td style={{ padding: '2px 8px', color: BV_COLORS[bv], fontWeight: 600 }}>
+                                <span style={{ width: 7, height: 7, borderRadius: '50%', background: BV_COLORS[bv], display: 'inline-block', marginRight: 4 }} />
+                                {bv}
+                              </td>
+                              <td style={{ padding: '2px 8px', color: 'var(--t2)' }}>{m}</td>
+                              <td className="r mono" style={{ padding: '2px 8px', color: e.declarable > 0 ? 'var(--t1)' : 'var(--t3)' }}>{e.declarable > 0 ? fmtU(e.declarable) : '—'}</td>
+                              <td className="r mono" style={{ padding: '2px 8px', color: e.internal > 0 ? 'var(--amber)' : 'var(--t3)' }}>{e.internal > 0 ? fmtU(e.internal) : '—'}</td>
+                              <td className="r mono" style={{ padding: '2px 8px', color: e.vakantie > 0 ? 'var(--blue)' : 'var(--t3)' }}>{e.vakantie > 0 ? fmtU(e.vakantie) : '—'}</td>
+                              <td className="r mono" style={{ padding: '2px 8px', color: e.ziekte > 0 ? 'var(--red)' : 'var(--t3)' }}>{e.ziekte > 0 ? fmtU(e.ziekte) : '—'}</td>
+                              <td className="r mono" style={{ padding: '2px 8px', color: e.overigVerlof > 0 ? 'var(--t2)' : 'var(--t3)' }}>{e.overigVerlof > 0 ? fmtU(e.overigVerlof) : '—'}</td>
+                            </tr>
+                          )
+                        }))}
+                        <tr style={{ borderTop: '1px solid var(--bd)', background: 'var(--bg4)' }}>
+                          <td colSpan={2} style={{ padding: '4px 8px', fontWeight: 700 }}>Totaal</td>
+                          <td className="r mono" style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--green)' }}>{fmtU(tDecl)}</td>
+                          <td className="r mono" style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--amber)' }}>{fmtU(tInt)}</td>
+                          <td className="r mono" style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--blue)' }}>{fmtU(tVak)}</td>
+                          <td className="r mono" style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--red)' }}>{fmtU(tZk)}</td>
+                          <td className="r mono" style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--t2)' }}>{fmtU(tOv)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
 
           {/* Aanpassen sectie */}

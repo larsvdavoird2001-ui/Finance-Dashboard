@@ -840,6 +840,26 @@ export function MaandTab({ filter: _filter }: Props) {
     flushSync(() => { setGenericWizardState(null) })
 
     const slot = UPLOAD_SLOTS.find(s => s.id === wizState.slotId)!
+
+    // ── Geschreven uren: overrulen we met SAP-aggregate als de kolom-layout
+    // matcht. De generic wizard gebruikt één amount-kolom die optelt over ALLE
+    // maanden (en soms inclusief verlof) — voor uren willen we per (BV, maand)
+    // declarable+internal. De SAP-aggregate levert dat én stashten we
+    // hoursEntries voor de store-push bij approve.
+    let recPerBv = result.perBv
+    let recTotal = result.totalAmount
+    let pendingHours: ParsedHoursEntry[] | null = null
+    if (wizState.slotId === 'geschreven_uren' && isSapTimesheetHeaders(result.headers)) {
+      const agg = aggregateSapTimesheet(result.rawRows, result.headers)
+      if (agg.entries.length > 0) {
+        const byBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
+        for (const e of agg.entries) byBv[e.bv] += e.declarable + e.internal
+        recPerBv = byBv
+        recTotal = byBv.Consultancy + byBv.Projects + byBv.Software
+        pendingHours = agg.entries
+      }
+    }
+
     const record: ImportRecord = {
       id: `${wizState.slotId}-${Date.now()}`,
       slotId: wizState.slotId,
@@ -847,8 +867,8 @@ export function MaandTab({ filter: _filter }: Props) {
       month: uploadMonth,
       fileName: wizState.fileName,
       uploadedAt: new Date().toLocaleString('nl-NL'),
-      perBv: result.perBv,
-      totalAmount: result.totalAmount,
+      perBv: recPerBv,
+      totalAmount: recTotal,
       rowCount: result.rowCount,
       parsedCount: result.parsedCount,
       skippedCount: result.skippedCount,
@@ -877,15 +897,10 @@ export function MaandTab({ filter: _filter }: Props) {
       })
     } catch (err) { console.error('addRawEntry faalde:', err) }
 
-    // Voor geschreven_uren: aggregeer SAP-timesheet layout per (BV, maand)
-    // en stash voor push-naar-store bij approve. Valt stilletjes terug als
-    // de kolom-layout niet matcht (dan blijft dit een "gewone" import — al
-    // doet geschreven_uren niets in applyImportToEntries).
-    if (wizState.slotId === 'geschreven_uren' && isSapTimesheetHeaders(result.headers)) {
-      const agg = aggregateSapTimesheet(result.rawRows, result.headers)
-      if (agg.entries.length > 0) {
-        setPendingHoursByRecord(prev => ({ ...prev, [record.id]: agg.entries }))
-      }
+    // Stash SAP-aggregated hoursEntries (hierboven al opgebouwd) voor
+    // push-naar-hours-store bij approve.
+    if (pendingHours && pendingHours.length > 0) {
+      setPendingHoursByRecord(prev => ({ ...prev, [record.id]: pendingHours! }))
     }
 
     setPendingFile(wizState.file)
@@ -2372,6 +2387,7 @@ export function MaandTab({ filter: _filter }: Props) {
       {pendingRecord && (
         <ImportApprovalModal
           record={pendingRecord}
+          hoursEntries={pendingHoursByRecord[pendingRecord.id]}
           onApprove={() => handleApprove(pendingRecord)}
           onReject={(reason) => handleReject(pendingRecord, reason)}
           onClose={() => { setPendingRecord(null); setPendingFile(null) }}
