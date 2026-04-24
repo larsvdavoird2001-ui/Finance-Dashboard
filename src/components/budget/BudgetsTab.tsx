@@ -11,6 +11,64 @@ import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
 
+/**
+ * Altijd-aan input cell voor Budget-invoer. Eén klik focus je, getallen
+ * worden geformatteerd getoond tot je focust, dan zie je het ruwe getal.
+ * Commit op blur/Enter; Escape herstelt.
+ */
+function BudgetInput({
+  value,
+  onCommit,
+  highlight,
+}: {
+  value: number
+  onCommit: (v: number) => void
+  highlight?: boolean
+}) {
+  const [raw, setRaw] = useState<string | null>(null)
+  const editing = raw !== null
+  const display = editing ? raw : (value === 0 ? '' : fmt(value))
+  const commit = () => {
+    if (raw === null) return
+    const trimmed = raw.trim()
+    const parsed = trimmed === '' ? 0 : parseNL(trimmed)
+    const v = isNaN(parsed) ? 0 : parsed
+    if (v !== value) onCommit(v)
+    setRaw(null)
+  }
+  return (
+    <input
+      className="ohw-inp"
+      value={display}
+      placeholder="—"
+      style={{
+        width: 85, fontSize: 11, padding: '2px 6px',
+        textAlign: 'right',
+        fontFamily: 'var(--mono)',
+        color: value === 0 ? 'var(--t3)' : highlight ? 'var(--green)' : 'var(--t1)',
+        background: highlight ? 'rgba(38,201,151,.05)' : 'var(--bg1)',
+        border: '1px solid transparent',
+        borderRadius: 3,
+      }}
+      onFocus={e => {
+        setRaw(value === 0 ? '' : String(value))
+        // Select na state-update voor consistente select
+        setTimeout(() => e.target.select(), 0)
+      }}
+      onChange={e => setRaw(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur()
+        } else if (e.key === 'Escape') {
+          setRaw(null)
+          e.currentTarget.blur()
+        }
+      }}
+    />
+  )
+}
+
 const ENTITIES: EntityName[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 
 const BV_COLORS: Record<string, string> = {
@@ -54,9 +112,6 @@ const READONLY_KEYS  = new Set([...AGGREGATE_KEYS, ...DERIVED_KEYS])
 
 interface Props { filter: GlobalFilter }
 
-// LE is niet bewerkbaar — alleen Budget-cellen editable.
-type EditTarget = { kind: 'budget'; e: EntityName; m: string; k: string }
-
 export function BudgetsTab({ filter: _filter }: Props) {
   const store = useBudgetStore()
   const fteGetEntry = useFteStore(s => s.getEntry)
@@ -66,8 +121,6 @@ export function BudgetsTab({ filter: _filter }: Props) {
 
   const [chartMetric,  setChartMetric]  = useState<string>('netto_omzet')
   const [expandedBvs,  setExpandedBvs]  = useState<Set<EntityName | 'Totaal'>>(new Set(['Consultancy']))
-  const [editing,      setEditing]      = useState<EditTarget | null>(null)
-  const [rawInput,     setRawInput]     = useState('')
   // Chart-filters: welke BVs tonen + welke series (budget / LE)
   const [chartBvs,     setChartBvs]     = useState<Set<EntityName>>(new Set(ENTITIES))
   const [showBudget,   setShowBudget]   = useState<boolean>(true)
@@ -167,21 +220,18 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return 'forecast'
   }
 
-  // ── Edit handlers (alleen Budget — LE is read-only) ──
-  const startEdit = (e: EntityName, m: string, k: string) => {
-    if (READONLY_KEYS.has(k)) return
-    const cur = rawBudget(e, m, k)
-    setRawInput(cur === 0 ? '' : String(cur))
-    setEditing({ kind: 'budget', e, m, k })
+  // ── Kopieer alle bewerkbare waardes van vorige maand naar deze maand ──
+  const copyPrevMonth = (e: EntityName, mIdx: number) => {
+    if (mIdx <= 0) return
+    const prev = months[mIdx - 1]
+    const cur = months[mIdx]
+    for (const item of PL_STRUCTURE) {
+      if (item.isSeparator || item.isPercentage) continue
+      if (READONLY_KEYS.has(item.key)) continue
+      const val = rawBudget(e, prev, item.key)
+      store.setValue(e, cur, item.key, val)
+    }
   }
-  const commitEdit = () => {
-    if (!editing) return
-    const parsed = parseNL(rawInput)
-    const v = isNaN(parsed) ? 0 : parsed
-    store.setValue(editing.e, editing.m, editing.k, v)
-    setEditing(null)
-  }
-  const cancelEdit = () => setEditing(null)
 
   // ── Accordion toggle (BV of 'Totaal') ──
   const toggleBv = (e: EntityName | 'Totaal') => {
@@ -273,38 +323,28 @@ export function BudgetsTab({ filter: _filter }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartMetric, chartBvs, showBudget, showLe, showTotal, store.overrides, store.leOverrides])
 
-  // ── Renderers voor cellen ──
+  // ── Budget cell: altijd-aan input voor subs, read-only span voor
+  // aggregaten/derived (brutomarge, EBITDA, etc.)
   const renderBudgetCell = (e: EntityName, m: string, k: string) => {
     const val = getBudgetVal(e, m, k)
-    const isEditing = editing?.kind === 'budget' && editing.e === e && editing.m === m && editing.k === k
     const readOnly = READONLY_KEYS.has(k)
-    const hasOv = !readOnly && store.overrides[e]?.[m]?.[k] !== undefined
-
-    if (isEditing) {
+    if (readOnly) {
       return (
-        <input
-          autoFocus
-          value={rawInput}
-          onChange={ev => setRawInput(ev.target.value)}
-          onBlur={commitEdit}
-          onKeyDown={ev => { if (ev.key === 'Enter') commitEdit(); else if (ev.key === 'Escape') cancelEdit() }}
-          className="ohw-inp"
-          style={{ width: 85, fontSize: 11, padding: '2px 5px' }}
-        />
+        <span
+          style={{ color: val === 0 ? 'var(--t3)' : 'var(--brand)', fontWeight: 700 }}
+          title="Auto-afgeleid uit subposten"
+        >
+          {val === 0 ? '—' : fmt(val)}
+        </span>
       )
     }
-    const color =
-      val === 0 ? 'var(--t3)' :
-      readOnly  ? 'var(--brand)' :
-      hasOv     ? 'var(--green)' : 'var(--t1)'
+    const hasOv = store.overrides[e]?.[m]?.[k] !== undefined
     return (
-      <span
-        style={{ color, cursor: readOnly ? 'default' : 'pointer', fontWeight: readOnly ? 700 : 400 }}
-        onClick={readOnly ? undefined : () => startEdit(e, m, k)}
-        title={readOnly ? 'Auto-afgeleid' : 'Klik om te bewerken'}
-      >
-        {val === 0 ? '—' : fmt(val)}
-      </span>
+      <BudgetInput
+        value={val}
+        highlight={hasOv}
+        onCommit={v => store.setValue(e, m, k, v)}
+      />
     )
   }
 
@@ -577,7 +617,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
                   <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, letterSpacing: 0 }}>
                     {isTot
                       ? '— som van alle BVs (read-only)'
-                      : '— klik op sub-regel om te bewerken; aggregaten worden auto-afgeleid'}
+                      : '— sub-regels zijn direct bewerkbaar; aggregaten worden auto-afgeleid · klik ⎘ onder een maand om vorige maand te kopiëren'}
                   </span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
@@ -585,8 +625,34 @@ export function BudgetsTab({ filter: _filter }: Props) {
                     <thead>
                       <tr>
                         <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 220 }}>P&L regel</th>
-                        {months.map(m => (
-                          <th key={m} className="r" style={{ minWidth: 92 }}>{m}</th>
+                        {months.map((m, mIdx) => (
+                          <th key={m} className="r" style={{ minWidth: 92, padding: '4px 6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                              <span>{m}</span>
+                              {!isTot && mIdx > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(ev) => {
+                                    ev.stopPropagation()
+                                    if (confirm(`Alle bewerkbare budget-waardes van ${months[mIdx - 1]} kopiëren naar ${m} voor ${scope}?`)) {
+                                      copyPrevMonth(scope as EntityName, mIdx)
+                                    }
+                                  }}
+                                  title={`Kopieer ${months[mIdx - 1]} → ${m}`}
+                                  style={{
+                                    background: 'var(--bg1)',
+                                    border: '1px solid var(--bd2)',
+                                    borderRadius: 3,
+                                    padding: '1px 5px',
+                                    fontSize: 10,
+                                    cursor: 'pointer',
+                                    color: 'var(--blue)',
+                                    lineHeight: 1,
+                                  }}
+                                >⎘</button>
+                              )}
+                            </div>
+                          </th>
                         ))}
                         <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)', minWidth: 110 }}>FY Totaal</th>
                       </tr>
