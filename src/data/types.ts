@@ -114,6 +114,12 @@ export interface ClosingEntry {
   /** Per-regel overrides voor directe/operationele kosten en amortisatie.
    *  Key = PL-sleutel (bijv. 'directe_inkoopkosten'), value = positief getal. */
   kostenOverrides: Record<string, number>
+  /** Financieel resultaat (teken volgens P&L-conventie: meestal negatief).
+   *  Optioneel voor backward-compat met persisted states; read-path valt dan
+   *  terug op plData Jan/Feb waardes. */
+  financieelResultaat?: number
+  /** Vennootschapsbelasting (teken volgens P&L: meestal negatief). */
+  vennootschapsbelasting?: number
   remark: string
 }
 

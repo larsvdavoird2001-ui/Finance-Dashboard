@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { flushSync } from 'react-dom'
-import { useFinStore, CLOSING_MONTHS } from '../../store/useFinStore'
+import { useFinStore, CLOSING_MONTHS, getFinResDefault, getVpbDefault } from '../../store/useFinStore'
 import { useImportStore } from '../../store/useImportStore'
 import { useOhwStore } from '../../store/useOhwStore'
 // FTE store werd hier inline gebruikt; dat blok is verhuisd naar FteTab.
@@ -335,6 +335,20 @@ export function MaandTab({ filter: _filter }: Props) {
   const ebitda = (bv: ClosingBv) => grossMargin(bv) - opKosten(bv)
   const ebit   = (bv: ClosingBv) => ebitda(bv) - amortisatie(bv)
 
+  // Financieel resultaat & vennootschapsbelasting — per BV. Ontbrekende
+  // velden (oude persisted entries) krijgen plData-defaults voor Jan/Feb.
+  const finResultaat = (bv: ClosingBv): number => {
+    const e = entry(bv)
+    if (e && typeof e.financieelResultaat === 'number') return e.financieelResultaat
+    return getFinResDefault(bv, month)
+  }
+  const vpb = (bv: ClosingBv): number => {
+    const e = entry(bv)
+    if (e && typeof e.vennootschapsbelasting === 'number') return e.vennootschapsbelasting
+    return getVpbDefault(bv, month)
+  }
+  const nettoResultaat = (bv: ClosingBv) => ebit(bv) + finResultaat(bv) + vpb(bv)
+
   // ── Budget lookups (monthlyBudget2026) ──────────────────────────────────
   // Gebruikt voor EBITDA/EBIT analyse tegen budget. Budget-waardes in plData
   // zijn ALTIJD zoals in de P&L-structuur: kosten negatief, omzet positief.
@@ -364,6 +378,9 @@ export function MaandTab({ filter: _filter }: Props) {
   const totAmortisatie = BVS.reduce((a, bv) => a + amortisatie(bv), 0)
   const totEbitda      = BVS.reduce((a, bv) => a + ebitda(bv), 0)
   const totEbit        = BVS.reduce((a, bv) => a + ebit(bv), 0)
+  const totFinRes      = BVS.reduce((a, bv) => a + finResultaat(bv), 0)
+  const totVpb         = BVS.reduce((a, bv) => a + vpb(bv), 0)
+  const totNettoRes    = BVS.reduce((a, bv) => a + nettoResultaat(bv), 0)
   const totBudgetEbitda = BVS.reduce((a, bv) => a + budgetEbitda(bv), 0)
   const totBudgetEbit   = BVS.reduce((a, bv) => a + budgetEbit(bv), 0)
   const totBudgetNetRev = BVS.reduce((a, bv) => a + budgetNetRevenue(bv), 0)
@@ -1727,6 +1744,63 @@ export function MaandTab({ filter: _filter }: Props) {
                         })}
                         <td className="mono r" style={{ fontWeight: 600, color: totEbit >= 0 ? 'var(--t1)' : 'var(--red)' }}>
                           {fmt(totEbit)}
+                        </td>
+                      </>, true
+                    )}
+
+                    {/* ── Financieel resultaat & Vennootschapsbelasting (invoerbaar) ── */}
+                    {sectionRow('Financieel resultaat',
+                      <>
+                        {BVS.map(bv => {
+                          const e = entry(bv)
+                          return (
+                            <td key={bv} className="r" style={{ padding: '4px 8px' }}>
+                              {e ? (
+                                <NumInput
+                                  value={finResultaat(bv)}
+                                  onChange={v => update(e.id, 'financieelResultaat', v)}
+                                  color={finResultaat(bv) < 0 ? 'var(--red)' : undefined}
+                                />
+                              ) : '—'}
+                            </td>
+                          )
+                        })}
+                        <td className="mono r" style={{ color: totFinRes < 0 ? 'var(--red)' : undefined }}>{fmt(totFinRes)}</td>
+                      </>
+                    )}
+
+                    {sectionRow('Vennootschapsbelasting',
+                      <>
+                        {BVS.map(bv => {
+                          const e = entry(bv)
+                          return (
+                            <td key={bv} className="r" style={{ padding: '4px 8px' }}>
+                              {e ? (
+                                <NumInput
+                                  value={vpb(bv)}
+                                  onChange={v => update(e.id, 'vennootschapsbelasting', v)}
+                                  color={vpb(bv) < 0 ? 'var(--red)' : undefined}
+                                />
+                              ) : '—'}
+                            </td>
+                          )
+                        })}
+                        <td className="mono r" style={{ color: totVpb < 0 ? 'var(--red)' : undefined }}>{fmt(totVpb)}</td>
+                      </>
+                    )}
+
+                    {sectionRow('Netto resultaat',
+                      <>
+                        {BVS.map(bv => {
+                          const nr = nettoResultaat(bv)
+                          return (
+                            <td key={bv} className="mono r" style={{ color: nr >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+                              {fmt(nr)}
+                            </td>
+                          )
+                        })}
+                        <td className="mono r" style={{ fontWeight: 700, color: totNettoRes >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          {fmt(totNettoRes)}
                         </td>
                       </>, true
                     )}

@@ -1,4 +1,4 @@
-import { useFinStore } from '../store/useFinStore'
+import { useFinStore, getFinResDefault, getVpbDefault } from '../store/useFinStore'
 import { useOhwStore } from '../store/useOhwStore'
 import { useCostBreakdownStore } from '../store/useCostBreakdownStore'
 import { monthlyActuals2026 } from '../data/plData'
@@ -149,6 +149,13 @@ export function useAdjustedActuals() {
       const brutomarge = netRevenue + adjDirecteKosten
       const ebitda     = brutomarge + operationeleKosten
       const ebit       = ebitda + amortisatie
+      const finRes     = entry && typeof entry.financieelResultaat === 'number'
+        ? entry.financieelResultaat
+        : getFinResDefault(bv, month)
+      const vpb        = entry && typeof entry.vennootschapsbelasting === 'number'
+        ? entry.vennootschapsbelasting
+        : getVpbDefault(bv, month)
+      const nettoResultaat = ebit + finRes + vpb
 
       return {
         ...base,
@@ -163,6 +170,9 @@ export function useAdjustedActuals() {
         amortisatie_afschrijvingen: amortisatie,
         ebitda,
         ebit,
+        financieel_resultaat:       finRes,
+        vennootschapsbelasting:     vpb,
+        netto_resultaat:            nettoResultaat,
       }
     }
 
@@ -179,6 +189,13 @@ export function useAdjustedActuals() {
         const brutomarge = netRevenue + adjDirecteKosten
         const ebitda     = brutomarge + operationeleKosten
         const ebit       = ebitda + amortisatie
+        const finRes     = typeof entry.financieelResultaat === 'number'
+          ? entry.financieelResultaat
+          : getFinResDefault(bv, month)
+        const vpb        = typeof entry.vennootschapsbelasting === 'number'
+          ? entry.vennootschapsbelasting
+          : getVpbDefault(bv, month)
+        const nettoResultaat = ebit + finRes + vpb
         return {
           ...base,
           ...subSigned,
@@ -191,6 +208,9 @@ export function useAdjustedActuals() {
           amortisatie_afschrijvingen: amortisatie,
           ebitda,
           ebit,
+          financieel_resultaat:       finRes,
+          vennootschapsbelasting:     vpb,
+          netto_resultaat:            nettoResultaat,
         }
       }
     }
