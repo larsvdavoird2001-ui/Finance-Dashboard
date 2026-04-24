@@ -309,9 +309,11 @@ export function MaandTab({ filter: _filter }: Props) {
   const updateKosten = (bv: ClosingBv, key: string, val: number) => {
     const e = entry(bv)
     if (!e) return
-    const next = { ...e.kostenOverrides }
-    if (val === 0) delete next[key]
-    else next[key] = val
+    // Altijd de ingevulde waarde bewaren — óók 0. Eerder werd 0 geïnterpreteerd
+    // als "override wissen" waardoor de cel terugsprong naar de plData-fallback
+    // (bv. Jan-26 Holdings overige_personeelskosten = 171.515). Dat is
+    // verwarrend: als de user 0 intypt, bedoelt-ie 0.
+    const next = { ...e.kostenOverrides, [key]: val }
     updateEntry(e.id, { kostenOverrides: next })
   }
 
