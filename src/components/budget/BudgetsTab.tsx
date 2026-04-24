@@ -7,6 +7,7 @@ import type { EntityName } from '../../data/plData'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useFteStore } from '../../store/useFteStore'
+import { useHoursStore } from '../../store/useHoursStore'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
@@ -134,6 +135,10 @@ export function BudgetsTab({ filter: _filter }: Props) {
   // Trigger re-render bij FTE wijzigingen
   useFteStore(s => s.entries)
   const { getMonthly } = useAdjustedActuals()
+  // Hours-store voor geplande vakantie/ziekte in toekomstige maanden.
+  const hoursEntries = useHoursStore(s => s.entries)
+  const getHoursEntry = (bv: BvId, m: string) =>
+    hoursEntries.find(e => e.bv === bv && e.month === m)
 
   const [chartMetric,  setChartMetric]  = useState<string>('netto_omzet')
   const [expandedBvs,  setExpandedBvs]  = useState<Set<EntityName | 'Totaal'>>(new Set(['Consultancy']))
@@ -265,8 +270,41 @@ export function BudgetsTab({ filter: _filter }: Props) {
       }
     }
 
-    const seasonalForecast = sameMonth2025 * perfMult * fteAdj
-    const runRateForecast  = lastActual * fteAdj
+    // ── Availability-adjustment o.b.v. geplande vakantie/verlof ─────────
+    // De SAP-timesheet upload bevat ook toekomstige vakantie-inleveringen
+    // (bv. Jul-26 Consultancy Vakantie 352u). Die vakantie is capaciteit die
+    // NIET beschikbaar is voor declarabel werk. We berekenen de ratio van
+    // geplande verlof (vakantie + ziekte is zelden gepland, dus primair
+    // vakantie) t.o.v. een baseline van werkuren in recente gesloten maanden.
+    // Dampening is alleen op omzetgerelateerde keys.
+    let leaveAdj = 1
+    const isRevenueKey = k === 'netto_omzet' || k === 'gefactureerde_omzet'
+    if (e !== 'Holdings' && lastClosedMonth && isRevenueKey) {
+      const hoursThisMonth = getHoursEntry(e as BvId, m)
+      // Plande vakantie (voor toekomst typisch alleen Vakantie gevuld)
+      const plannedVakantie = hoursThisMonth?.vakantie ?? 0
+      if (plannedVakantie > 0) {
+        // Baseline werkuren: gemiddelde van recente gesloten maanden
+        let baselineWork = 0, baselineCount = 0
+        for (const cm of closedMonths) {
+          const he = getHoursEntry(e as BvId, cm)
+          if (he) {
+            baselineWork += he.declarable + he.internal
+            baselineCount++
+          }
+        }
+        const avgWork = baselineCount > 0 ? baselineWork / baselineCount : 0
+        if (avgWork > 0) {
+          // Vakantie als ratio van normale werkcapaciteit (cap op 50% dempen).
+          const leaveRatio = Math.min(plannedVakantie / avgWork, 0.5)
+          leaveAdj = 1 - leaveRatio
+        }
+      }
+    }
+
+    const combinedAdj = fteAdj * leaveAdj
+    const seasonalForecast = sameMonth2025 * perfMult * combinedAdj
+    const runRateForecast  = lastActual * combinedAdj
     if (seasonalForecast === 0 && runRateForecast === 0) return 0
     if (seasonalForecast === 0) return Math.round(runRateForecast)
     if (runRateForecast === 0)  return Math.round(seasonalForecast)

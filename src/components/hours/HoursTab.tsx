@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Bar, Line } from 'react-chartjs-2'
 import '../../lib/chartSetup'
 import { CHART_COLORS } from '../../lib/chartSetup'
 import { hoursData2026, hoursData2025, MONTHS_2026, MONTHS_2025, ACTUAL_MONTHS, CURRENT_MONTH } from '../../data/hoursData'
-import type { BvId, GlobalFilter } from '../../data/types'
+import type { BvId, GlobalFilter, HoursRecord } from '../../data/types'
+import { useHoursStore, totalLeave } from '../../store/useHoursStore'
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
@@ -55,7 +56,38 @@ export function HoursTab({ filter }: Props) {
   const [showForecast, setShowForecast] = useState(true)
 
   const is2025 = filter.year === '2025'
-  const hoursData = is2025 ? hoursData2025 : hoursData2026
+  // Hours-store: geuploade SAP-timesheet data. Override hoursData2026
+  // per (bv, maand) waar we een geuploade entry hebben met werkuren > 0.
+  const hoursStoreEntries = useHoursStore(s => s.entries)
+  const storeMap = useMemo(() => {
+    const m = new Map<string, (typeof hoursStoreEntries)[number]>()
+    for (const e of hoursStoreEntries) m.set(e.id, e)
+    return m
+  }, [hoursStoreEntries])
+
+  const mergedHours2026: HoursRecord[] = useMemo(() => {
+    return hoursData2026.map(rec => {
+      const storeEntry = storeMap.get(`${rec.bv}-${rec.month}`)
+      if (!storeEntry) return rec
+      const work = storeEntry.declarable + storeEntry.internal
+      const leave = totalLeave(storeEntry)
+      // Werkuren > 0 betekent daadwerkelijk geregistreerd → markeer als actual
+      // en gebruik de SAP-cijfers. Alleen-verlof rijen (toekomstige vakantie)
+      // laten we de forecast-baseline ongemoeid, maar we mergen wel leave
+      // terug via getPlannedLeave (zie LE-flow).
+      if (work <= 0) return rec
+      return {
+        ...rec,
+        written: work,
+        declarable: storeEntry.declarable,
+        nonDeclarable: storeEntry.internal,
+        capacity: Math.max(rec.capacity, work + leave),
+        type: 'actual',
+      }
+    })
+  }, [storeMap])
+
+  const hoursData = is2025 ? hoursData2025 : mergedHours2026
   const months    = is2025 ? MONTHS_2025   : MONTHS_2026
 
   const activeBvs = filter.bv === 'all' ? BVS : [filter.bv as BvId]

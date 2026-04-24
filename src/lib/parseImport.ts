@@ -536,6 +536,159 @@ function findBestBvColumn(
   return bestCol
 }
 
+// ── SAP Analytics timesheet (geschreven_uren) ───────────────────────────────
+/** Resultaat-rij voor de SAP-timesheet import: per BV × maand de declarable
+ *  werkuren, interne uren en afwezigheid (opgesplitst per categorie). */
+export interface ParsedHoursEntry {
+  id: string          // `${bv}-${month}`
+  bv: BvId
+  month: string       // 'Jan-26'
+  declarable: number
+  internal: number
+  vakantie: number
+  ziekte: number
+  overigVerlof: number
+}
+
+/** Detecteer of het bestand de SAP Analytics timesheet layout heeft. */
+function isSapTimesheetHeaders(headers: string[]): boolean {
+  const lower = headers.map(h => h.toLowerCase().trim())
+  const has = (kw: string) => lower.some(h => h.includes(kw))
+  return (
+    has('bedrijf') &&
+    has('kalenderjaar') &&
+    has('projecttype') &&
+    has('tijdtype') &&
+    (has('gewerkte tijd') || has('werktijd')) &&
+    has('afwezigheidstijd')
+  )
+}
+
+/** Parse een getal uit SAP-format: "2.808 u" / "485 u" / "1 u" (dot = thousand sep). */
+function parseSapHours(val: unknown): number {
+  if (val == null) return 0
+  const s = String(val).trim()
+  if (!s) return 0
+  // Strip " u" suffix, verwijder duizend-separators (dot), vervang komma door dot
+  const cleaned = s.replace(/\s*u\s*$/i, '').replace(/\./g, '').replace(/,/g, '.').trim()
+  const n = parseFloat(cleaned)
+  return isNaN(n) ? 0 : n
+}
+
+/** "The People Group | Consultancy B.V." → 'Consultancy'; idem Projects/Software. */
+function detectBvFromBedrijf(raw: unknown): BvId | null {
+  const s = String(raw ?? '').toLowerCase()
+  if (s.includes('consult')) return 'Consultancy'
+  if (s.includes('software')) return 'Software'
+  if (s.includes('project'))  return 'Projects'
+  return null
+}
+
+/** "01.2026" → "Jan-26". */
+const MMM_FROM_IDX = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+function parseSapMonth(raw: unknown): string | null {
+  const s = String(raw ?? '').trim()
+  const m = s.match(/^(\d{1,2})\.(\d{4})$/)
+  if (!m) return null
+  const idx = Number(m[1]) - 1
+  const yy = m[2].slice(-2)
+  if (idx < 0 || idx > 11) return null
+  return `${MMM_FROM_IDX[idx]}-${yy}`
+}
+
+/** Is een projecttype declarable? 'Intern TPG' is internal, 'Niet toegewezen'
+ *  is afwezigheid, alle andere project-types (Detachering, Eenheden, General,
+ *  Software, Uren, Training, …) gelden als declarable productiviteit. */
+function classifyWerkuurRow(projecttype: string): 'declarable' | 'internal' | null {
+  const pt = projecttype.trim().toLowerCase()
+  if (pt === 'niet toegewezen') return null  // afwezigheid — niet werkuren
+  if (pt === 'intern tpg') return 'internal'
+  return 'declarable'
+}
+
+/** Is een afwezigheid-type vakantie/ziekte/overig-verlof? */
+function classifyVerlofType(tijdtype: string): 'vakantie' | 'ziekte' | 'overig' {
+  const t = tijdtype.trim().toLowerCase()
+  if (t === 'vakantie') return 'vakantie'
+  if (t === 'ziekte')   return 'ziekte'
+  return 'overig'
+}
+
+/** Aggregator: rijen uit de SAP-timesheet → per (bv, maand) ParsedHoursEntry. */
+function aggregateSapTimesheet(rows: Record<string, unknown>[], headers: string[]): {
+  entries: ParsedHoursEntry[]
+  parsedCount: number
+  skippedCount: number
+  warnings: string[]
+} {
+  const warnings: string[] = []
+  // Kolom-namen exact vanuit headers (case-insensitive lookup)
+  const findHeader = (kw: string) => headers.find(h => h.toLowerCase().includes(kw)) ?? ''
+  const colBedrijf = findHeader('bedrijf')
+  const colMaand   = findHeader('kalenderjaar')
+  const colProject = findHeader('projecttype')
+  const colTijd    = findHeader('tijdtype')
+  const colGewerkt = findHeader('gewerkte tijd') || findHeader('werktijd')
+  const colAfw     = findHeader('afwezigheid')
+
+  const agg = new Map<string, ParsedHoursEntry>()
+  const getOrInit = (bv: BvId, month: string): ParsedHoursEntry => {
+    const id = `${bv}-${month}`
+    let e = agg.get(id)
+    if (!e) {
+      e = { id, bv, month, declarable: 0, internal: 0, vakantie: 0, ziekte: 0, overigVerlof: 0 }
+      agg.set(id, e)
+    }
+    return e
+  }
+
+  let parsed = 0
+  let skipped = 0
+  for (const row of rows) {
+    const bv = detectBvFromBedrijf(row[colBedrijf])
+    const month = parseSapMonth(row[colMaand])
+    if (!bv || !month) { skipped++; continue }
+    const projecttype = String(row[colProject] ?? '').trim()
+    const tijdtype    = String(row[colTijd] ?? '').trim()
+    const gewerkt = parseSapHours(row[colGewerkt])
+    const afw     = parseSapHours(row[colAfw])
+
+    // Niet toegewezen = afwezigheid — gebruik Afwezigheidstijd
+    if (projecttype.toLowerCase() === 'niet toegewezen') {
+      const kind = classifyVerlofType(tijdtype)
+      const e = getOrInit(bv, month)
+      if (kind === 'vakantie') e.vakantie += afw
+      else if (kind === 'ziekte') e.ziekte += afw
+      else e.overigVerlof += afw
+      parsed++
+      continue
+    }
+
+    // Anders: werkuren
+    const cls = classifyWerkuurRow(projecttype)
+    if (!cls) { skipped++; continue }
+    const e = getOrInit(bv, month)
+    if (cls === 'declarable') e.declarable += gewerkt
+    else e.internal += gewerkt
+    parsed++
+  }
+
+  if (agg.size === 0 && rows.length > 0) {
+    warnings.push('Geen geldige BV/maand-combinaties gevonden in bestand — controleer of dit een SAP Analytics timesheet is met de juiste kolom-layout.')
+  }
+
+  // Rond af naar geheel aantal uren — SAP levert ook vaak hele uren
+  const entries = Array.from(agg.values()).map(e => ({
+    ...e,
+    declarable:   Math.round(e.declarable),
+    internal:     Math.round(e.internal),
+    vakantie:     Math.round(e.vakantie),
+    ziekte:       Math.round(e.ziekte),
+    overigVerlof: Math.round(e.overigVerlof),
+  }))
+  return { entries, parsedCount: parsed, skippedCount: skipped, warnings }
+}
+
 // ── Publieke interface ────────────────────────────────────────────────────────
 export interface ParseResult {
   perBv: Record<BvId, number>
@@ -561,6 +714,11 @@ export interface ParseResult {
   missingHoursDetails?: MissingHoursDetail[]
   /** Per-rij detail voor generic imports (factuurvolume, uren_lijst, etc) */
   genericImportDetails?: GenericImportDetail[]
+  /** Geparseerde geschreven-uren per BV × maand × categorie.
+   *  Alleen gevuld wanneer de geschreven_uren import de SAP Analytics-
+   *  timesheet layout herkent (Bedrijf / Kalenderjaar-maand / Projecttype /
+   *  Tijdtype / Gewerkte tijd / Afwezigheidstijd). */
+  hoursEntries?: ParsedHoursEntry[]
   /** Gedetailleerde bucket-tellingen zodat de UI volledige verantwoording
    *  kan tonen: hoe zijn rowCount rijen opgesplitst? Alleen gevuld voor
    *  missing_hours flow. */
@@ -1158,6 +1316,35 @@ export async function parseImportFile(
         // ── Missing Hours: speciaal geval — werknemer × tarief × 0.9 ──
         if (slotId === 'missing_hours' && tariffLookup) {
           resolve(parseMissingHours(rows, headers, tariffLookup, config, overrides))
+          return
+        }
+
+        // ── Geschreven uren (SAP Analytics timesheet): structured per
+        // BV × maand × projecttype → declarable / internal / verlof
+        if (slotId === 'geschreven_uren' && isSapTimesheetHeaders(headers)) {
+          const { entries, parsedCount: pc, skippedCount: sc, warnings: ws } =
+            aggregateSapTimesheet(rows, headers)
+          // perBv-totaal = declarable + internal (= werkuren, exclusief verlof)
+          const perBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
+          for (const e of entries) {
+            perBv[e.bv] += e.declarable + e.internal
+          }
+          const totalAmount = perBv.Consultancy + perBv.Projects + perBv.Software
+          resolve({
+            perBv,
+            totalAmount,
+            rowCount: rows.length,
+            parsedCount: pc,
+            skippedCount: sc,
+            detectedAmountCol: '(gewerkte tijd + afwezigheidstijd)',
+            detectedBvCol: '(Bedrijf)',
+            headers,
+            preview: rows.slice(0, 5) as Record<string, unknown>[],
+            rawRows: rows as Record<string, unknown>[],
+            warnings: ws,
+            unmatchedCount: 0,
+            hoursEntries: entries,
+          })
           return
         }
         const warnings: string[] = []
