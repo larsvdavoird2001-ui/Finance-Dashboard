@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import {
   PL_STRUCTURE,
-  monthlyActuals2026, monthlyBudget2026,
-  ytdActuals2026, ytdBudget2026,
+  monthlyActuals2026,
+  ytdActuals2026,
   ytdActuals2025, ytdBudget2025,
 } from '../../data/plData'
 import { monthlyActuals2025, monthlyBudget2025, MONTHS_2025_LABELS } from '../../data/plData2025'
@@ -13,6 +13,7 @@ import type { BvId, GlobalFilter } from '../../data/types'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useFteStore } from '../../store/useFteStore'
 import { useNavStore } from '../../store/useNavStore'
+import { useBudgetStore } from '../../store/useBudgetStore'
 
 type ColType = 'actual' | 'budget' | 'delta'
 
@@ -64,6 +65,13 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
   const [colTypes,  setColTypes]  = useState<Set<ColType>>(new Set(['actual', 'budget', 'delta']))
 
   const { getMonthly, getYtd } = useAdjustedActuals()
+  // Subscribe naar budget-overrides zodat edits in Budgetten-tab live
+  // doorwerken in Budget vs Actuals. getBudgetMonth merged source + overrides.
+  const getBudgetMonth = useBudgetStore(s => s.getMonth)
+  // Zorg dat we re-renderen als overrides veranderen (selector op `overrides`
+  // zelf — anders zou Zustand alleen herrenderen bij referentie-verschil van de
+  // functie, die stabiel is).
+  useBudgetStore(s => s.overrides)
 
   // When year changes, jump to that year's YTD period (prevents mismatch: 2026 periods shown while 2025 selected)
   useEffect(() => {
@@ -95,8 +103,19 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
       if (p.month) return monthlyBudget2025[e]?.[p.month] ?? {}
       return ytdBudget2025[e] ?? {}
     }
-    if (p.month) return monthlyBudget2026[e]?.[p.month] ?? {}
-    return ytdBudget2026[e] ?? {}
+    // 2026: haal budget via de store (source + user overrides). Dat zorgt dat
+    // edits in de Budgetten-tab direct doorwerken in deze analyse.
+    if (p.month) return getBudgetMonth(e, p.month)
+    // YTD: som per plKey over alle YTD-maanden met store-merged values.
+    const months = p.ytdMonths ?? []
+    const sum: Record<string, number> = {}
+    for (const m of months) {
+      const md = getBudgetMonth(e, m)
+      for (const k of Object.keys(md)) {
+        sum[k] = (sum[k] ?? 0) + (md[k] ?? 0)
+      }
+    }
+    return sum
   }
 
   const allActuals: Record<EntityName, Record<string, number>> = Object.fromEntries(
