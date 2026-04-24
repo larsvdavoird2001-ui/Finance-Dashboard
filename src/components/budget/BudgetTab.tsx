@@ -12,6 +12,7 @@ import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useFteStore } from '../../store/useFteStore'
 import { useNavStore } from '../../store/useNavStore'
 import { useBudgetStore } from '../../store/useBudgetStore'
+import { derivePL, READONLY_KEYS as PL_DERIVED_KEYS } from '../../lib/plDerive'
 
 type ColType = 'actual' | 'budget' | 'delta'
 
@@ -93,19 +94,40 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
     return getYtd(e, p.ytdMonths ?? [])
   }
 
+  // Keys waarvoor we via derivePL aggregeren/afleiden. Ook alle items uit
+  // PL_STRUCTURE (inclusief sub-regels) worden geïnlude zodat het return
+  // object per maand alle regels dekt die de Budget vs Actuals tabel rendert.
+  const allPlKeys = Array.from(new Set([
+    ...PL_STRUCTURE.filter(i => !i.isSeparator && !i.isPercentage).map(i => i.key),
+    ...PL_DERIVED_KEYS,
+  ]))
+
+  // Bepaal alle budget-waardes voor één (entity, maand). Aggregaten worden
+  // altijd uit subs afgeleid (stale opgeslagen aggregate-overrides worden
+  // genegeerd) zodat Budget vs Actuals exact dezelfde cijfers toont als de
+  // Budgetten-tab.
+  const budgetMap2026 = (e: EntityName, m: string): Record<string, number> => {
+    const raw = getBudgetMonth(e, m)
+    const lookup = (k: string) => raw[k] ?? 0
+    const out: Record<string, number> = {}
+    for (const k of allPlKeys) out[k] = derivePL(lookup, k)
+    return out
+  }
+
   const getBudget = (p: Period, e: EntityName): Record<string, number> => {
     if (p.year === '2025') {
       if (p.month) return monthlyBudget2025[e]?.[p.month] ?? {}
       return ytdBudget2025[e] ?? {}
     }
-    // 2026: haal budget via de store (source + user overrides). Dat zorgt dat
-    // edits in de Budgetten-tab direct doorwerken in deze analyse.
-    if (p.month) return getBudgetMonth(e, p.month)
-    // YTD: som per plKey over alle YTD-maanden met store-merged values.
+    // 2026: haal budget via de store (source + user overrides) met derivatie.
+    // Sub-edits in de Budgetten-tab werken direct door, oude/stale aggregate-
+    // overrides worden genegeerd ten gunste van som-van-subs.
+    if (p.month) return budgetMap2026(e, p.month)
+    // YTD: som per plKey over alle YTD-maanden met store-merged derived values.
     const months = p.ytdMonths ?? []
     const sum: Record<string, number> = {}
     for (const m of months) {
-      const md = getBudgetMonth(e, m)
+      const md = budgetMap2026(e, m)
       for (const k of Object.keys(md)) {
         sum[k] = (sum[k] ?? 0) + (md[k] ?? 0)
       }

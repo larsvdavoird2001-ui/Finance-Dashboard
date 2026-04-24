@@ -10,6 +10,7 @@ import { useFteStore } from '../../store/useFteStore'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
+import { SUBS_OF, DERIVED_FORMULA, AGGREGATE_KEYS, DERIVED_KEYS, READONLY_KEYS } from '../../lib/plDerive'
 
 /**
  * Altijd-aan input cell voor Budget-invoer. Eén klik focus je, getallen
@@ -89,26 +90,9 @@ const CHART_METRICS = [
   { key: 'ebit',                       label: 'EBIT' },
 ]
 
-// Aggregate keys worden automatisch berekend als som van deze sub-keys.
-// Die subs staan in PL_STRUCTURE als indent=1.
-const SUBS_OF: Record<string, string[]> = {
-  netto_omzet:                ['gefactureerde_omzet', 'omzet_periode_allocatie'],
-  directe_kosten:             ['directe_inkoopkosten', 'directe_personeelskosten', 'directe_overige_personeelskosten', 'directe_autokosten'],
-  operationele_kosten:        ['indirecte_personeelskosten', 'overige_personeelskosten', 'huisvestingskosten', 'automatiseringskosten', 'indirecte_autokosten', 'verkoopkosten', 'algemene_kosten', 'doorbelaste_kosten'],
-  amortisatie_afschrijvingen: ['amortisatie_goodwill', 'amortisatie_software', 'afschrijvingen'],
-}
-
-// Derived keys: berekend uit andere aggregate/flat keys (niet uit subs).
-const DERIVED_FORMULA: Record<string, (v: (k: string) => number) => number> = {
-  brutomarge:      v => v('netto_omzet') + v('directe_kosten'),
-  ebitda:          v => v('brutomarge') + v('operationele_kosten'),
-  ebit:            v => v('ebitda') + v('amortisatie_afschrijvingen'),
-  netto_resultaat: v => v('ebit') + v('financieel_resultaat') + v('vennootschapsbelasting'),
-}
-
-const AGGREGATE_KEYS = new Set(Object.keys(SUBS_OF))
-const DERIVED_KEYS   = new Set(Object.keys(DERIVED_FORMULA))
-const READONLY_KEYS  = new Set([...AGGREGATE_KEYS, ...DERIVED_KEYS])
+// SUBS_OF, DERIVED_FORMULA, AGGREGATE_KEYS, DERIVED_KEYS, READONLY_KEYS
+// komen uit ../../lib/plDerive — gedeeld met BudgetTab zodat beide tabs
+// dezelfde aggregaat-logica gebruiken.
 
 // Gedeelde kolom-breedtes: zorgt dat Budget- en LE-tabellen exact onder
 // elkaar uitlijnen en grote bedragen (FY-totalen, kosten met teken) volledig
