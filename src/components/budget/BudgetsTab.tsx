@@ -148,20 +148,36 @@ export function BudgetsTab({ filter: _filter }: Props) {
   }
   const ytdTotal = Object.values(ytdPerBv).reduce((a, b) => a + b, 0)
 
-  // ── Chart 1: Budget over het jaar per BV (line) ──
+  // ── Chart 1: Budget + Latest Estimate over het jaar per BV (line) ──
+  // Solid lines = Budget, dashed lines = LE. Zelfde BV-kleur zodat paren
+  // visueel bij elkaar blijven; de legenda maakt het onderscheid.
   const lineData = useMemo(() => ({
     labels: months,
-    datasets: activeEntities.map(e => ({
-      label: e,
-      data: months.map(m => display(getVal(e, m, metric))),
-      borderColor: BV_COLORS[e],
-      backgroundColor: BV_COLORS[e] + '22',
-      borderWidth: 2,
-      tension: 0.3,
-      pointRadius: 3,
-      fill: false,
-    })),
-  }), [activeEntities, metric, store.overrides])
+    datasets: [
+      ...activeEntities.map(e => ({
+        label: `${e} — Budget`,
+        data: months.map(m => display(getVal(e, m, metric))),
+        borderColor: BV_COLORS[e],
+        backgroundColor: BV_COLORS[e] + '22',
+        borderWidth: 2,
+        tension: 0.3,
+        pointRadius: 3,
+        fill: false,
+      })),
+      ...activeEntities.map(e => ({
+        label: `${e} — LE`,
+        data: months.map(m => display(getLeVal(e, m, metric))),
+        borderColor: BV_COLORS[e],
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderDash: [6, 4],
+        tension: 0.3,
+        pointRadius: 2,
+        pointStyle: 'rectRot' as const,
+        fill: false,
+      })),
+    ],
+  }), [activeEntities, metric, store.overrides, store.leOverrides])
 
   // ── Chart 2: Pie chart verdeling per BV (totaal jaar) ──
   const pieEntities = activeEntities.filter(e => Math.abs(ytdPerBv[e] ?? 0) > 0)
@@ -595,9 +611,11 @@ export function BudgetsTab({ filter: _filter }: Props) {
                 <th style={{ minWidth: 220 }}>Regel</th>
                 <th className="r">Budget 2025</th>
                 <th className="r">Actuals 2025</th>
-                <th className="r">Budget 2026 (FY, deze tab)</th>
-                <th className="r">Δ vs Actuals 2025</th>
-                <th className="r">Δ %</th>
+                <th className="r">Budget 2026 (FY)</th>
+                <th className="r">LE 2026 (FY)</th>
+                <th className="r">Δ Budget vs Act 2025</th>
+                <th className="r">Δ LE vs Act 2025</th>
+                <th className="r">Δ LE vs Budget 2026</th>
               </tr>
             </thead>
             <tbody>
@@ -605,14 +623,15 @@ export function BudgetsTab({ filter: _filter }: Props) {
                 const b25 = activeEntities.reduce((s, e) => s + (ytdBudget2025[e]?.[item.key] ?? 0), 0)
                 const a25 = activeEntities.reduce((s, e) => s + (ytdActuals2025[e]?.[item.key] ?? 0), 0)
                 const b26 = activeEntities.reduce((s, e) => s + months.reduce((ss, m) => ss + (store.getMonth(e, m)[item.key] ?? 0), 0), 0)
-                const d   = b26 - a25
-                const pct = a25 !== 0 ? d / Math.abs(a25) * 100 : 0
+                const le26 = activeEntities.reduce((s, e) => s + months.reduce((ss, m) => ss + getLeVal(e, m, item.key), 0), 0)
+                const dBudgetVs25 = b26 - a25
+                const dLeVs25     = le26 - a25
+                const dLeVsBudget = le26 - b26
                 // Costs zijn in plData opgeslagen als negatieve waarden. Daardoor
                 // geldt voor omzet- én kostenregels: d > 0 = gunstig (meer
                 // omzet of minder negatieve kosten).
-                const deltaColor = d === 0
-                  ? 'var(--t3)'
-                  : d > 0 ? 'var(--green)' : 'var(--red)'
+                const clr = (d: number) => d === 0 ? 'var(--t3)' : d > 0 ? 'var(--green)' : 'var(--red)'
+                const fmtDelta = (d: number) => d === 0 ? '—' : (d > 0 ? '+' : '') + fmt(d)
                 return (
                   <tr key={item.key} style={{ background: item.isBold ? 'var(--bg3)' : undefined }}>
                     <td style={{
@@ -622,10 +641,10 @@ export function BudgetsTab({ filter: _filter }: Props) {
                     <td className="r mono" style={{ color: 'var(--t3)' }}>{fmt(b25)}</td>
                     <td className="r mono">{fmt(a25)}</td>
                     <td className="r mono" style={{ color: 'var(--brand)', fontWeight: 600 }}>{fmt(b26)}</td>
-                    <td className="r mono" style={{ color: deltaColor }}>{d === 0 ? '—' : (d > 0 ? '+' : '') + fmt(d)}</td>
-                    <td className="r mono" style={{ color: deltaColor, fontSize: 11 }}>
-                      {a25 === 0 ? '—' : `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`}
-                    </td>
+                    <td className="r mono" style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(le26)}</td>
+                    <td className="r mono" style={{ color: clr(dBudgetVs25) }}>{fmtDelta(dBudgetVs25)}</td>
+                    <td className="r mono" style={{ color: clr(dLeVs25) }}>{fmtDelta(dLeVs25)}</td>
+                    <td className="r mono" style={{ color: clr(dLeVsBudget) }}>{fmtDelta(dLeVsBudget)}</td>
                   </tr>
                 )
               })}
