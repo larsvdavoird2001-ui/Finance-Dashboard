@@ -211,13 +211,18 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return { fte: plannedFte, firstIdx: firstChangeIdx, lastClosedIdx: cIdx }
   }
 
-  /** Ramp-factor voor nieuwe hires: 40% productief in de maand van aanname,
-   *  +20% per maand daarna tot max 100%. Dus m+0=40%, m+1=60%, m+2=80%, m+3=100%.
+  /** Ramp-factor voor nieuwe hires: realistischer inwerkschema, want in de
+   *  praktijk zijn hires binnen ~2 maanden goed declarabel (niet nul).
+   *    Maand 0 (instap): 70%
+   *    Maand 1:          90%
+   *    Maand 2+:        100%
    *  Voor bestaande FTE (fteDelta ≤ 0) geldt ramp = 1 (volle impact van
-   *  ontslag / besparing).  */
+   *  ontslag / besparing — capaciteit valt meteen weg). */
   const rampFactor = (monthsSinceFirstHire: number): number => {
     if (monthsSinceFirstHire < 0) return 0
-    return Math.min(0.4 + 0.2 * monthsSinceFirstHire, 1.0)
+    if (monthsSinceFirstHire === 0) return 0.7
+    if (monthsSinceFirstHire === 1) return 0.9
+    return 1.0
   }
 
   // ── Forecast voor toekomstige maanden ──
