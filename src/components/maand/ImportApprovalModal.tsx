@@ -18,6 +18,16 @@ const SLOT_DESTINATION: Record<string, string> = {
   missing_hours: 'OHW Overzicht → Consultancy → "Missing hours (nog niet geboekte of goed gekeurde uren)"',
   factuurvolume: 'Maandafsluiting → Factuurvolume per BV',
   conceptfacturen: 'Maandafsluiting → Factuurvolume per BV',
+  geschreven_uren: 'Uren Dashboard + Latest Estimate forecast (declarable, intern & verlof per BV × maand) — NIET toegepast op maandafsluiting-regels',
+}
+
+/** Slots die uren-data verwerken i.p.v. financiële bedragen. Weergave schakelt
+ *  daarmee over van € naar 'u' en verbergt de Δ vs-budget-achtige summaries. */
+const HOURS_SLOTS = new Set(['geschreven_uren'])
+
+/** Formatteer een uren-getal voor in de modal. */
+function fmtU(v: number): string {
+  return `${Math.round(v).toLocaleString('nl-NL')} u`
 }
 
 // Slots die maar voor één BV zijn
@@ -64,6 +74,8 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
   const bvDetected = BVS.some(bv => (record.perBv[bv] ?? 0) > 0)
   const bvTotal = BVS.reduce((s, bv) => s + (record.perBv[bv] ?? 0), 0)
   const labels = colLabels(record.slotId)
+  const isHoursSlot = HOURS_SLOTS.has(record.slotId)
+  const fmtValue = (v: number) => isHoursSlot ? fmtU(v) : fmt(v)
 
   const handleReparse = async () => {
     if (!onReparse) return
@@ -217,7 +229,7 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
                   <span style={{ fontSize: 13, fontWeight: 700, color: BV_COLORS[singleBv] }}>{singleBv}</span>
                 </div>
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 22, fontWeight: 700, color: 'var(--t1)' }}>
-                  {fmt(record.totalAmount)}
+                  {fmtValue(record.totalAmount)}
                 </span>
               </div>
             ) : (
@@ -240,7 +252,7 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
                           )}
                         </div>
                         <div style={{ fontFamily: 'var(--mono)', fontSize: 16, fontWeight: 700, color: amount > 0 ? 'var(--t1)' : 'var(--t3)' }}>
-                          {amount > 0 ? fmt(amount) : '—'}
+                          {amount > 0 ? fmtValue(amount) : '—'}
                         </div>
                         {amount === 0 && bvTotal > 0 && (
                           <div style={{ fontSize: 9, color: 'var(--amber)', marginTop: 3 }}>⚠ Geen data herkend</div>
@@ -250,8 +262,10 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
                   })}
                 </div>
 
-                {/* Waarschuwing bij ongelijke verdeling */}
-                {bvTotal > 0 && Math.abs(record.totalAmount - bvTotal) > 1 && (
+                {/* Waarschuwing bij ongelijke verdeling — niet relevant voor
+                    hours-slots omdat perBv daar sommen van werkuren zijn
+                    (verlof zit niet in totaal) */}
+                {!isHoursSlot && bvTotal > 0 && Math.abs(record.totalAmount - bvTotal) > 1 && (
                   <div style={{
                     background: 'var(--bd-amber)', borderRadius: 6, padding: '8px 10px',
                     marginBottom: 8, fontSize: 11, color: 'var(--amber)',
@@ -267,13 +281,28 @@ export function ImportApprovalModal({ record, onApprove, onReject, onClose, onRe
             {/* Totaal */}
             <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <div>
-                <span style={{ fontWeight: 600, fontSize: 12 }}>Totaal gedetecteerd</span>
+                <span style={{ fontWeight: 600, fontSize: 12 }}>
+                  {isHoursSlot ? 'Totaal werkuren gedetecteerd' : 'Totaal gedetecteerd'}
+                </span>
                 <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--t3)' }}>
                   {record.parsedCount} van {record.rowCount} rijen verwerkt
                 </span>
               </div>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 700 }}>{fmt(record.totalAmount)}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 700 }}>{fmtValue(record.totalAmount)}</span>
             </div>
+
+            {/* Extra uitleg voor hours-slots: zichtbaar herinnering dat deze
+                data NIET in de maand-closing terecht komt. */}
+            {isHoursSlot && (
+              <div style={{
+                marginTop: 10, background: 'var(--bd-blue)', borderRadius: 6, padding: '8px 10px',
+                fontSize: 11, color: 'var(--t2)', border: '1px solid var(--blue)',
+              }}>
+                💡 Deze uren-data wordt <strong>alleen gebruikt voor het Uren Dashboard en de Latest Estimate</strong>
+                {' '}(met name: forecast-dempening bij geplande vakantie en context voor de analyses).
+                Er wordt geen bedrag naar de maandafsluiting geboekt.
+              </div>
+            )}
           </div>
 
           {/* Aanpassen sectie */}

@@ -551,7 +551,7 @@ export interface ParsedHoursEntry {
 }
 
 /** Detecteer of het bestand de SAP Analytics timesheet layout heeft. */
-function isSapTimesheetHeaders(headers: string[]): boolean {
+export function isSapTimesheetHeaders(headers: string[]): boolean {
   const lower = headers.map(h => h.toLowerCase().trim())
   const has = (kw: string) => lower.some(h => h.includes(kw))
   return (
@@ -615,7 +615,7 @@ function classifyVerlofType(tijdtype: string): 'vakantie' | 'ziekte' | 'overig' 
 }
 
 /** Aggregator: rijen uit de SAP-timesheet → per (bv, maand) ParsedHoursEntry. */
-function aggregateSapTimesheet(rows: Record<string, unknown>[], headers: string[]): {
+export function aggregateSapTimesheet(rows: Record<string, unknown>[], headers: string[]): {
   entries: ParsedHoursEntry[]
   parsedCount: number
   skippedCount: number

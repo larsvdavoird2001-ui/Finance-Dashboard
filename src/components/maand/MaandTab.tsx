@@ -26,10 +26,14 @@ import { buildMonthBundleZip, downloadBlob } from '../../lib/exportMonthBundle'
 import { generateMonthPptx, monthLabelFromCode } from '../../lib/exportPptx'
 import { useRawDataStore as useRawDataStoreFull } from '../../store/useRawDataStore'
 
-// geschreven_uren heeft een specifiek SAP-analytics formaat (Bedrijf /
-// Kalenderjaar-maand / Projecttype / Tijdtype / Gewerkte tijd /
-// Afwezigheidstijd) en gaat direct via parseImportFile → useHoursStore.
-const GENERIC_WIZARD_SLOTS = new Set(['factuurvolume', 'uren_lijst', 'd_lijst', 'conceptfacturen'])
+// Alle "generic wizard"-slots doorlopen stap-voor-stap kolom-detectie.
+// geschreven_uren staat hier ook in zodat de user kan verifiëren welke
+// kolommen gebruikt worden — ná confirm aggregeren we de SAP-timesheet
+// layout (Bedrijf / Kalenderjaar / Projecttype / Tijdtype / Gewerkte /
+// Afwezigheidstijd) naar ParsedHoursEntry[] voor de uren-store. Deze
+// import wordt NIET toegepast op maandafsluiting-regels — alleen op het
+// Uren Dashboard en de LE-forecast.
+const GENERIC_WIZARD_SLOTS = new Set(['factuurvolume', 'geschreven_uren', 'uren_lijst', 'd_lijst', 'conceptfacturen'])
 import { useTariffStore } from '../../store/useTariffStore'
 import { useRawDataStore } from '../../store/useRawDataStore'
 import type { BvId, ClosingBv, ClosingEntry, ImportRecord, GlobalFilter } from '../../data/types'
@@ -41,6 +45,7 @@ import { TariffTable } from './TariffTable'
 import { FteTab } from './FteTab'
 import { useCostBreakdownStore } from '../../store/useCostBreakdownStore'
 import { useHoursStore } from '../../store/useHoursStore'
+import { isSapTimesheetHeaders, aggregateSapTimesheet } from '../../lib/parseImport'
 import type { ParsedHoursEntry } from '../../lib/parseImport'
 
 // OHW-gerelateerde flows blijven op de 3 "productie" BVs (OHW heeft geen
@@ -871,6 +876,17 @@ export function MaandTab({ filter: _filter }: Props) {
         status: 'pending',
       })
     } catch (err) { console.error('addRawEntry faalde:', err) }
+
+    // Voor geschreven_uren: aggregeer SAP-timesheet layout per (BV, maand)
+    // en stash voor push-naar-store bij approve. Valt stilletjes terug als
+    // de kolom-layout niet matcht (dan blijft dit een "gewone" import — al
+    // doet geschreven_uren niets in applyImportToEntries).
+    if (wizState.slotId === 'geschreven_uren' && isSapTimesheetHeaders(result.headers)) {
+      const agg = aggregateSapTimesheet(result.rawRows, result.headers)
+      if (agg.entries.length > 0) {
+        setPendingHoursByRecord(prev => ({ ...prev, [record.id]: agg.entries }))
+      }
+    }
 
     setPendingFile(wizState.file)
     setPendingRecord(record)
