@@ -97,27 +97,29 @@ export function useAuth(): AuthState & {
       return
     }
 
-    // Initial session check + profiles fetch
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const profiles = await fetchUserProfiles()
+    // Stap 1: snel de session ophalen → loading=false zo snel mogelijk
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setState(s => ({
         ...s,
         session,
         user: session?.user ?? null,
-        profiles,
         loading: false,
       }))
-      // Touch last-sign-in op startup
+      // Stap 2 (background): profielen laden + last-sign-in touchen.
+      // Dit blokkeert NOOIT de UI — bij fouten loggen we en gaan verder.
       if (session?.user?.email) {
-        touchUserSignIn(session.user.email)
+        touchUserSignIn(session.user.email).catch(e => console.warn('[auth] touchUserSignIn:', e))
       }
+      fetchUserProfiles()
+        .then(profiles => setState(s => ({ ...s, profiles })))
+        .catch(e => console.warn('[auth] fetchUserProfiles:', e))
     }).catch(err => {
       console.warn('[auth] getSession failed:', err)
       setState(s => ({ ...s, loading: false, error: String(err) }))
     })
 
     // Subscribe to auth changes
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setState(s => ({
         ...s,
         session,
@@ -125,18 +127,27 @@ export function useAuth(): AuthState & {
         loading: false,
       }))
       if (event === 'SIGNED_IN' && session?.user?.email) {
-        // Hoofd-admin: zorg dat de profiles-rij altijd bestaat.
-        if (session.user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-          await upsertUserProfile({
-            email: ADMIN_EMAIL,
-            role: 'admin',
-            active: true,
-            invitedBy: 'system',
-          })
-        }
-        await touchUserSignIn(session.user.email)
-        const profiles = await fetchUserProfiles()
-        setState(s => ({ ...s, profiles }))
+        // Background: hoofd-admin profile bootstrap + sign-in touch + refresh.
+        // We awaiten niets om de UI niet te blokkeren.
+        const email = session.user.email
+        ;(async () => {
+          try {
+            if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+              await upsertUserProfile({
+                email: ADMIN_EMAIL,
+                role: 'admin',
+                active: true,
+                needsPassword: false,
+                invitedBy: 'system',
+              })
+            }
+            await touchUserSignIn(email)
+            const profiles = await fetchUserProfiles()
+            setState(s => ({ ...s, profiles }))
+          } catch (e) {
+            console.warn('[auth] background sign-in tasks failed:', e)
+          }
+        })()
       }
     })
 
