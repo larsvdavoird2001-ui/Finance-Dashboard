@@ -296,3 +296,75 @@ export async function deleteEvidence(id: string): Promise<void> {
   const { error } = await supabase.from('ohw_evidence').delete().eq('id', id)
   if (error) console.error('deleteEvidence:', error)
 }
+
+// ── User Profiles (multi-user beheer) ───────────────────────────────────────
+export interface UserProfile {
+  email: string
+  role: 'admin' | 'user'
+  active: boolean
+  invitedBy: string
+  invitedAt: string
+  lastSignIn?: string | null
+}
+
+export async function fetchUserProfiles(): Promise<UserProfile[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .order('invited_at', { ascending: true })
+  if (error) { console.error('fetchUserProfiles:', error); return [] }
+  return (data ?? []).map(row => ({
+    email:       String(row.email ?? ''),
+    role:        (row.role === 'admin' ? 'admin' : 'user') as 'admin' | 'user',
+    active:      !!row.active,
+    invitedBy:   String(row.invited_by ?? ''),
+    invitedAt:   String(row.invited_at ?? ''),
+    lastSignIn:  row.last_sign_in ?? null,
+  }))
+}
+
+export async function upsertUserProfile(p: {
+  email: string
+  role?: 'admin' | 'user'
+  active?: boolean
+  invitedBy?: string
+}): Promise<{ error: string | null }> {
+  if (!supabaseEnabled) return { error: 'Supabase niet geconfigureerd' }
+  const payload: Record<string, unknown> = {
+    email: p.email.trim().toLowerCase(),
+  }
+  if (p.role !== undefined)      payload.role = p.role
+  if (p.active !== undefined)    payload.active = p.active
+  if (p.invitedBy !== undefined) payload.invited_by = p.invitedBy
+  const { error } = await supabase
+    .from('user_profiles')
+    .upsert(payload, { onConflict: 'email' })
+  if (error) {
+    console.error('upsertUserProfile:', error)
+    return { error: error.message }
+  }
+  return { error: null }
+}
+
+export async function deleteUserProfile(email: string): Promise<{ error: string | null }> {
+  if (!supabaseEnabled) return { error: 'Supabase niet geconfigureerd' }
+  const { error } = await supabase
+    .from('user_profiles')
+    .delete()
+    .eq('email', email.trim().toLowerCase())
+  if (error) {
+    console.error('deleteUserProfile:', error)
+    return { error: error.message }
+  }
+  return { error: null }
+}
+
+export async function touchUserSignIn(email: string): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase
+    .from('user_profiles')
+    .update({ last_sign_in: new Date().toISOString() })
+    .eq('email', email.trim().toLowerCase())
+  if (error) console.error('touchUserSignIn:', error)
+}

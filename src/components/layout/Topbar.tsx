@@ -7,6 +7,7 @@ const TITLES: Record<TabId, string> = {
   budget:     'Budget vs Actuals',
   budgets:    'Budgetten',
   maand:      'Maandafsluiting',
+  users:      'Gebruikersbeheer',
 }
 
 export const BV_COLORS: Record<BvId, string> = {

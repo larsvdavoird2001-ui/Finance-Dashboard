@@ -129,6 +129,21 @@ CREATE TABLE IF NOT EXISTS ohw_evidence (
   created_at timestamptz DEFAULT now()
 );
 
+-- 9b. User profiles — administratie van uitgenodigde gebruikers + rol
+--     Wordt gebruikt door de admin om gebruikers toe te voegen aan de app.
+--     De daadwerkelijke wachtwoorden worden door Supabase Auth beheerd
+--     (auth.users); deze tabel houdt alleen email, rol en uitnodiging-status bij.
+CREATE TABLE IF NOT EXISTS user_profiles (
+  email text PRIMARY KEY,
+  role text NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+  active boolean NOT NULL DEFAULT true,
+  invited_by text DEFAULT '',
+  invited_at timestamptz DEFAULT now(),
+  last_sign_in timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
 -- 9. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
 CREATE TABLE IF NOT EXISTS tariff_entries (
   id text PRIMARY KEY,                -- werknemer ID
@@ -159,6 +174,7 @@ ALTER TABLE tariff_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE budget_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE closing_archives ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ohw_evidence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 
 -- Policies: volledige lees/schrijf-toegang voor iedereen (aanpassen als auth nodig is)
 CREATE POLICY "Allow all on closing_entries" ON closing_entries FOR ALL USING (true) WITH CHECK (true);
@@ -170,6 +186,7 @@ CREATE POLICY "Allow all on tariff_entries" ON tariff_entries FOR ALL USING (tru
 CREATE POLICY "Allow all on budget_overrides" ON budget_overrides FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on closing_archives" ON closing_archives FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on ohw_evidence" ON ohw_evidence FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on user_profiles" ON user_profiles FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================================
 -- Indexes voor snelle queries
@@ -220,3 +237,15 @@ CREATE OR REPLACE TRIGGER trg_budget_overrides_updated
 CREATE OR REPLACE TRIGGER trg_closing_archives_updated
   BEFORE UPDATE ON closing_archives
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE OR REPLACE TRIGGER trg_user_profiles_updated
+  BEFORE UPDATE ON user_profiles
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================================
+-- Bootstrap: zorg dat de TPG Finance hoofd-admin altijd aanwezig is.
+-- Pas dit aan als jouw admin-email anders is.
+-- ============================================================================
+INSERT INTO user_profiles (email, role, invited_by, invited_at)
+VALUES ('lvanderavoird@thepeoplegroup.nl', 'admin', 'system', now())
+ON CONFLICT (email) DO UPDATE SET role = 'admin', active = true;

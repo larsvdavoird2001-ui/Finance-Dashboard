@@ -4,10 +4,12 @@ interface Props {
   active: TabId
   onNav: (t: TabId) => void
   userEmail?: string | null
+  isAdmin?: boolean
+  userRole?: 'admin' | 'user'
   onSignOut?: () => void | Promise<void>
 }
 
-const items: { id: TabId; ic: string; label: string; group: string }[] = [
+const items: { id: TabId; ic: string; label: string; group: string; adminOnly?: boolean }[] = [
   // CFO Dashboards
   { id: 'dashboard',  ic: '🏠', label: 'Executive Overview',   group: 'CFO Dashboard' },
   { id: 'hours',      ic: '⏱',  label: 'Uren Dashboard',       group: 'CFO Dashboard' },
@@ -17,10 +19,13 @@ const items: { id: TabId; ic: string; label: string; group: string }[] = [
   // Input
   { id: 'ohw',   ic: '📋', label: 'OHW Overzicht',   group: 'Input' },
   { id: 'maand', ic: '📅', label: 'Maandafsluiting',  group: 'Input' },
+  // Beheer (admin-only)
+  { id: 'users', ic: '👥', label: 'Gebruikers',       group: 'Beheer', adminOnly: true },
 ]
 
-export function Sidebar({ active, onNav, userEmail, onSignOut }: Props) {
-  const groups = [...new Set(items.map(i => i.group))]
+export function Sidebar({ active, onNav, userEmail, isAdmin, userRole, onSignOut }: Props) {
+  const visibleItems = items.filter(i => !i.adminOnly || isAdmin)
+  const groups = [...new Set(visibleItems.map(i => i.group))]
   return (
     <nav className="sb">
       <div className="sb-logo">
@@ -30,7 +35,7 @@ export function Sidebar({ active, onNav, userEmail, onSignOut }: Props) {
       {groups.map(g => (
         <div key={g} className="sb-group">
           <div className="sb-grp-lbl">{g}</div>
-          {items.filter(i => i.group === g).map(i => (
+          {visibleItems.filter(i => i.group === g).map(i => (
             <button
               key={i.id}
               className={`nav${active === i.id ? ' active' : ''}`}
@@ -59,7 +64,7 @@ export function Sidebar({ active, onNav, userEmail, onSignOut }: Props) {
             </span>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>
-                Admin
+                {isAdmin ? 'Admin' : userRole === 'admin' ? 'Admin' : 'Gebruiker'}
               </div>
               <div style={{
                 fontSize: 10, color: 'var(--t2)',

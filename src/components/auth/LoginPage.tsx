@@ -1,42 +1,69 @@
 import { useState } from 'react'
-import { ADMIN_EMAIL } from '../../lib/auth'
 
 interface Props {
   onSignIn: (email: string, password: string) => Promise<{ error: string | null }>
-  onSignUp: (email: string, password: string) => Promise<{ error: string | null }>
+  onSendMagicLink: (email: string) => Promise<{ error: string | null }>
+  onSendPasswordReset: (email: string) => Promise<{ error: string | null }>
   loading: boolean
   disabled: boolean
   logoUrl?: string
 }
 
-export function LoginPage({ onSignIn, onSignUp, loading, disabled, logoUrl = '/tpg-logo.png' }: Props) {
-  const [email, setEmail] = useState(ADMIN_EMAIL)
+type Mode = 'signin' | 'magic' | 'reset'
+
+export function LoginPage({
+  onSignIn,
+  onSendMagicLink,
+  onSendPasswordReset,
+  loading,
+  disabled,
+  logoUrl = '/tpg-logo.png',
+}: Props) {
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [mode, setMode] = useState<Mode>('signin')
   const [info, setInfo] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null); setInfo(null)
-    if (!email.trim() || !password) {
-      setError('Vul e-mail en wachtwoord in')
+    if (!email.trim()) {
+      setError('Vul je e-mailadres in')
+      return
+    }
+    if (mode === 'signin' && !password) {
+      setError('Vul je wachtwoord in')
       return
     }
     setSubmitting(true)
     try {
-      const fn = mode === 'signin' ? onSignIn : onSignUp
-      const { error } = await fn(email, password)
-      if (error) setError(error)
-      else if (mode === 'signup') {
-        setInfo('Account aangemaakt! Check je mailbox voor een bevestigingslink; log daarna in.')
-        setMode('signin')
+      if (mode === 'signin') {
+        const { error } = await onSignIn(email, password)
+        if (error) setError(error)
+      } else if (mode === 'magic') {
+        const { error } = await onSendMagicLink(email)
+        if (error) setError(error)
+        else setInfo('Magic-link verzonden naar je inbox. Klik op de link om in te loggen.')
+      } else {
+        const { error } = await onSendPasswordReset(email)
+        if (error) setError(error)
+        else setInfo('Reset-link verzonden! Check je inbox.')
       }
     } finally {
       setSubmitting(false)
     }
   }
+
+  const title =
+    mode === 'signin' ? 'Welkom terug' :
+    mode === 'magic'  ? 'Login via magic-link' :
+                        'Wachtwoord vergeten?'
+  const subtitle =
+    mode === 'signin' ? 'Log in met je TPG Finance-account.' :
+    mode === 'magic'  ? 'Vul je e-mail in en ontvang een eenmalige inlog-link.' :
+                        'Vul je e-mail in en ontvang een reset-link.'
 
   return (
     <div style={{
@@ -69,12 +96,10 @@ export function LoginPage({ onSignIn, onSignUp, loading, disabled, logoUrl = '/t
         </div>
 
         <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--t1)', marginBottom: 4 }}>
-          {mode === 'signin' ? 'Welkom terug' : 'Account aanmaken'}
+          {title}
         </div>
         <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 22 }}>
-          {mode === 'signin'
-            ? 'Log in met het admin-account om toegang te krijgen.'
-            : 'Eerste keer gebruik: maak het admin-account aan.'}
+          {subtitle}
         </div>
 
         {disabled && (
@@ -97,44 +122,40 @@ export function LoginPage({ onSignIn, onSignUp, loading, disabled, logoUrl = '/t
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              readOnly
+              autoFocus={mode !== 'signin'}
+              autoComplete="email"
+              placeholder="naam@thepeoplegroup.nl"
               style={{
                 width: '100%', background: 'var(--bg3)',
                 border: '1px solid var(--bd2)', borderRadius: 7,
-                color: 'var(--t2)', fontSize: 13, padding: '9px 12px',
-                fontFamily: 'var(--font)', outline: 'none', marginTop: 6,
-                cursor: 'not-allowed',
-              }}
-            />
-            <div style={{ fontSize: 9, color: 'var(--t3)', marginTop: 4 }}>
-              Alleen dit admin-account heeft toegang.
-            </div>
-          </div>
-
-          <div>
-            <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
-              Wachtwoord
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              autoFocus
-              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-              style={{
-                width: '100%', background: 'var(--bg3)',
-                border: `1px solid ${error ? 'var(--red)' : 'var(--bd3)'}`, borderRadius: 7,
                 color: 'var(--t1)', fontSize: 13, padding: '9px 12px',
                 fontFamily: 'var(--font)', outline: 'none', marginTop: 6,
               }}
               disabled={disabled || submitting}
             />
-            {mode === 'signup' && (
-              <div style={{ fontSize: 9, color: 'var(--t3)', marginTop: 4 }}>
-                Minimaal 6 tekens.
-              </div>
-            )}
           </div>
+
+          {mode === 'signin' && (
+            <div>
+              <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
+                Wachtwoord
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                autoFocus
+                autoComplete="current-password"
+                style={{
+                  width: '100%', background: 'var(--bg3)',
+                  border: `1px solid ${error ? 'var(--red)' : 'var(--bd3)'}`, borderRadius: 7,
+                  color: 'var(--t1)', fontSize: 13, padding: '9px 12px',
+                  fontFamily: 'var(--font)', outline: 'none', marginTop: 6,
+                }}
+                disabled={disabled || submitting}
+              />
+            </div>
+          )}
 
           {error && (
             <div style={{
@@ -167,22 +188,52 @@ export function LoginPage({ onSignIn, onSignUp, loading, disabled, logoUrl = '/t
           >
             {submitting
               ? '⏳ Bezig...'
-              : mode === 'signin' ? '→ Inloggen' : '+ Account aanmaken'}
+              : mode === 'signin' ? '→ Inloggen'
+              : mode === 'magic'  ? '✉ Magic-link sturen'
+              :                     '✉ Reset-link sturen'}
           </button>
 
-          <button
-            type="button"
-            onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(null); setInfo(null) }}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--blue)', fontSize: 11, marginTop: 2,
-              fontFamily: 'var(--font)', textAlign: 'center',
-            }}
-          >
-            {mode === 'signin'
-              ? 'Admin account nog niet aangemaakt? Klik hier'
-              : '← Terug naar inloggen'}
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+            {mode !== 'magic' && (
+              <button
+                type="button"
+                onClick={() => { setMode('magic'); setError(null); setInfo(null) }}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--blue)', fontSize: 11,
+                  fontFamily: 'var(--font)', textAlign: 'center',
+                }}
+              >
+                Inloggen via magic-link →
+              </button>
+            )}
+            {mode !== 'reset' && (
+              <button
+                type="button"
+                onClick={() => { setMode('reset'); setError(null); setInfo(null) }}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--t3)', fontSize: 11,
+                  fontFamily: 'var(--font)', textAlign: 'center',
+                }}
+              >
+                Wachtwoord vergeten?
+              </button>
+            )}
+            {mode !== 'signin' && (
+              <button
+                type="button"
+                onClick={() => { setMode('signin'); setError(null); setInfo(null) }}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--t3)', fontSize: 11,
+                  fontFamily: 'var(--font)', textAlign: 'center',
+                }}
+              >
+                ← Terug naar inloggen
+              </button>
+            )}
+          </div>
         </form>
 
         <div style={{
@@ -190,7 +241,8 @@ export function LoginPage({ onSignIn, onSignUp, loading, disabled, logoUrl = '/t
           borderTop: '1px solid var(--bd)',
           fontSize: 10, color: 'var(--t3)', textAlign: 'center',
         }}>
-          TPG Finance Dashboard · {new Date().getFullYear()} The People Group
+          Geen account? Vraag de admin om een uitnodiging.
+          <br />TPG Finance Dashboard · {new Date().getFullYear()} The People Group
         </div>
       </div>
     </div>

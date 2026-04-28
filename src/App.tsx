@@ -12,18 +12,28 @@ import { MaandTab } from './components/maand/MaandTab'
 import { Toast } from './components/common/Toast'
 import { AiChat } from './components/dashboard/AiChat'
 import { LoginPage } from './components/auth/LoginPage'
+import { SetPasswordPage } from './components/auth/SetPasswordPage'
+import { UsersTab } from './components/auth/UsersTab'
 import { useOhwState } from './hooks/useOhwState'
 import { useToast } from './hooks/useToast'
 import { useDbInit } from './hooks/useDbInit'
-import { useAuth } from './lib/auth'
+import { useAuth, userHasPassword } from './lib/auth'
 
 const DEFAULT_FILTER: GlobalFilter = { year: '2026', bv: 'all' }
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('dashboard')
   const [filter, setFilter] = useState<GlobalFilter>(DEFAULT_FILTER)
+  // Lokale "skip wachtwoord-instellen"-flag, alleen voor deze sessie.
+  const [skipSetPw, setSkipSetPw] = useState(false)
 
-  const { user, loading: authLoading, disabled: authDisabled, signIn, signUp, signOut } = useAuth()
+  const auth = useAuth()
+  const {
+    user, loading: authLoading, disabled: authDisabled,
+    profiles, isAdmin,
+    signIn, signOut, sendMagicLink, sendPasswordReset, setPassword,
+    inviteUser, setUserActive, setUserRole, removeUser, refreshProfiles,
+  } = auth
   const { data2025, data2026, updateEntity } = useOhwState()
   const { toasts, showToast } = useToast()
   const { ready: dbReady, error: dbError } = useDbInit()
@@ -37,6 +47,11 @@ export default function App() {
       setTab('ohw')
     }
   }, [navPending])
+
+  // Als een non-admin per ongeluk op users-tab terechtkomt → terug naar dashboard
+  useEffect(() => {
+    if (tab === 'users' && !isAdmin) setTab('dashboard')
+  }, [tab, isAdmin])
 
   const onFilterChange = (patch: Partial<GlobalFilter>) =>
     setFilter(prev => ({ ...prev, ...patch }))
@@ -54,7 +69,26 @@ export default function App() {
 
   // Niet ingelogd én Supabase is geconfigureerd → toon login-pagina
   if (!authDisabled && !user) {
-    return <LoginPage onSignIn={signIn} onSignUp={signUp} loading={authLoading} disabled={authDisabled} />
+    return (
+      <LoginPage
+        onSignIn={signIn}
+        onSendMagicLink={sendMagicLink}
+        onSendPasswordReset={sendPasswordReset}
+        loading={authLoading}
+        disabled={authDisabled}
+      />
+    )
+  }
+
+  // Ingelogd via magic-link, maar nog geen wachtwoord ingesteld → prompt
+  if (!authDisabled && user && !userHasPassword(user) && !skipSetPw) {
+    return (
+      <SetPasswordPage
+        email={user.email ?? ''}
+        onSetPassword={setPassword}
+        onSkip={() => setSkipSetPw(true)}
+      />
+    )
   }
 
   // Loading state terwijl Supabase data laadt
@@ -69,9 +103,18 @@ export default function App() {
     )
   }
 
+  const currentProfile = profiles.find(p => p.email.toLowerCase() === (user?.email ?? '').toLowerCase())
+
   return (
     <>
-      <Sidebar active={tab} onNav={setTab} userEmail={user?.email ?? null} onSignOut={signOut} />
+      <Sidebar
+        active={tab}
+        onNav={setTab}
+        userEmail={user?.email ?? null}
+        isAdmin={isAdmin}
+        userRole={currentProfile?.role}
+        onSignOut={signOut}
+      />
       <div className="main">
         <Topbar tab={tab} filter={filter} onFilterChange={onFilterChange} />
 
@@ -88,6 +131,18 @@ export default function App() {
         {tab === 'budget'  && <BudgetTab filter={filter} onFilterChange={onFilterChange} />}
         {tab === 'budgets' && <BudgetsTab filter={filter} />}
         {tab === 'maand'   && <MaandTab filter={filter} />}
+        {tab === 'users'   && (
+          <UsersTab
+            currentEmail={user?.email ?? null}
+            profiles={profiles}
+            isAdmin={isAdmin}
+            inviteUser={inviteUser}
+            setUserActive={setUserActive}
+            setUserRole={setUserRole}
+            removeUser={removeUser}
+            refreshProfiles={refreshProfiles}
+          />
+        )}
       </div>
       <Toast toasts={toasts} />
       <AiChat />
