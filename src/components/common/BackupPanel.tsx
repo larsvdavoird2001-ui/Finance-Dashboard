@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { listBackups, restoreBackup, deleteBackup, snapshotLocalStorage } from '../../lib/localBackup'
+import { downloadBackupNow, importBackupFile } from '../../lib/dataExport'
 
 interface Props {
   open: boolean
@@ -11,8 +12,35 @@ export function BackupPanel({ open, onClose, currentUserEmail }: Props) {
   const [backups, setBackups] = useState(() => listBackups())
   const [info, setInfo] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   if (!open) return null
+
+  const onDownloadNow = () => {
+    downloadBackupNow(currentUserEmail)
+    setInfo('Backup-bestand wordt gedownload naar je Downloads-map.')
+  }
+
+  const onImportClick = () => fileInputRef.current?.click()
+
+  const onFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setError(null); setInfo(null)
+    if (!confirm(`Backup-bestand inlezen: ${file.name}\n\nHuidige localStorage wordt overschreven met de inhoud van dit bestand. Een snapshot van de huidige staat wordt eerst gemaakt zodat je terug kunt.\n\nNa het inlezen wordt de pagina opnieuw geladen.\n\nDoorgaan?`)) {
+      e.target.value = ''
+      return
+    }
+    snapshotLocalStorage('pre-import')
+    const r = await importBackupFile(file)
+    e.target.value = ''
+    if (!r.ok) {
+      setError(r.error ?? 'Import mislukt')
+      return
+    }
+    setInfo(`✓ ${r.keys} keys geïmporteerd. Pagina wordt opnieuw geladen...`)
+    setTimeout(() => window.location.reload(), 800)
+  }
 
   const refresh = () => setBackups(listBackups())
 
@@ -59,21 +87,36 @@ export function BackupPanel({ open, onClose, currentUserEmail }: Props) {
           padding: 22, color: 'var(--t1)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16, gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 18 }}>💾</span>
-          <strong style={{ fontSize: 14 }}>localStorage backups</strong>
-          <button
-            data-rw="ok"
-            onClick={onMakeSnapshot}
-            className="btn sm"
-            style={{ marginLeft: 'auto', fontSize: 11 }}
-          >+ Nieuwe snapshot</button>
-          <button onClick={onClose} className="btn sm ghost" style={{ fontSize: 11 }}>✕ Sluiten</button>
+          <strong style={{ fontSize: 14 }}>Backups & Export</strong>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button data-rw="ok" onClick={onDownloadNow} className="btn sm" style={{ fontSize: 11 }}>
+              ↓ Download .json
+            </button>
+            <button data-rw="ok" onClick={onImportClick} className="btn sm" style={{ fontSize: 11 }}>
+              ↑ Import .json
+            </button>
+            <button data-rw="ok" onClick={onMakeSnapshot} className="btn sm" style={{ fontSize: 11 }}>
+              + Snapshot
+            </button>
+            <button onClick={onClose} className="btn sm ghost" style={{ fontSize: 11 }}>✕</button>
+          </div>
         </div>
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          style={{ display: 'none' }}
+          onChange={onFileChosen}
+          data-rw="ok"
+        />
+
         <div style={{ fontSize: 11, color: 'var(--t2)', lineHeight: 1.55, marginBottom: 14 }}>
-          De app maakt automatisch een snapshot van je localStorage bij elke start. De laatste 5 worden bewaard.
-          Als data 'verdwijnt' kun je hier terugklikken naar een eerdere staat — daarna laadt de pagina opnieuw met die staat.
+          <strong>Download .json</strong>: lokaal bestand van je hele staat. Bewaar dit periodiek op je laptop voor maximale veiligheid.<br/>
+          <strong>Import .json</strong>: lees een eerder gedownload backup-bestand terug.<br/>
+          <strong>Snapshots</strong>: in-browser kopieën, laatste 5 bewaard. Beperkt — bij wissen van browserdata weg.
         </div>
 
         {error && (

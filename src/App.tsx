@@ -24,6 +24,7 @@ import { useAuth, profileNeedsPassword } from './lib/auth'
 import { PermissionsContext } from './lib/permissions'
 import { onDbEvent } from './lib/dbEvents'
 import { snapshotLocalStorage } from './lib/localBackup'
+import { autoDownloadIfStale } from './lib/dataExport'
 import { BackupPanel } from './components/common/BackupPanel'
 
 const DEFAULT_FILTER: GlobalFilter = { year: '2026', bv: 'all' }
@@ -61,6 +62,15 @@ export default function App() {
     snapshotLocalStorage(userEmailKey)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Auto-download naar Downloads-map: alleen voor admins, eens per 24 uur,
+  // alleen als er ECHT data in localStorage staat. Ultiem vangnet — ook als
+  // browser data wist of Supabase ontoegankelijk is, heb je het bestand.
+  useEffect(() => {
+    if (!user || !isAdmin) return
+    autoDownloadIfStale(userEmailKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAdmin])
 
   // Realtime sync — actief zodra een user is ingelogd. Bij elke wijziging in
   // de gedeelde tabellen worden de stores opnieuw geladen.

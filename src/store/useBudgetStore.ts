@@ -62,13 +62,23 @@ export const useBudgetStore = create<BudgetState>()(
       loaded: false,
 
       loadFromDb: async () => {
+        // ABSOLUTE GARANTIE: deze functie wipet onder geen voorwaarde lokale
+        // state. Bij elke fout / lege response blijft localStorage intact.
+        //
         // Merge-load met reconcile:
         //  1. Haal Supabase-data op
         //  2. Merge met lokale state — Supabase wint bij conflict op
         //     (entity, maand, key). Local-only keys blijven staan.
         //  3. Push local-only keys terug naar Supabase zodat ze gedeeld
         //     worden (recovery na eerdere save-fouten).
-        const rows = await fetchBudgetOverrides()
+        let rows: Awaited<ReturnType<typeof fetchBudgetOverrides>> = []
+        try {
+          rows = await fetchBudgetOverrides()
+        } catch (e) {
+          console.warn('[useBudgetStore] fetch failed — keeping local state:', e)
+          set({ loaded: true })
+          return
+        }
         const dbOv = emptyOverrides()
         for (const r of rows) {
           const e = r.entity as EntityName
