@@ -19,6 +19,7 @@ import { useToast } from './hooks/useToast'
 import { useDbInit } from './hooks/useDbInit'
 import { useRealtimeSync } from './hooks/useRealtimeSync'
 import { useUserProfileGuard } from './hooks/useUserProfileGuard'
+import { useDataRefresh } from './hooks/useDataRefresh'
 import { useAuth, profileNeedsPassword } from './lib/auth'
 import { PermissionsContext } from './lib/permissions'
 
@@ -44,7 +45,10 @@ export default function App() {
   const { data2025, data2026, updateEntity } = useOhwState()
   const { toasts, showToast } = useToast()
   const { ready: dbReady, error: dbError } = useDbInit()
+  const refreshAllData = useDataRefresh()
+  const [refreshing, setRefreshing] = useState(false)
   const navPending = useNavStore(s => s.pending)
+  const userEmailKey = user?.email ?? null
 
   // Realtime sync — actief zodra een user is ingelogd. Bij elke wijziging in
   // de gedeelde tabellen worden de stores opnieuw geladen.
@@ -77,6 +81,26 @@ export default function App() {
   useEffect(() => {
     if (user) setRevokedReason(null)
   }, [user])
+
+  // Forceer een verse data-load zodra een gebruiker inlogt (of switcht).
+  // useDbInit fired al op mount, maar dat kan vóór de auth-resolutie zijn
+  // gebeurd. Hierdoor zou een nieuwe user soms stale localStorage / lege
+  // state zien. Met deze re-fetch garanderen we dat we ALTIJD de meest
+  // recente Supabase-data ophalen direct na login.
+  useEffect(() => {
+    if (!userEmailKey) return
+    refreshAllData().catch(e => console.warn('[refresh on login] failed:', e))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userEmailKey])
+
+  const handleManualRefresh = async () => {
+    setRefreshing(true)
+    try {
+      await refreshAllData()
+    } finally {
+      setTimeout(() => setRefreshing(false), 600)
+    }
+  }
 
   const onFilterChange = (patch: Partial<GlobalFilter>) =>
     setFilter(prev => ({ ...prev, ...patch }))
@@ -163,7 +187,24 @@ export default function App() {
         {!canEdit && (
           <div className="readonly-banner">
             <span className="ic">👁</span>
-            <span>Alleen-lezen modus — neem contact op met een admin om wijzigingen te laten doen.</span>
+            <span style={{ flex: 1 }}>Alleen-lezen modus — neem contact op met een admin om wijzigingen te laten doen.</span>
+            <button
+              data-rw="ok"
+              onClick={handleManualRefresh}
+              disabled={refreshing}
+              style={{
+                fontSize: 11, fontWeight: 600,
+                background: 'transparent',
+                border: '1px solid var(--amber)',
+                color: 'var(--amber)',
+                padding: '3px 10px', borderRadius: 5,
+                cursor: refreshing ? 'not-allowed' : 'pointer',
+                opacity: refreshing ? 0.5 : 1,
+              }}
+              title="Forceer een verse data-load uit de database"
+            >
+              {refreshing ? '⏳ bezig...' : '↻ Herlaad data'}
+            </button>
           </div>
         )}
         <Topbar tab={tab} filter={filter} onFilterChange={onFilterChange} />
