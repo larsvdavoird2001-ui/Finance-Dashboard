@@ -8,6 +8,7 @@ const TITLES: Record<TabId, string> = {
   budgets:    'Budgetten',
   maand:      'Maandafsluiting',
   users:      'Gebruikersbeheer',
+  backups:    'Backups',
 }
 
 export const BV_COLORS: Record<ClosingBv, string> = {

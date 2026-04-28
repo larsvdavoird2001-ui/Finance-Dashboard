@@ -25,7 +25,7 @@ import { PermissionsContext } from './lib/permissions'
 import { onDbEvent } from './lib/dbEvents'
 import { snapshotLocalStorage } from './lib/localBackup'
 import { autoDownloadIfStale } from './lib/dataExport'
-import { BackupPanel } from './components/common/BackupPanel'
+import { BackupsTab } from './components/common/BackupsTab'
 
 const DEFAULT_FILTER: GlobalFilter = { year: '2026', bv: 'all' }
 
@@ -51,7 +51,6 @@ export default function App() {
   const { ready: dbReady, error: dbError } = useDbInit()
   const refreshAllData = useDataRefresh()
   const [refreshing, setRefreshing] = useState(false)
-  const [backupPanelOpen, setBackupPanelOpen] = useState(false)
   const navPending = useNavStore(s => s.pending)
   const userEmailKey = user?.email ?? null
 
@@ -94,9 +93,9 @@ export default function App() {
     else if (navPending?.tab === 'ohw') setTab('ohw')
   }, [navPending])
 
-  // Non-admin op users-tab → terug naar dashboard
+  // Non-admin op admin-only tabs → terug naar dashboard
   useEffect(() => {
-    if (tab === 'users' && !isAdmin) setTab('dashboard')
+    if ((tab === 'users' || tab === 'backups') && !isAdmin) setTab('dashboard')
   }, [tab, isAdmin])
 
   // Reset revoked-reason zodra een nieuwe user inlogt
@@ -269,31 +268,10 @@ export default function App() {
             refreshProfiles={refreshProfiles}
           />
         )}
+        {tab === 'backups' && <BackupsTab isAdmin={isAdmin} currentEmail={userEmailKey} />}
       </div>
       <Toast toasts={toasts} />
       <AiChat />
-      {isAdmin && (
-        <button
-          data-rw="ok"
-          onClick={() => setBackupPanelOpen(true)}
-          title="localStorage backups bekijken / herstellen"
-          style={{
-            position: 'fixed', bottom: 12, right: 12, zIndex: 50,
-            background: 'var(--bg2)', border: '1px solid var(--bd2)',
-            borderRadius: 999, color: 'var(--t2)',
-            fontSize: 11, padding: '6px 10px', cursor: 'pointer',
-            fontFamily: 'var(--font)',
-            boxShadow: '0 4px 12px rgba(0,0,0,.4)',
-          }}
-        >
-          💾 Backups
-        </button>
-      )}
-      <BackupPanel
-        open={backupPanelOpen}
-        onClose={() => setBackupPanelOpen(false)}
-        currentUserEmail={userEmailKey}
-      />
     </PermissionsContext.Provider>
   )
 }

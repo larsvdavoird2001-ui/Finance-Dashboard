@@ -58,7 +58,7 @@ export interface OhwYearData {
   entities: OhwEntityData[]
 }
 
-export type TabId = 'dashboard' | 'hours' | 'ohw' | 'budget' | 'budgets' | 'maand' | 'users'
+export type TabId = 'dashboard' | 'hours' | 'ohw' | 'budget' | 'budgets' | 'maand' | 'users' | 'backups'
 
 export type BvId = 'Consultancy' | 'Projects' | 'Software'
 

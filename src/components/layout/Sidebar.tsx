@@ -20,7 +20,8 @@ const items: { id: TabId; ic: string; label: string; group: string; adminOnly?: 
   { id: 'ohw',   ic: '📋', label: 'OHW Overzicht',   group: 'Input' },
   { id: 'maand', ic: '📅', label: 'Maandafsluiting',  group: 'Input' },
   // Beheer (admin-only)
-  { id: 'users', ic: '👥', label: 'Gebruikers',       group: 'Beheer', adminOnly: true },
+  { id: 'users',   ic: '👥', label: 'Gebruikers', group: 'Beheer', adminOnly: true },
+  { id: 'backups', ic: '💾', label: 'Backups',    group: 'Beheer', adminOnly: true },
 ]
 
 export function Sidebar({ active, onNav, userEmail, isAdmin, userRole, onSignOut }: Props) {
