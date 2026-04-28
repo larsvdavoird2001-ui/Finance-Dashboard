@@ -87,10 +87,16 @@ export function UsersTab({
 
   const onRemove = async (p: UserProfile) => {
     setError(null); setInfo(null)
-    if (!confirm(`Verwijder ${p.email}? Toegang wordt direct ingetrokken.`)) return
+    if (!confirm(
+      `Definitief verwijderen: ${p.email}\n\n` +
+      `• Profiel uit user_profiles wordt verwijderd\n` +
+      `• Auth-account uit Supabase wordt opgeruimd (via DB-trigger)\n` +
+      `• Eventuele actieve sessie wordt direct uitgelogd\n\n` +
+      `Doorgaan?`
+    )) return
     const { error } = await removeUser(p.email)
     if (error) setError(error)
-    else setInfo(`Gebruiker ${p.email} is verwijderd.`)
+    else setInfo(`Gebruiker ${p.email} is volledig verwijderd (profiel + auth-account).`)
   }
 
   const onResend = async (p: UserProfile) => {

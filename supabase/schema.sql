@@ -249,6 +249,33 @@ CREATE OR REPLACE TRIGGER trg_user_profiles_updated
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ============================================================================
+-- Cascade-delete naar auth.users
+-- Wanneer een rij wordt verwijderd uit public.user_profiles ruimen we ook de
+-- bijbehorende auth.users-row op zodat de gebruiker niet meer kan inloggen
+-- en het account volledig is verwijderd. SECURITY DEFINER omdat alleen de
+-- postgres-rol DELETE-rechten op auth.users heeft.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION delete_auth_user_on_profile_delete()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Best-effort: het kan zijn dat de auth.users rij al niet (meer) bestaat,
+  -- dan willen we de profile-delete sowieso laten slagen.
+  BEGIN
+    DELETE FROM auth.users WHERE lower(email) = lower(OLD.email);
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'Kon auth.users niet verwijderen voor %: %', OLD.email, SQLERRM;
+  END;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_delete_auth_user_on_profile_delete ON public.user_profiles;
+CREATE TRIGGER trg_delete_auth_user_on_profile_delete
+  AFTER DELETE ON public.user_profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION delete_auth_user_on_profile_delete();
+
+-- ============================================================================
 -- Bootstrap: zorg dat de TPG Finance hoofd-admin altijd aanwezig is.
 -- Pas dit aan als jouw admin-email anders is.
 -- ============================================================================
