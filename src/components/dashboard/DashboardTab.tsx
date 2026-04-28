@@ -272,7 +272,9 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         })),
       }
     }
-    // 2026: actuals (solid) Jan→last-closed + LE forecast (dashed) forward
+    // 2026: actuals (solid) Jan→last-closed + LE (dashed) forward.
+    // LE-stippen alleen waar er info is (override of budget); waar niets staat
+    // krijgt de chart een gat (null).
     const lastClosedIdx = (() => {
       let idx = -1
       for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
@@ -286,11 +288,15 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       const actData = BUDGET_MONTHS_2026.map((m, i) =>
         i <= lastClosedIdx ? (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000 : null
       )
-      const leData = BUDGET_MONTHS_2026.map((m, i) =>
-        // Verbind het laatste actual-punt met de eerste LE-punt door op laatste
-        // closed-index ook de waarde te tonen (visuele continuïteit).
-        i >= lastClosedIdx ? le.getLE(bv as EntityName, m, 'netto_omzet') / 1000 : null
-      )
+      const leData = BUDGET_MONTHS_2026.map((m, i) => {
+        // Op laatste closed-idx tonen we de actual-waarde óók als startpunt
+        // van de LE-lijn (visuele continuïteit met het laatste actual-punt).
+        if (i === lastClosedIdx) return (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000
+        if (i < lastClosedIdx)   return null
+        // Open maand: alleen tonen als er echt LE-data is (override of budget)
+        if (!le.hasLE(bv as EntityName, m, 'netto_omzet')) return null
+        return le.getLE(bv as EntityName, m, 'netto_omzet') / 1000
+      })
       datasets.push({
         label: `${bv} — Actual`,
         data: actData,
@@ -298,6 +304,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         backgroundColor: BV_COLORS[bv] + '18',
         tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2.5,
         pointBackgroundColor: BV_COLORS[bv],
+        spanGaps: false,
       })
       datasets.push({
         label: `${bv} — LE`,
@@ -308,6 +315,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         tension: 0.3, fill: false, pointRadius: 3, borderWidth: 2,
         pointStyle: 'rectRot' as const,
         pointBackgroundColor: BV_COLORS[bv],
+        spanGaps: false,
       })
     }
     return { labels: BUDGET_MONTHS_2026, datasets }
@@ -350,7 +358,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
     return {
       labels: BUDGET_MONTHS_2026,
       datasets: [
-        { label: 'LE cumulatief (Actual + Forecast)', data: leData, borderColor: '#00a9e0', backgroundColor: '#00a9e022', borderWidth: 2.5, tension: 0.3, fill: true, pointRadius: 3 },
+        { label: 'LE cumulatief (Actual + ingevuld budget)', data: leData, borderColor: '#00a9e0', backgroundColor: '#00a9e022', borderWidth: 2.5, tension: 0.3, fill: true, pointRadius: 3 },
         { label: 'Budget cumulatief', data: budData, borderColor: '#fbbf24', backgroundColor: 'transparent', borderDash: [6, 4], borderWidth: 2, tension: 0.3, fill: false, pointRadius: 2 },
       ],
     }
@@ -375,19 +383,21 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         })),
       }
     }
-    // 2026: marge% over alle 12 maanden, actual+LE
+    // 2026: marge% over alle 12 maanden, actual+LE — null waar geen data
     return {
       labels: BUDGET_MONTHS_2026,
       datasets: activeBvs.map(bv => ({
         label: bv,
         data: BUDGET_MONTHS_2026.map(m => {
+          if (!le.hasLE(bv as EntityName, m, 'netto_omzet')) return null
           const r = le.getLE(bv as EntityName, m, 'netto_omzet')
           const g = le.getLE(bv as EntityName, m, 'brutomarge')
-          return r > 0 ? (g / r * 100) : 0
+          return r > 0 ? (g / r * 100) : null
         }),
         borderColor: BV_COLORS[bv],
         backgroundColor: 'transparent',
         tension: 0.3, fill: false, pointRadius: 3, borderWidth: 2,
+        spanGaps: false,
       })),
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -821,7 +831,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, marginBottom: 0 }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: '.1em' }}>📈 FY 2026 — Latest Estimate</span>
-            <span style={{ fontSize: 10, color: 'var(--t3)' }}>actual t/m laatst gesloten + LE / budget voor de rest</span>
+            <span style={{ fontSize: 10, color: 'var(--t3)' }}>strikt: actuals (closed maanden) + ingevuld budget; open maanden zonder budget tellen 0</span>
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <KpiCard
