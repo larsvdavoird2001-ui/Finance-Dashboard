@@ -23,6 +23,8 @@ import { useDataRefresh } from './hooks/useDataRefresh'
 import { useAuth, profileNeedsPassword } from './lib/auth'
 import { PermissionsContext } from './lib/permissions'
 import { onDbEvent } from './lib/dbEvents'
+import { snapshotLocalStorage } from './lib/localBackup'
+import { BackupPanel } from './components/common/BackupPanel'
 
 const DEFAULT_FILTER: GlobalFilter = { year: '2026', bv: 'all' }
 
@@ -48,8 +50,17 @@ export default function App() {
   const { ready: dbReady, error: dbError } = useDbInit()
   const refreshAllData = useDataRefresh()
   const [refreshing, setRefreshing] = useState(false)
+  const [backupPanelOpen, setBackupPanelOpen] = useState(false)
   const navPending = useNavStore(s => s.pending)
   const userEmailKey = user?.email ?? null
+
+  // Eénmalige snapshot van localStorage op app-start — voor het geval data
+  // verdwijnt door bugs of cache-clears. listBackups() in BackupPanel toont
+  // de laatste 5 snapshots zodat de admin er altijd op terug kan vallen.
+  useEffect(() => {
+    snapshotLocalStorage(userEmailKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Realtime sync — actief zodra een user is ingelogd. Bij elke wijziging in
   // de gedeelde tabellen worden de stores opnieuw geladen.
@@ -83,22 +94,13 @@ export default function App() {
     if (user) setRevokedReason(null)
   }, [user])
 
-  // Forceer een verse data-load zodra een gebruiker inlogt (of switcht).
-  // Daarvóór: clear localStorage van data-stores als de email anders is dan
-  // bij de vorige sessie. Zo zie je nooit data van een ander account.
+  // Forceer een verse data-load zodra een gebruiker inlogt of switcht.
+  // We CLEAREN localStorage NIET meer — de merge-load in de stores zorgt al
+  // dat de gebruiker zijn eigen lokale state niet kwijtraakt en Supabase
+  // wint per (entity, maand, key) waar er een waarde is. Een simpele
+  // refresh haalt de gedeelde state op zonder dat lokale edits sneuvelen.
   useEffect(() => {
     if (!userEmailKey) return
-    const lastUser = localStorage.getItem('tpg-last-user') ?? ''
-    if (lastUser && lastUser !== userEmailKey) {
-      // Andere user dan vorige keer → wis alle data-cache
-      const toRemove: string[] = []
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i)
-        if (k && k.startsWith('tpg-') && k !== 'tpg-last-user') toRemove.push(k)
-      }
-      toRemove.forEach(k => localStorage.removeItem(k))
-      console.info(`[App] localStorage cache gewist (${toRemove.length} keys) — andere user ${lastUser} → ${userEmailKey}`)
-    }
     localStorage.setItem('tpg-last-user', userEmailKey)
     refreshAllData().catch(e => console.warn('[refresh on login] failed:', e))
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -260,6 +262,28 @@ export default function App() {
       </div>
       <Toast toasts={toasts} />
       <AiChat />
+      {isAdmin && (
+        <button
+          data-rw="ok"
+          onClick={() => setBackupPanelOpen(true)}
+          title="localStorage backups bekijken / herstellen"
+          style={{
+            position: 'fixed', bottom: 12, right: 12, zIndex: 50,
+            background: 'var(--bg2)', border: '1px solid var(--bd2)',
+            borderRadius: 999, color: 'var(--t2)',
+            fontSize: 11, padding: '6px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font)',
+            boxShadow: '0 4px 12px rgba(0,0,0,.4)',
+          }}
+        >
+          💾 Backups
+        </button>
+      )}
+      <BackupPanel
+        open={backupPanelOpen}
+        onClose={() => setBackupPanelOpen(false)}
+        currentUserEmail={userEmailKey}
+      />
     </PermissionsContext.Provider>
   )
 }
