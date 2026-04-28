@@ -30,6 +30,11 @@ concurrency:
   group: supabase-backup
   cancel-in-progress: false
 
+# Opt-in op Node.js 24 voor alle JavaScript-actions (checkout, setup-node).
+# Node 20 wordt door GitHub uitgefaseerd vanaf juni 2026.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   backup:
     runs-on: ubuntu-latest
@@ -40,7 +45,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Run Supabase backup
         env:
