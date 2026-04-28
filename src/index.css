@@ -335,3 +335,42 @@ html, body, #root {
 /* ── Animations ── */
 @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
+
+/* ════════════════════════════════════════════════════════════
+   READ-ONLY MODUS — voor non-admin gebruikers.
+   Form-input volledig uitgeschakeld; expliciet als 'kijk-only'
+   gemarkeerde knoppen worden ook geblokkeerd.
+════════════════════════════════════════════════════════════ */
+.app-readonly input:not([type="hidden"]):not([data-rw="ok"]),
+.app-readonly textarea:not([data-rw="ok"]),
+.app-readonly select:not([data-rw="ok"]) {
+  pointer-events: none !important;
+  background: var(--bg2) !important;
+  color: var(--t3) !important;
+  cursor: not-allowed !important;
+  border-color: var(--bd) !important;
+}
+.app-readonly [data-rw="edit"] {
+  pointer-events: none !important;
+  opacity: .35 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(.5);
+}
+.app-readonly [data-rw="hide"] {
+  display: none !important;
+}
+
+/* Banner bovenin de main-content-area */
+.readonly-banner {
+  background: linear-gradient(90deg, rgba(245,166,35,.18), rgba(245,166,35,.08));
+  border-bottom: 1px solid var(--amber);
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  padding: 7px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.readonly-banner .ic { font-size: 14px }

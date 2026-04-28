@@ -262,6 +262,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                 onMouseEnter={e => { e.currentTarget.style.opacity = '1' }}
                 onMouseLeave={e => { e.currentTarget.style.opacity = '0.7' }}
                 title="Verwijder deze rubriek (alleen mogelijk als leeg)"
+                data-rw="hide"
               >✕ rubriek</button>
             )
           })()}
@@ -345,6 +346,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                               fontSize: 10, padding: '0 4px', lineHeight: 1.4, fontWeight: 700,
                             }}
                             title={`⚠ Afwijking: huidige waarde (${fmt(v)}) komt niet overeen met import (${fmt(expected)}). Klik om te synchroniseren met het geüploade bestand.`}
+                          data-rw="hide"
                           >↻</button>
                         )}
                         {clickable ? (
@@ -375,6 +377,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                           }}
                           title="Handmatig overschrijven (toelichting vereist)"
                           onClick={() => startOverride(row, m)}
+                          data-rw="hide"
                         >✏</button>
                       </div>
                     </td>
@@ -432,6 +435,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                         }}
                         onClick={() => !hasValue && removeRow(row.id)}
                         title={hasValue ? 'Maak eerst alle cellen leeg om deze rij te kunnen verwijderen' : 'Verwijder deze regel'}
+                        data-rw="hide"
                       >✕</button>
                     )
                   })()}
@@ -486,6 +490,7 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                   width: '100%', justifyContent: 'center',
                 }}
                 onClick={addRow}
+                data-rw="hide"
               >
                 + Regel toevoegen aan "{section.title}"
               </button>

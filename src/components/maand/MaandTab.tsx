@@ -1063,6 +1063,7 @@ export function MaandTab({ filter: _filter }: Props) {
                 onClick={() => removeBreakdown(br.id)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 12, padding: '2px 4px' }}
                 title="Verwijder deze specifieke post"
+                data-rw="hide"
               >✕</button>
             </td>
           </tr>
@@ -1083,6 +1084,7 @@ export function MaandTab({ filter: _filter }: Props) {
                 fontSize: 10, padding: '3px 10px',
               }}
               title="Voeg een specifieke post toe onder deze kostenregel"
+              data-rw="hide"
             >
               + specifieke post toevoegen
             </button>
@@ -1248,6 +1250,7 @@ export function MaandTab({ filter: _filter }: Props) {
 
                       {/* Upload area */}
                       <div
+                        data-rw="edit"
                         style={{
                           border: `2px dashed ${loading ? 'var(--blue)' : latest ? 'var(--green)' : 'var(--bd2)'}`,
                           borderRadius: 7, padding: '12px', textAlign: 'center', cursor: 'pointer',

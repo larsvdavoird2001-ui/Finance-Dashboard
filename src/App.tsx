@@ -17,7 +17,10 @@ import { UsersTab } from './components/auth/UsersTab'
 import { useOhwState } from './hooks/useOhwState'
 import { useToast } from './hooks/useToast'
 import { useDbInit } from './hooks/useDbInit'
+import { useRealtimeSync } from './hooks/useRealtimeSync'
+import { useUserProfileGuard } from './hooks/useUserProfileGuard'
 import { useAuth, profileNeedsPassword } from './lib/auth'
+import { PermissionsContext } from './lib/permissions'
 
 const DEFAULT_FILTER: GlobalFilter = { year: '2026', bv: 'all' }
 
@@ -26,10 +29,10 @@ export default function App() {
   const [filter, setFilter] = useState<GlobalFilter>(DEFAULT_FILTER)
   // Lokale "skip wachtwoord-instellen"-flag, alleen voor deze sessie.
   const [skipSetPw, setSkipSetPw] = useState(false)
-  // Tweede gate: zodra de user succesvol een wachtwoord heeft ingesteld
-  // tijdens deze sessie, slaan we de SetPasswordPage altijd over — onafhankelijk
-  // van of user_metadata.password_set al gepropageerd is in de session.
+  // Tweede gate voor SetPasswordPage — direct doorgaan na succes.
   const [pwJustSet, setPwJustSet] = useState(false)
+  // Reden van geforceerde uitlog (deactivatie / verwijdering door admin).
+  const [revokedReason, setRevokedReason] = useState<string | null>(null)
 
   const auth = useAuth()
   const {
@@ -43,24 +46,42 @@ export default function App() {
   const { ready: dbReady, error: dbError } = useDbInit()
   const navPending = useNavStore(s => s.pending)
 
-  // Reageer op navigatie-verzoeken vanuit andere componenten (bijv. OHW → klik getal → ga naar import)
+  // Realtime sync — actief zodra een user is ingelogd. Bij elke wijziging in
+  // de gedeelde tabellen worden de stores opnieuw geladen.
+  useRealtimeSync(!!user && !authDisabled)
+
+  // Bewaak of de huidige user nog mag inloggen. Sign-out direct als admin
+  // hem deactiveert of verwijdert.
+  useUserProfileGuard({
+    email: user?.email ?? null,
+    enabled: !!user && !authDisabled,
+    onRevoked: async (reason) => {
+      console.warn('[guard] toegang ingetrokken:', reason)
+      setRevokedReason(reason)
+      await signOut()
+    },
+  })
+
+  // Reageer op navigatie-verzoeken vanuit andere componenten
   useEffect(() => {
-    if (navPending?.tab === 'maand') {
-      setTab('maand')
-    } else if (navPending?.tab === 'ohw') {
-      setTab('ohw')
-    }
+    if (navPending?.tab === 'maand') setTab('maand')
+    else if (navPending?.tab === 'ohw') setTab('ohw')
   }, [navPending])
 
-  // Als een non-admin per ongeluk op users-tab terechtkomt → terug naar dashboard
+  // Non-admin op users-tab → terug naar dashboard
   useEffect(() => {
     if (tab === 'users' && !isAdmin) setTab('dashboard')
   }, [tab, isAdmin])
 
+  // Reset revoked-reason zodra een nieuwe user inlogt
+  useEffect(() => {
+    if (user) setRevokedReason(null)
+  }, [user])
+
   const onFilterChange = (patch: Partial<GlobalFilter>) =>
     setFilter(prev => ({ ...prev, ...patch }))
 
-  // Auth loading state (check sessie bij app-start)
+  // Auth loading
   if (authLoading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg1)', color: 'var(--t2)', flexDirection: 'column', gap: 12 }}>
@@ -71,31 +92,37 @@ export default function App() {
     )
   }
 
-  // Niet ingelogd én Supabase is geconfigureerd → toon login-pagina
+  // Niet ingelogd → LoginPage (eventueel met revoked-banner)
   if (!authDisabled && !user) {
     return (
-      <LoginPage
-        onSignIn={signIn}
-        onSendMagicLink={sendMagicLink}
-        onSendPasswordReset={sendPasswordReset}
-        loading={authLoading}
-        disabled={authDisabled}
-      />
+      <>
+        {revokedReason && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+            background: 'var(--bd-red)', color: 'var(--red)',
+            padding: '10px 18px', fontSize: 12, fontWeight: 600,
+            borderBottom: '1px solid var(--red)', textAlign: 'center',
+          }}>
+            ⛔ {revokedReason} Log opnieuw in als je opnieuw bent uitgenodigd.
+          </div>
+        )}
+        <LoginPage
+          onSignIn={signIn}
+          onSendMagicLink={sendMagicLink}
+          onSendPasswordReset={sendPasswordReset}
+          loading={authLoading}
+          disabled={authDisabled}
+        />
+      </>
     )
   }
 
-  // Net uitgenodigde user (magic-link login, needs_password=true) → prompt.
-  // Bestaande users en hoofd-admin hebben needs_password=false en zien deze
-  // pagina nooit.
+  // Set-password prompt
   const needsPw = profileNeedsPassword(user?.email, profiles)
   if (!authDisabled && user && needsPw && !skipSetPw && !pwJustSet) {
     const handleSetPassword = async (newPw: string) => {
       const result = await setPassword(newPw)
-      if (!result.error) {
-        // Direct doorzetten naar dashboard, ook als profiel-refresh nog niet
-        // klaar is — voorkomt dat de pagina vast blijft staan.
-        setPwJustSet(true)
-      }
+      if (!result.error) setPwJustSet(true)
       return result
     }
     return (
@@ -120,9 +147,10 @@ export default function App() {
   }
 
   const currentProfile = profiles.find(p => p.email.toLowerCase() === (user?.email ?? '').toLowerCase())
+  const canEdit = isAdmin
 
   return (
-    <>
+    <PermissionsContext.Provider value={{ canEdit, isAdmin }}>
       <Sidebar
         active={tab}
         onNav={setTab}
@@ -131,7 +159,13 @@ export default function App() {
         userRole={currentProfile?.role}
         onSignOut={signOut}
       />
-      <div className="main">
+      <div className={`main${canEdit ? '' : ' app-readonly'}`}>
+        {!canEdit && (
+          <div className="readonly-banner">
+            <span className="ic">👁</span>
+            <span>Alleen-lezen modus — neem contact op met een admin om wijzigingen te laten doen.</span>
+          </div>
+        )}
         <Topbar tab={tab} filter={filter} onFilterChange={onFilterChange} />
 
         {tab === 'dashboard'  && <DashboardTab filter={filter} onFilterChange={onFilterChange} onNav={(t) => setTab(t)} />}
@@ -162,6 +196,6 @@ export default function App() {
       </div>
       <Toast toasts={toasts} />
       <AiChat />
-    </>
+    </PermissionsContext.Provider>
   )
 }
