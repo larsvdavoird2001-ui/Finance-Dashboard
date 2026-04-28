@@ -1,31 +1,40 @@
 import { useAdjustedActuals } from './useAdjustedActuals'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../store/useBudgetStore'
-import { monthlyActuals2026 } from '../data/plData'
+import { monthlyActuals2026, monthlyBudget2026 } from '../data/plData'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../data/plData2025'
 import type { EntityName } from '../data/plData'
-import { derivePL } from '../lib/plDerive'
+import { derivePL, SUBS_OF } from '../lib/plDerive'
 import type { BvId } from '../data/types'
 
 const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+// Welke aggregaat-groep hoort bij een sub-key? Voor elke sub vinden we
+// de aggregaat-key (bv. 'gefactureerde_omzet' → 'netto_omzet').
+const GROUP_OF_SUB: Record<string, string> = (() => {
+  const out: Record<string, string> = {}
+  for (const [agg, subs] of Object.entries(SUBS_OF)) {
+    for (const sub of subs) out[sub] = agg
+  }
+  return out
+})()
 
 /**
  * Latest Estimate per BV per maand voor de Executive Overview.
  *
  * Hiërarchie per (bv, maand, key):
- *   1. CLOSED kalender-maand → adjusted actual.  ALTIJD. Een LE-override
- *      wordt voor closed maanden genegeerd — actual is feit.
- *   2. Open maand met handmatige LE-override (Budgetten-tab) → die override.
- *   3. Open maand met ingevuld budget (store-override of plData Jan/Feb
- *      defaults) → budget waarde.
- *   4. Open maand zonder budget → seizoens-projectie:
- *        2025-zelfde-maand × (YTD-2026 / YTD-2025 performance ratio)
- *        geblend 60/40 met run-rate van laatst-gesloten 2026-maand.
- *      Dit pakt info die we al hebben (vorig jaar + Q1 dit jaar) en geeft
- *      een redelijke LE zonder dat de gebruiker eerst overal budget hoeft
- *      in te vullen.
+ *   1. CLOSED kalender-maand → adjusted actual (LE-override genegeerd).
+ *   2. Open maand met handmatige LE-override → die override.
+ *   3. Open maand waar de gebruiker (in Budgetten-tab) een budget heeft
+ *      ingevuld voor dezelfde aggregaat-groep → budget waarde van die key
+ *      (0 als die specifieke sub-key zelf niet ingevuld is, want de gebruiker
+ *      heeft die groep onder zijn beheer genomen).
+ *   4. Open maand zonder budget-input voor die groep → seizoens-forecast:
+ *        2025-zelfde-maand × YTD-2026/YTD-2025 perf, geblend 60/40 met
+ *        run-rate van laatst-gesloten maand.
  *
- * Reactief: zodra een budget of LE-override in Budgetten-tab wordt aangepast
- * werkt het direct door in de Executive Overview (gedeelde zustand store).
+ * Met deze opzet werkt elke budget-edit in Budgetten-tab direct door in de
+ * Executive Overview, zonder dat de forecast voor andere keys mee blijft
+ * tellen wanneer de gebruiker maar één sub-key heeft ingevuld.
  */
 export function useLatestEstimate(currentDate?: Date) {
   const { getMonthly } = useAdjustedActuals()
@@ -63,15 +72,31 @@ export function useLatestEstimate(currentDate?: Date) {
   const rawActual2025 = (bv: EntityName, m25: string, key: string): number =>
     monthlyActuals2025[bv]?.[m25]?.[key] ?? 0
 
-  /** Heeft Budgetten-store een waarde voor (bv, maand, key)? */
-  const hasExplicitBudget = (bv: EntityName, month: string, key: string): boolean => {
-    const ov = overrides[bv]?.[month]?.[key]
-    if (ov !== undefined) return true
-    const monthData = getBudgetMonth(bv, month)
-    return Object.prototype.hasOwnProperty.call(monthData, key)
+  /** Heeft de gebruiker voor (bv, maand) een budget-override gezet op
+   *  een sub-key die in dezelfde aggregaat-groep zit als `key`? Dat is het
+   *  signaal dat de gebruiker de groep onder zijn beheer neemt. */
+  const groupHasUserBudget = (bv: EntityName, month: string, key: string): boolean => {
+    const monthOv = overrides[bv]?.[month]
+    if (!monthOv) return false
+    // Sub-key zelf? dan is de eigen aanwezigheid voldoende.
+    if (Object.prototype.hasOwnProperty.call(monthOv, key)) return true
+    // Aggregaat-key? Check of een van zijn subs is gezet.
+    if (SUBS_OF[key]) {
+      return SUBS_OF[key].some(sub => Object.prototype.hasOwnProperty.call(monthOv, sub))
+    }
+    // Sub-key (niet zelf gezet): check siblings binnen dezelfde groep.
+    const group = GROUP_OF_SUB[key]
+    if (!group) return false
+    return SUBS_OF[group].some(sub => Object.prototype.hasOwnProperty.call(monthOv, sub))
   }
 
-  /** Forecast voor een open maand zonder ingevuld budget. */
+  /** Heeft plData een budget-source voor (bv, maand)? Jan/Feb-26 is gevuld,
+   *  Mar-Dec is leeg in monthlyBudget2026. */
+  const hasPlDataBudget = (bv: EntityName, month: string): boolean => {
+    const src = monthlyBudget2026[bv]?.[month]
+    return !!src && Object.keys(src).length > 0
+  }
+
   const forecastUnclosed = (bv: EntityName, month: string, key: string): number => {
     const sameMonth2025 = rawActual2025(bv, toPY(month), key)
     let ytd2026 = 0, ytd2025 = 0
@@ -95,7 +120,8 @@ export function useLatestEstimate(currentDate?: Date) {
   const getLeSource = (bv: EntityName, month: string, key: string): LeSource => {
     if (isClosed(month)) return 'actual'
     if (getLeOverride(bv, month, key) != null) return 'override'
-    if (hasExplicitBudget(bv, month, key)) return 'budget'
+    if (groupHasUserBudget(bv, month, key)) return 'budget'
+    if (hasPlDataBudget(bv, month)) return 'budget'
     return 'forecast'
   }
 
@@ -103,9 +129,16 @@ export function useLatestEstimate(currentDate?: Date) {
     if (isClosed(month)) return rawActual2026(bv, month, key)
     const ov = getLeOverride(bv, month, key)
     if (ov != null) return ov
-    if (hasExplicitBudget(bv, month, key)) {
+    // Gebruiker heeft de aggregaat-groep "geclaimd" door iets in te vullen?
+    // → gebruik exact wat in het budget staat (0 voor unfilled subs).
+    if (groupHasUserBudget(bv, month, key)) {
       return getBudgetMonth(bv, month)[key] ?? 0
     }
+    // Geen user-input maar wel plData-source (Jan/Feb-26)?
+    if (hasPlDataBudget(bv, month)) {
+      return getBudgetMonth(bv, month)[key] ?? 0
+    }
+    // Fallback: seizoens-forecast
     return forecastUnclosed(bv, month, key)
   }
 
@@ -118,8 +151,6 @@ export function useLatestEstimate(currentDate?: Date) {
   const fyLE = (bv: EntityName, key: string): number =>
     sumLE(bv, BUDGET_MONTHS_2026, key)
 
-  /** Voor charts: is er voor (bv, maand, key) ENIGE bron? Forecast-only telt
-   *  óók als bron, want we willen de LE-lijn zien lopen. */
   const hasLE = (_bv: EntityName, _month: string, _key: string): boolean => true
 
   return { getLE, sumLE, fyLE, isClosed, getLeSource, hasLE }
