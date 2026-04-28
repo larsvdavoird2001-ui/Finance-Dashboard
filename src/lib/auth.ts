@@ -27,13 +27,19 @@ export function isAdminUser(
   return !!p && p.active && p.role === 'admin'
 }
 
-/** True als deze user al een wachtwoord heeft ingesteld (via updateUser).
- *  We zetten user_metadata.password_set = true zodra de gebruiker
- *  succesvol een wachtwoord heeft ingesteld na een magic-link login. */
-export function userHasPassword(user: User | null): boolean {
-  if (!user) return false
-  const md = (user.user_metadata ?? {}) as Record<string, unknown>
-  return md.password_set === true
+/** True als de user nog een wachtwoord moet instellen.
+ *  Wordt aangestuurd via user_profiles.needs_password (server-side flag).
+ *  Default false → bestaande users en hoofd-admin krijgen NOOIT de
+ *  set-password prompt. Alleen via inviteUser() wordt deze flag op true
+ *  gezet, en bij setPassword() weer op false. */
+export function profileNeedsPassword(
+  email: string | null | undefined,
+  profiles: { email: string; needsPassword: boolean }[],
+): boolean {
+  if (!email) return false
+  const norm = email.trim().toLowerCase()
+  const p = profiles.find(p => p.email.toLowerCase() === norm)
+  return !!p && p.needsPassword
 }
 
 export interface AuthState {
@@ -182,15 +188,30 @@ export function useAuth(): AuthState & {
     if (!supabaseEnabled) return { error: 'Supabase niet geconfigureerd' }
     const { data, error } = await supabase.auth.updateUser({
       password: newPassword,
-      data: { password_set: true },
     })
-    if (error) return { error: error.message }
-    // Forceer een verse user-fetch, want updateUser geeft soms een user object
-    // terug zonder de zojuist geschreven user_metadata. Met getUser() lezen we
-    // de definitieve state van Supabase en triggeren we een correcte rerender.
-    const fresh = await supabase.auth.getUser()
-    const finalUser = fresh.data?.user ?? data?.user ?? null
-    if (finalUser) setState(s => ({ ...s, user: finalUser }))
+    if (error) {
+      console.error('[auth] setPassword failed:', error)
+      return { error: error.message }
+    }
+    // Markeer in user_profiles dat deze user géén set-password meer hoeft.
+    const email = data?.user?.email ?? state.user?.email
+    if (email) {
+      const { error: dbErr } = await upsertUserProfile({
+        email,
+        needsPassword: false,
+      })
+      if (dbErr) {
+        // Dit is een soft-error: het wachtwoord is gezet, alleen de flag
+        // niet bijgewerkt. We retourneren wel een waarschuwing zodat de UI
+        // niet kan re-rerenderen op de set-password flow blijft hangen.
+        console.warn('[auth] needs_password flag bijwerken faalde:', dbErr)
+      }
+      // Refresh profielen-cache zodat de UI de nieuwe waarde gebruikt.
+      const profiles = await fetchUserProfiles()
+      setState(s => ({ ...s, profiles, user: data?.user ?? s.user }))
+    } else if (data?.user) {
+      setState(s => ({ ...s, user: data.user }))
+    }
     return { error: null }
   }
 
@@ -201,11 +222,13 @@ export function useAuth(): AuthState & {
       return { error: 'Ongeldig e-mailadres' }
     }
     const inviter = state.user?.email ?? 'admin'
-    // 1. Profiel aanmaken / activeren
+    // 1. Profiel aanmaken / activeren — met needs_password flag zodat de user
+    //    bij eerste login een wachtwoord moet kiezen.
     const up = await upsertUserProfile({
       email: norm,
       role,
       active: true,
+      needsPassword: true,
       invitedBy: inviter,
     })
     if (up.error) return { error: up.error }

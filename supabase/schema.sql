@@ -137,12 +137,18 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   email text PRIMARY KEY,
   role text NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
   active boolean NOT NULL DEFAULT true,
+  -- True voor net-uitgenodigde users die nog hun wachtwoord moeten instellen.
+  -- App toont alleen aan deze users de SetPasswordPage. Wordt false gezet zodra
+  -- de user een wachtwoord opslaat.
+  needs_password boolean NOT NULL DEFAULT false,
   invited_by text DEFAULT '',
   invited_at timestamptz DEFAULT now(),
   last_sign_in timestamptz,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
+-- Migratie voor bestaande projecten: voeg de kolom toe als die ontbreekt.
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS needs_password boolean NOT NULL DEFAULT false;
 
 -- 9. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
 CREATE TABLE IF NOT EXISTS tariff_entries (
@@ -246,6 +252,6 @@ CREATE OR REPLACE TRIGGER trg_user_profiles_updated
 -- Bootstrap: zorg dat de TPG Finance hoofd-admin altijd aanwezig is.
 -- Pas dit aan als jouw admin-email anders is.
 -- ============================================================================
-INSERT INTO user_profiles (email, role, invited_by, invited_at)
-VALUES ('lvanderavoird@thepeoplegroup.nl', 'admin', 'system', now())
-ON CONFLICT (email) DO UPDATE SET role = 'admin', active = true;
+INSERT INTO user_profiles (email, role, active, needs_password, invited_by, invited_at)
+VALUES ('lvanderavoird@thepeoplegroup.nl', 'admin', true, false, 'system', now())
+ON CONFLICT (email) DO UPDATE SET role = 'admin', active = true, needs_password = false;

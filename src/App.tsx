@@ -17,7 +17,7 @@ import { UsersTab } from './components/auth/UsersTab'
 import { useOhwState } from './hooks/useOhwState'
 import { useToast } from './hooks/useToast'
 import { useDbInit } from './hooks/useDbInit'
-import { useAuth, userHasPassword } from './lib/auth'
+import { useAuth, profileNeedsPassword } from './lib/auth'
 
 const DEFAULT_FILTER: GlobalFilter = { year: '2026', bv: 'all' }
 
@@ -84,13 +84,16 @@ export default function App() {
     )
   }
 
-  // Ingelogd via magic-link, maar nog geen wachtwoord ingesteld → prompt
-  if (!authDisabled && user && !userHasPassword(user) && !skipSetPw && !pwJustSet) {
+  // Net uitgenodigde user (magic-link login, needs_password=true) → prompt.
+  // Bestaande users en hoofd-admin hebben needs_password=false en zien deze
+  // pagina nooit.
+  const needsPw = profileNeedsPassword(user?.email, profiles)
+  if (!authDisabled && user && needsPw && !skipSetPw && !pwJustSet) {
     const handleSetPassword = async (newPw: string) => {
       const result = await setPassword(newPw)
       if (!result.error) {
-        // Direct doorzetten naar dashboard, zelfs als user_metadata nog niet
-        // gerefresht is.
+        // Direct doorzetten naar dashboard, ook als profiel-refresh nog niet
+        // klaar is — voorkomt dat de pagina vast blijft staan.
         setPwJustSet(true)
       }
       return result

@@ -302,6 +302,7 @@ export interface UserProfile {
   email: string
   role: 'admin' | 'user'
   active: boolean
+  needsPassword: boolean
   invitedBy: string
   invitedAt: string
   lastSignIn?: string | null
@@ -315,12 +316,13 @@ export async function fetchUserProfiles(): Promise<UserProfile[]> {
     .order('invited_at', { ascending: true })
   if (error) { console.error('fetchUserProfiles:', error); return [] }
   return (data ?? []).map(row => ({
-    email:       String(row.email ?? ''),
-    role:        (row.role === 'admin' ? 'admin' : 'user') as 'admin' | 'user',
-    active:      !!row.active,
-    invitedBy:   String(row.invited_by ?? ''),
-    invitedAt:   String(row.invited_at ?? ''),
-    lastSignIn:  row.last_sign_in ?? null,
+    email:         String(row.email ?? ''),
+    role:          (row.role === 'admin' ? 'admin' : 'user') as 'admin' | 'user',
+    active:        !!row.active,
+    needsPassword: !!row.needs_password,
+    invitedBy:     String(row.invited_by ?? ''),
+    invitedAt:     String(row.invited_at ?? ''),
+    lastSignIn:    row.last_sign_in ?? null,
   }))
 }
 
@@ -328,15 +330,17 @@ export async function upsertUserProfile(p: {
   email: string
   role?: 'admin' | 'user'
   active?: boolean
+  needsPassword?: boolean
   invitedBy?: string
 }): Promise<{ error: string | null }> {
   if (!supabaseEnabled) return { error: 'Supabase niet geconfigureerd' }
   const payload: Record<string, unknown> = {
     email: p.email.trim().toLowerCase(),
   }
-  if (p.role !== undefined)      payload.role = p.role
-  if (p.active !== undefined)    payload.active = p.active
-  if (p.invitedBy !== undefined) payload.invited_by = p.invitedBy
+  if (p.role !== undefined)          payload.role = p.role
+  if (p.active !== undefined)        payload.active = p.active
+  if (p.needsPassword !== undefined) payload.needs_password = p.needsPassword
+  if (p.invitedBy !== undefined)     payload.invited_by = p.invitedBy
   const { error } = await supabase
     .from('user_profiles')
     .upsert(payload, { onConflict: 'email' })
