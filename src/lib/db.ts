@@ -4,6 +4,7 @@
 import { supabase, supabaseEnabled } from './supabase'
 import type { ClosingEntry, FteEntry, ImportRecord, OhwEntityData } from '../data/types'
 import type { RawDataEntry } from '../store/useRawDataStore'
+import { emitDbEvent } from './dbEvents'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function camelToSnake(obj: Record<string, unknown>): Record<string, unknown> {
@@ -34,14 +35,14 @@ export async function upsertClosingEntry(entry: ClosingEntry): Promise<void> {
   if (!supabaseEnabled) return
   const row = camelToSnake(entry as unknown as Record<string, unknown>)
   const { error } = await supabase.from('closing_entries').upsert(row, { onConflict: 'id' })
-  if (error) console.error('upsertClosingEntry:', error)
+  if (error) emitDbEvent({ type: 'save-error', table: 'closing_entries', message: error.message })
 }
 
 export async function upsertAllClosingEntries(entries: ClosingEntry[]): Promise<void> {
   if (!supabaseEnabled) return
   const rows = entries.map(e => camelToSnake(e as unknown as Record<string, unknown>))
   const { error } = await supabase.from('closing_entries').upsert(rows, { onConflict: 'id' })
-  if (error) console.error('upsertAllClosingEntries:', error)
+  if (error) emitDbEvent({ type: 'save-error', table: 'closing_entries', message: error.message })
 }
 
 // ── FTE Entries ─────────────────────────────────────────────────────────────
@@ -56,14 +57,14 @@ export async function upsertFteEntry(entry: FteEntry): Promise<void> {
   if (!supabaseEnabled) return
   const row = camelToSnake(entry as unknown as Record<string, unknown>)
   const { error } = await supabase.from('fte_entries').upsert(row, { onConflict: 'id' })
-  if (error) console.error('upsertFteEntry:', error)
+  if (error) emitDbEvent({ type: 'save-error', table: 'fte_entries', message: error.message })
 }
 
 export async function upsertAllFteEntries(entries: FteEntry[]): Promise<void> {
   if (!supabaseEnabled) return
   const rows = entries.map(e => camelToSnake(e as unknown as Record<string, unknown>))
   const { error } = await supabase.from('fte_entries').upsert(rows, { onConflict: 'id' })
-  if (error) console.error('upsertAllFteEntries:', error)
+  if (error) emitDbEvent({ type: 'save-error', table: 'fte_entries', message: error.message })
 }
 
 // ── Import Records ──────────────────────────────────────────────────────────
@@ -192,7 +193,7 @@ export async function upsertOhwEntity(year: string, entity: OhwEntityData): Prom
   const { error } = await supabase
     .from('ohw_entities')
     .upsert(row, { onConflict: 'year,entity' })
-  if (error) console.error('upsertOhwEntity:', error)
+  if (error) emitDbEvent({ type: 'save-error', table: 'ohw_entities', message: error.message })
 }
 
 export async function upsertAllOhwEntities(year: string, entities: OhwEntityData[]): Promise<void> {
@@ -205,7 +206,7 @@ export async function upsertAllOhwEntities(year: string, entities: OhwEntityData
   const { error } = await supabase
     .from('ohw_entities')
     .upsert(rows, { onConflict: 'year,entity' })
-  if (error) console.error('upsertAllOhwEntities:', error)
+  if (error) emitDbEvent({ type: 'save-error', table: 'ohw_entities', message: error.message })
 }
 
 // ── Budget Overrides (Budgetten tab — editable forward-month budgets) ──────
@@ -239,7 +240,7 @@ export async function upsertBudgetOverride(row: BudgetOverrideRow): Promise<void
   const { error } = await supabase
     .from('budget_overrides')
     .upsert(payload, { onConflict: 'entity,month,pl_key' })
-  if (error) console.error('upsertBudgetOverride:', error)
+  if (error) emitDbEvent({ type: 'save-error', table: 'budget_overrides', message: error.message })
 }
 
 export async function deleteBudgetOverridesForMonth(entity: string, month: string): Promise<void> {

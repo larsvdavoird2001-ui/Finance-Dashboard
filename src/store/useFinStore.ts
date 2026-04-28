@@ -160,34 +160,26 @@ export const useFinStore = create<FinStore>()(
       loaded: false,
 
       loadFromDb: async () => {
-        // Non-destructieve laad: overschrijf lokale staat ALLEEN als Supabase
-        // daadwerkelijk data teruggeeft. Bij fout of leeg antwoord blijft de
-        // localStorage-gehydreerde staat behouden — voorkomt data-verlies
-        // wanneer Supabase tijdelijk onbereikbaar is of RLS strict is.
+        // Destructieve laad: Supabase is de single source of truth.
+        // Reset naar INITIAL_ENTRIES (de "lege" staat), merge dan in wat in
+        // Supabase staat. Hierdoor zien alle gebruikers altijd dezelfde data
+        // die werkelijk in de database is opgeslagen.
         try {
           const rows = await fetchClosingEntries()
-          if (rows.length > 0) {
-            // Merge ontbrekende entries (bv. Holdings) aan met de db-rows
-            // zodat migraties van nieuwe BVs/maanden niet verloren gaan.
-            const merged = mergeWithInitialEntries(rows)
-            set({ entries: merged, loaded: true })
-            // Sync ontbrekende default-entries terug naar Supabase
-            if (merged.length > rows.length) {
-              const newOnes = merged.slice(rows.length)
-              await upsertAllClosingEntries(newOnes)
-            }
-          } else {
-            // Alleen seeden als er lokaal ook niks aangepast is (initial set)
-            const current = get().entries
-            const looksLikeDefaults = current.length === INITIAL_ENTRIES.length &&
-              current.every(e => e.remark === '' && e.debiteuren === 0)
-            if (looksLikeDefaults) {
-              await upsertAllClosingEntries(INITIAL_ENTRIES)
-            }
-            set({ loaded: true })
+          const merged = mergeWithInitialEntries(rows)
+          console.info(`[useFinStore] loaded ${rows.length} closing_entries rows from Supabase`)
+          set({ entries: merged, loaded: true })
+          // Eerste keer ooit: seed Supabase met de defaults
+          if (rows.length === 0) {
+            await upsertAllClosingEntries(INITIAL_ENTRIES)
+          } else if (merged.length > rows.length) {
+            // Nieuwe BV/maanden zijn toegevoegd in code → push die naar DB
+            const existingIds = new Set(rows.map(r => r.id))
+            const newOnes = merged.filter(e => !existingIds.has(e.id))
+            if (newOnes.length > 0) await upsertAllClosingEntries(newOnes)
           }
         } catch (err) {
-          console.warn('[useFinStore] Supabase load failed, keeping local state:', err)
+          console.error('[useFinStore] Supabase load failed:', err)
           set({ loaded: true })
         }
       },

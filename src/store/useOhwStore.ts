@@ -62,17 +62,21 @@ export const useOhwStore = create<OhwStore>()(
       deletedRowIds: [],
 
       loadFromDb: async () => {
-        // Non-destructieve load: Supabase data wint ALS er iets opgehaald wordt,
-        // anders blijft de localStorage-gehydreerde staat behouden.
+        // Destructieve load: Supabase = bron van waarheid. Eerst reset naar
+        // de seed-defaults, dan invullen wat in Supabase staat. Hierdoor
+        // ziet een ander apparaat dezelfde data, ook als hun localStorage
+        // out-of-sync was.
         try {
           const [entities2025, entities2026] = await Promise.all([
             fetchOhwEntities('2025'),
             fetchOhwEntities('2026'),
           ])
+          console.info(`[useOhwStore] loaded ohw_entities: 2025=${entities2025.length}, 2026=${entities2026.length}`)
 
           const state = get()
-          let d2025 = state.data2025
-          let d2026 = state.data2026
+          // Reset naar seed-defaults zodat oude lokale state wegvalt.
+          let d2025 = initYear(ohwYearData2025)
+          let d2026 = initYear(ohwYearData2026)
           const tombstones = new Set(state.deletedRowIds)
 
           // Filter-helper: verwijder rijen uit onderhanden-secties én uit

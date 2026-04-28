@@ -22,6 +22,7 @@ import { useUserProfileGuard } from './hooks/useUserProfileGuard'
 import { useDataRefresh } from './hooks/useDataRefresh'
 import { useAuth, profileNeedsPassword } from './lib/auth'
 import { PermissionsContext } from './lib/permissions'
+import { onDbEvent } from './lib/dbEvents'
 
 const DEFAULT_FILTER: GlobalFilter = { year: '2026', bv: 'all' }
 
@@ -83,15 +84,37 @@ export default function App() {
   }, [user])
 
   // Forceer een verse data-load zodra een gebruiker inlogt (of switcht).
-  // useDbInit fired al op mount, maar dat kan vóór de auth-resolutie zijn
-  // gebeurd. Hierdoor zou een nieuwe user soms stale localStorage / lege
-  // state zien. Met deze re-fetch garanderen we dat we ALTIJD de meest
-  // recente Supabase-data ophalen direct na login.
+  // Daarvóór: clear localStorage van data-stores als de email anders is dan
+  // bij de vorige sessie. Zo zie je nooit data van een ander account.
   useEffect(() => {
     if (!userEmailKey) return
+    const lastUser = localStorage.getItem('tpg-last-user') ?? ''
+    if (lastUser && lastUser !== userEmailKey) {
+      // Andere user dan vorige keer → wis alle data-cache
+      const toRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (k && k.startsWith('tpg-') && k !== 'tpg-last-user') toRemove.push(k)
+      }
+      toRemove.forEach(k => localStorage.removeItem(k))
+      console.info(`[App] localStorage cache gewist (${toRemove.length} keys) — andere user ${lastUser} → ${userEmailKey}`)
+    }
+    localStorage.setItem('tpg-last-user', userEmailKey)
     refreshAllData().catch(e => console.warn('[refresh on login] failed:', e))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userEmailKey])
+
+  // Toast bij save-fouten uit de DB-laag — anders verdwijnen ze in console.
+  useEffect(() => {
+    return onDbEvent(e => {
+      if (e.type === 'save-error') {
+        showToast(`⚠ Niet opgeslagen in ${e.table}: ${e.message}`, 'r')
+      } else {
+        showToast(`⚠ Kon ${e.table} niet laden: ${e.message}`, 'r')
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleManualRefresh = async () => {
     setRefreshing(true)

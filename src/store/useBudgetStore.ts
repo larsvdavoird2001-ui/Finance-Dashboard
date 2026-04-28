@@ -62,21 +62,20 @@ export const useBudgetStore = create<BudgetState>()(
       loaded: false,
 
       loadFromDb: async () => {
+        // Destructieve laad: Supabase is de waarheid voor budget-data.
+        // Eerst reset naar leeg, dan invullen vanuit DB. Dit voorkomt dat een
+        // andere user op een ander apparaat stale localStorage-cache blijft
+        // zien terwijl admin al lang verder is.
         const rows = await fetchBudgetOverrides()
-        if (rows.length > 0) {
-          // Reconstrueer de geneste struct
-          const overrides = emptyOverrides()
-          for (const r of rows) {
-            const entity = r.entity as EntityName
-            if (!overrides[entity]) continue
-            if (!overrides[entity][r.month]) overrides[entity][r.month] = {}
-            overrides[entity][r.month][r.plKey] = r.value
-          }
-          set({ overrides, loaded: true })
-        } else {
-          // Geen remote data — behoud lokale cache (via persist middleware)
-          set({ loaded: true })
+        const overrides = emptyOverrides()
+        for (const r of rows) {
+          const entity = r.entity as EntityName
+          if (!overrides[entity]) continue
+          if (!overrides[entity][r.month]) overrides[entity][r.month] = {}
+          overrides[entity][r.month][r.plKey] = r.value
         }
+        console.info(`[useBudgetStore] loaded ${rows.length} budget_overrides rows from Supabase`)
+        set({ overrides, loaded: true })
       },
 
       setValue: (entity, month, key, val) => {
