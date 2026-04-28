@@ -322,6 +322,18 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return getForecastFor(e, m, k)
   }
   const getLeVal = (e: EntityName, m: string, k: string): number => {
+    // Voor CLOSED maanden gebruiken we de werkelijke aggregaat-waarde
+    // uit useAdjustedActuals.getMonthly i.p.v. sum-of-subs / derived-
+    // formula. Reden: netto_omzet bevat behalve sub-keys ook
+    // IC-verrekening, accruals, handmatige correctie en mutatie
+    // vooruitgefactureerd — die zijn géén sub-keys maar wel onderdeel
+    // van de echte aggregaat-waarde. Hierdoor klopt brutomarge% in
+    // de Budgetten-tab nu één-op-één met de BV-overzichtstabel.
+    if (isClosedMonth(m) && (AGGREGATE_KEYS.has(k) || DERIVED_KEYS.has(k))) {
+      const ov = store.getLeOverride(e, m, k)
+      if (ov != null) return ov
+      return getActualsFor(e, m)[k] ?? 0
+    }
     if (AGGREGATE_KEYS.has(k)) {
       return SUBS_OF[k].reduce((s, sk) => s + rawLeVal(e, m, sk), 0)
     }

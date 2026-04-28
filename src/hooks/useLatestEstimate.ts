@@ -145,8 +145,17 @@ export function useLatestEstimate(currentDate?: Date) {
     return forecastUnclosed(bv, month, key)
   }
 
-  const getLE = (bv: EntityName, month: string, key: string): number =>
-    derivePL(k => rawLE(bv, month, k), key)
+  const getLE = (bv: EntityName, month: string, key: string): number => {
+    // Voor CLOSED maanden trust we de werkelijke aggregaat-waarde uit
+    // useAdjustedActuals.getMonthly, NIET de som van sub-keys via derivePL.
+    // Reden: netto_omzet = gefactureerde_omzet + omzet_periode_allocatie
+    // + IC-verrekening + accruals + handmatige correctie + mutatie
+    // vooruitgefactureerd. Die laatste vier zijn GEEN sub-keys maar
+    // FinStore/OHW-aanvullingen. derivePL zou die missen → brutomarge%
+    // klopt dan niet meer t.o.v. de BV-overzichtstabel.
+    if (isClosed(month)) return rawActual2026(bv, month, key)
+    return derivePL(k => rawLE(bv, month, k), key)
+  }
 
   const sumLE = (bv: EntityName, months: string[], key: string): number =>
     months.reduce((s, m) => s + getLE(bv, m, key), 0)
