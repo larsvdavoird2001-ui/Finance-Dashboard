@@ -358,7 +358,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
     return {
       labels: BUDGET_MONTHS_2026,
       datasets: [
-        { label: 'LE cumulatief (Actual + ingevuld budget)', data: leData, borderColor: '#00a9e0', backgroundColor: '#00a9e022', borderWidth: 2.5, tension: 0.3, fill: true, pointRadius: 3 },
+        { label: 'LE cumulatief (Actual + LE)', data: leData, borderColor: '#00a9e0', backgroundColor: '#00a9e022', borderWidth: 2.5, tension: 0.3, fill: true, pointRadius: 3 },
         { label: 'Budget cumulatief', data: budData, borderColor: '#fbbf24', backgroundColor: 'transparent', borderDash: [6, 4], borderWidth: 2, tension: 0.3, fill: false, pointRadius: 2 },
       ],
     }
@@ -831,7 +831,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, marginBottom: 0 }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: '.1em' }}>📈 FY 2026 — Latest Estimate</span>
-            <span style={{ fontSize: 10, color: 'var(--t3)' }}>strikt: actuals (closed maanden) + ingevuld budget; open maanden zonder budget tellen 0</span>
+            <span style={{ fontSize: 10, color: 'var(--t3)' }}>actuals (closed) + ingevuld budget waar gezet + seizoens-forecast op basis van 2025 × YTD-performance voor de overige maanden</span>
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <KpiCard

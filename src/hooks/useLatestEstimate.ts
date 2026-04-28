@@ -1,6 +1,7 @@
 import { useAdjustedActuals } from './useAdjustedActuals'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../store/useBudgetStore'
 import { monthlyActuals2026 } from '../data/plData'
+import { monthlyActuals2025, MONTHS_2025_LABELS } from '../data/plData2025'
 import type { EntityName } from '../data/plData'
 import { derivePL } from '../lib/plDerive'
 import type { BvId } from '../data/types'
@@ -10,23 +11,28 @@ const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'
 /**
  * Latest Estimate per BV per maand voor de Executive Overview.
  *
- * STRIKTE LE — geen verzonnen forecast. We gebruiken alleen wat al bekend is:
- *   - Closed kalender-maand   → ALTIJD adjusted actual (LE-override negeren).
- *   - Open maand met override → handmatig ingevulde LE wint.
- *   - Open maand met budget   → budget waarde (uit Budgetten-tab of plData
- *                                Jan/Feb defaults).
- *   - Geen van bovenstaande   → 0 + source='none' zodat de chart de stip
- *                                kan overslaan i.p.v. een 0-lijn te tekenen.
+ * Hiërarchie per (bv, maand, key):
+ *   1. CLOSED kalender-maand → adjusted actual.  ALTIJD. Een LE-override
+ *      wordt voor closed maanden genegeerd — actual is feit.
+ *   2. Open maand met handmatige LE-override (Budgetten-tab) → die override.
+ *   3. Open maand met ingevuld budget (store-override of plData Jan/Feb
+ *      defaults) → budget waarde.
+ *   4. Open maand zonder budget → seizoens-projectie:
+ *        2025-zelfde-maand × (YTD-2026 / YTD-2025 performance ratio)
+ *        geblend 60/40 met run-rate van laatst-gesloten 2026-maand.
+ *      Dit pakt info die we al hebben (vorig jaar + Q1 dit jaar) en geeft
+ *      een redelijke LE zonder dat de gebruiker eerst overal budget hoeft
+ *      in te vullen.
  *
- * Zodra de gebruiker in de Budgetten-tab een waarde invult voor een open maand
- * werkt die direct door in Executive Overview (dezelfde reactive store).
+ * Reactief: zodra een budget of LE-override in Budgetten-tab wordt aangepast
+ * werkt het direct door in de Executive Overview (gedeelde zustand store).
  */
 export function useLatestEstimate(currentDate?: Date) {
   const { getMonthly } = useAdjustedActuals()
   const getLeOverride = useBudgetStore(s => s.getLeOverride)
   const getBudgetMonth = useBudgetStore(s => s.getMonth)
   const overrides = useBudgetStore(s => s.overrides)
-  // Alleen om re-renders te triggeren zodra leOverrides verandert
+  // Trigger re-render bij leOverrides wijziging
   useBudgetStore(s => s.leOverrides)
 
   const now = currentDate ?? new Date()
@@ -42,34 +48,57 @@ export function useLatestEstimate(currentDate?: Date) {
     return mi < nowMonthIdx
   }
 
-  /** Raw actual lookup. */
+  const closedMonths2026 = BUDGET_MONTHS_2026.filter(isClosed)
+  const lastClosed2026   = closedMonths2026[closedMonths2026.length - 1] ?? null
+
+  const toPY = (m: string): string => {
+    const idx = BUDGET_MONTHS_2026.indexOf(m)
+    return idx >= 0 ? MONTHS_2025_LABELS[idx] : m.replace('-26', '-25')
+  }
+
   const rawActual2026 = (bv: EntityName, month: string, key: string): number => {
     if (bv === 'Holdings') return monthlyActuals2026['Holdings']?.[month]?.[key] ?? 0
     return getMonthly(bv as BvId, month)[key] ?? 0
   }
+  const rawActual2025 = (bv: EntityName, m25: string, key: string): number =>
+    monthlyActuals2025[bv]?.[m25]?.[key] ?? 0
 
-  /** Heeft Budgetten-store een (source of override) waarde voor (bv, maand, key)?
-   *  Specifieker dan alleen "is er iets in de map" — we kijken naar de exacte
-   *  P&L-key zodat een leeg veld niet als ingevuld telt. */
+  /** Heeft Budgetten-store een waarde voor (bv, maand, key)? */
   const hasExplicitBudget = (bv: EntityName, month: string, key: string): boolean => {
-    // Eerst: store-override op deze specifieke key?
     const ov = overrides[bv]?.[month]?.[key]
     if (ov !== undefined) return true
-    // Anders: source-budget (plData Jan/Feb-26)?
     const monthData = getBudgetMonth(bv, month)
     return Object.prototype.hasOwnProperty.call(monthData, key)
   }
 
-  /** Source-tag voor diagnose / chart-styling. */
-  type LeSource = 'override' | 'actual' | 'budget' | 'none'
-  const getLeSource = (bv: EntityName, month: string, key: string): LeSource => {
-    if (isClosed(month)) return 'actual'  // closed: actual wint altijd
-    if (getLeOverride(bv, month, key) != null) return 'override'
-    if (hasExplicitBudget(bv, month, key)) return 'budget'
-    return 'none'
+  /** Forecast voor een open maand zonder ingevuld budget. */
+  const forecastUnclosed = (bv: EntityName, month: string, key: string): number => {
+    const sameMonth2025 = rawActual2025(bv, toPY(month), key)
+    let ytd2026 = 0, ytd2025 = 0
+    for (const cm of closedMonths2026) {
+      ytd2026 += rawActual2026(bv, cm, key)
+      ytd2025 += rawActual2025(bv, toPY(cm), key)
+    }
+    const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
+    const lastActual = lastClosed2026 ? rawActual2026(bv, lastClosed2026, key) : 0
+
+    const seasonalForecast = sameMonth2025 * perfMult
+    const runRateForecast  = lastActual
+
+    if (seasonalForecast === 0 && runRateForecast === 0) return 0
+    if (seasonalForecast === 0) return Math.round(runRateForecast)
+    if (runRateForecast === 0)  return Math.round(seasonalForecast)
+    return Math.round(0.6 * seasonalForecast + 0.4 * runRateForecast)
   }
 
-  /** Raw waarde voor een sub-key (geen aggregate/derived). */
+  type LeSource = 'override' | 'actual' | 'budget' | 'forecast'
+  const getLeSource = (bv: EntityName, month: string, key: string): LeSource => {
+    if (isClosed(month)) return 'actual'
+    if (getLeOverride(bv, month, key) != null) return 'override'
+    if (hasExplicitBudget(bv, month, key)) return 'budget'
+    return 'forecast'
+  }
+
   const rawLE = (bv: EntityName, month: string, key: string): number => {
     if (isClosed(month)) return rawActual2026(bv, month, key)
     const ov = getLeOverride(bv, month, key)
@@ -77,39 +106,21 @@ export function useLatestEstimate(currentDate?: Date) {
     if (hasExplicitBudget(bv, month, key)) {
       return getBudgetMonth(bv, month)[key] ?? 0
     }
-    return 0
+    return forecastUnclosed(bv, month, key)
   }
 
-  /** Waarde voor om het even welke key (aggregate of derived afgeleid). */
   const getLE = (bv: EntityName, month: string, key: string): number =>
     derivePL(k => rawLE(bv, month, k), key)
 
-  /** True als er voor deze (bv, maand) ÉNIGE bron is van LE-info, voor om het
-   *  even welke sub-key. Voor charts die gaten willen tonen wanneer er nog
-   *  niets ingevuld is. */
-  const hasAnyLeData = (bv: EntityName, month: string): boolean => {
-    if (isClosed(month)) return true
-    // Override op iets in deze maand?
-    const leOv = useBudgetStore.getState().leOverrides[bv]?.[month]
-    if (leOv && Object.keys(leOv).length > 0) return true
-    // Budget source / override met data?
-    const data = getBudgetMonth(bv, month)
-    return Object.keys(data).length > 0
-  }
-
-  /** Specifieker: heeft deze (bv, maand) een waarde voor `key` (override,
-   *  actual, of budget)? Gebruik dit voor chart-data zodat lege punten als
-   *  null ipv 0 worden geplot. */
-  const hasLE = (bv: EntityName, month: string, key: string): boolean =>
-    getLeSource(bv, month, key) !== 'none'
-
-  /** Totaal over reeks maanden (lege maanden tellen als 0). */
   const sumLE = (bv: EntityName, months: string[], key: string): number =>
     months.reduce((s, m) => s + getLE(bv, m, key), 0)
 
-  /** FY 2026 totaal voor een BV. */
   const fyLE = (bv: EntityName, key: string): number =>
     sumLE(bv, BUDGET_MONTHS_2026, key)
 
-  return { getLE, sumLE, fyLE, isClosed, getLeSource, hasLE, hasAnyLeData }
+  /** Voor charts: is er voor (bv, maand, key) ENIGE bron? Forecast-only telt
+   *  óók als bron, want we willen de LE-lijn zien lopen. */
+  const hasLE = (_bv: EntityName, _month: string, _key: string): boolean => true
+
+  return { getLE, sumLE, fyLE, isClosed, getLeSource, hasLE }
 }
