@@ -140,7 +140,8 @@ export interface TariffEntry {
 
 export interface GlobalFilter {
   year: '2025' | '2026' | 'all'
-  bv: BvId | 'all'
+  /** Selecteerbare BV inclusief Holdings (kosten-only) of 'all' (3 productie-BV's) */
+  bv: ClosingBv | 'all'
 }
 
 export interface FteEntry {

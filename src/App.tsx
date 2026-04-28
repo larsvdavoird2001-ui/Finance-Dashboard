@@ -134,7 +134,7 @@ export default function App() {
       <div className="main">
         <Topbar tab={tab} filter={filter} onFilterChange={onFilterChange} />
 
-        {tab === 'dashboard'  && <DashboardTab filter={filter} onNav={(t) => setTab(t)} />}
+        {tab === 'dashboard'  && <DashboardTab filter={filter} onFilterChange={onFilterChange} onNav={(t) => setTab(t)} />}
         {tab === 'hours'      && <HoursTab filter={filter} />}
         {tab === 'ohw' && (
           <OhwTab

@@ -1,4 +1,4 @@
-import type { GlobalFilter, BvId, TabId } from '../../data/types'
+import type { GlobalFilter, ClosingBv, TabId } from '../../data/types'
 
 const TITLES: Record<TabId, string> = {
   dashboard:  'Executive Overview',
@@ -10,17 +10,19 @@ const TITLES: Record<TabId, string> = {
   users:      'Gebruikersbeheer',
 }
 
-export const BV_COLORS: Record<BvId, string> = {
+export const BV_COLORS: Record<ClosingBv, string> = {
   Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
+  Holdings:    '#8fa3c0',
 }
 
-const BV_OPTIONS: Array<{ id: BvId | 'all'; label: string }> = [
+const BV_OPTIONS: Array<{ id: ClosingBv | 'all'; label: string; sub?: string }> = [
   { id: 'all',         label: 'Alle BV\'s' },
   { id: 'Consultancy', label: 'Consultancy' },
   { id: 'Projects',    label: 'Projects' },
   { id: 'Software',    label: 'Software' },
+  { id: 'Holdings',    label: 'Holdings', sub: 'kosten' },
 ]
 
 const YEAR_OPTIONS: Array<{ id: GlobalFilter['year']; label: string }> = [
@@ -79,7 +81,7 @@ export function Topbar({ tab, filter, onFilterChange }: Props) {
             <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', marginRight: 2 }}>BV:</span>
             {BV_OPTIONS.map(o => {
               const isActive = filter.bv === o.id
-              const color = o.id !== 'all' ? BV_COLORS[o.id as BvId] : undefined
+              const color = o.id !== 'all' ? BV_COLORS[o.id as ClosingBv] : undefined
               return (
                 <button
                   key={o.id}
@@ -112,6 +114,11 @@ export function Topbar({ tab, filter, onFilterChange }: Props) {
                     }} />
                   )}
                   {o.label}
+                  {o.sub && (
+                    <span style={{ fontSize: 9, color: isActive ? color : 'var(--t3)', opacity: 0.75, marginLeft: 2 }}>
+                      ({o.sub})
+                    </span>
+                  )}
                 </button>
               )
             })}

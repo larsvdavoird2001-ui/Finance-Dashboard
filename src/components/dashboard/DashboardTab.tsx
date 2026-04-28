@@ -6,7 +6,7 @@ import { monthlyActuals2025, monthlyBudget2025, MONTHS_2025_LABELS } from '../..
 import type { EntityName } from '../../data/plData'
 import { hoursData2026, hoursData2025, MONTHS_2025, ACTUAL_MONTHS } from '../../data/hoursData'
 import { fmt } from '../../lib/format'
-import type { BvId, GlobalFilter } from '../../data/types'
+import type { BvId, ClosingBv, GlobalFilter } from '../../data/types'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useLatestEstimate } from '../../hooks/useLatestEstimate'
 import { useOhwStore } from '../../store/useOhwStore'
@@ -15,10 +15,52 @@ import { derivePL } from '../../lib/plDerive'
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
-const BV_COLORS: Record<BvId, string> = {
+const BV_COLORS: Record<ClosingBv, string> = {
   Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
+  Holdings:    '#8fa3c0',
+}
+
+interface BvFilterPillProps {
+  active: boolean
+  color?: string
+  label: string
+  sub?: string
+  onClick: () => void
+}
+function BvFilterPill({ active, color, label, sub, onClick }: BvFilterPillProps) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '6px 12px', borderRadius: 7,
+        fontSize: 12, fontWeight: active ? 700 : 500,
+        cursor: 'pointer',
+        fontFamily: 'var(--font)',
+        border: '1px solid',
+        borderColor: active ? (color ?? 'var(--bd3)') : 'var(--bd2)',
+        background: active
+          ? color ? color + '22' : 'var(--bg4)'
+          : 'var(--bg2)',
+        color: active ? (color ?? 'var(--t1)') : 'var(--t2)',
+        transition: 'all .12s',
+      }}
+    >
+      {color && (
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: active ? color : 'var(--t3)',
+          flexShrink: 0,
+        }} />
+      )}
+      <span>{label}</span>
+      {sub && (
+        <span style={{ fontSize: 10, opacity: 0.7, fontWeight: 500 }}>· {sub}</span>
+      )}
+    </button>
+  )
 }
 
 const ACTUAL_PERIODS_2026 = ['Jan-26', 'Feb-26', 'Mar-26']
@@ -80,11 +122,12 @@ function Finding({ type, title, body }: FindingProps) {
 interface Props {
   filter: GlobalFilter
   onNav: (tab: 'ohw') => void
+  onFilterChange?: (patch: Partial<GlobalFilter>) => void
 }
 
 type ViewMode = 'monthly' | 'ytd'
 
-export function DashboardTab({ filter, onNav }: Props) {
+export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const is2025 = filter.year === '2025'
   const ACTUAL_PERIODS = is2025 ? MONTHS_2025_LABELS : ACTUAL_PERIODS_2026
 
@@ -95,7 +138,13 @@ export function DashboardTab({ filter, onNav }: Props) {
     setPeriod(is2025 ? 'Dec-25' : 'Mar-26')
   }, [is2025])
 
-  const activeBvs = filter.bv === 'all' ? BVS : [filter.bv as BvId]
+  // 'all' = de drie productie-BV's (klassieke geconsolideerde view).
+  // Holdings selecteer je apart om te focussen op de overhead-kosten.
+  const activeBvs: ClosingBv[] =
+    filter.bv === 'all'
+      ? (BVS as ClosingBv[])
+      : [filter.bv as ClosingBv]
+  const isHoldings = filter.bv === 'Holdings'
 
   const { getMonthly, getYtd } = useAdjustedActuals()
   const le = useLatestEstimate()
@@ -103,7 +152,7 @@ export function DashboardTab({ filter, onNav }: Props) {
   const getBudgetMonth = useBudgetStore(s => s.getMonth)
   useBudgetStore(s => s.overrides)
   useBudgetStore(s => s.leOverrides)
-  const budget2026 = (bv: BvId, month: string, key: string): number => {
+  const budget2026 = (bv: ClosingBv, month: string, key: string): number => {
     const raw = getBudgetMonth(bv as EntityName, month)
     return derivePL(k => raw[k] ?? 0, key)
   }
@@ -132,7 +181,7 @@ export function DashboardTab({ filter, onNav }: Props) {
   }
 
   // ── Data selection: monthly or YTD ──────────────────────────────────────
-  const getActuals = (bv: BvId, key: string): number => {
+  const getActuals = (bv: ClosingBv, key: string): number => {
     if (is2025) {
       if (viewMode === 'ytd') return ytdActuals2025[bv as EntityName]?.[key] ?? 0
       return monthlyActuals2025[bv as EntityName]?.[period]?.[key] ?? 0
@@ -140,7 +189,7 @@ export function DashboardTab({ filter, onNav }: Props) {
     if (viewMode === 'ytd') return getYtd(bv, ACTUAL_MONTHS)[key] ?? 0
     return getMonthly(bv, period)[key] ?? 0
   }
-  const getBudget = (bv: BvId, key: string): number => {
+  const getBudget = (bv: ClosingBv, key: string): number => {
     if (is2025) {
       if (viewMode === 'ytd') return ytdActuals2025[bv as EntityName]?.[key] ?? 0
       return monthlyBudget2025[bv as EntityName]?.[period]?.[key] ?? 0
@@ -150,7 +199,7 @@ export function DashboardTab({ filter, onNav }: Props) {
     }
     return budget2026(bv, period, key)
   }
-  const getPY = (bv: BvId, key: string): number => {
+  const getPY = (bv: ClosingBv, key: string): number => {
     if (is2025) return 0
     if (viewMode === 'ytd') {
       const py25 = ACTUAL_PERIODS_2026.map(m => m.replace('-26', '-25'))
@@ -160,9 +209,9 @@ export function DashboardTab({ filter, onNav }: Props) {
     return monthlyActuals2025[bv as EntityName]?.[py]?.[key] ?? 0
   }
   // FY 2026 LE / Budget — over alle 12 maanden
-  const fyLe = (bv: BvId, key: string): number =>
+  const fyLe = (bv: ClosingBv, key: string): number =>
     is2025 ? 0 : le.fyLE(bv as EntityName, key)
-  const fyBudget = (bv: BvId, key: string): number =>
+  const fyBudget = (bv: ClosingBv, key: string): number =>
     is2025
       ? 0
       : BUDGET_MONTHS_2026.reduce((s, m) => s + budget2026(bv, m, key), 0)
@@ -417,183 +466,285 @@ export function DashboardTab({ filter, onNav }: Props) {
     },
   }
 
-  // ── Auto-bevindingen: YTD + laatste maand ─────────────────────────────────
+  // ── Auto-bevindingen — view-mode bewust ──────────────────────────────────
+  // YTD-mode → cumulatieve signalen.
+  // Monthly-mode → signalen voor de geselecteerde maand (period).
   type Finding = { type: 'good' | 'warn' | 'bad' | 'info'; title: string; body: string }
+  const findingsView = viewMode  // alias zodat dep-array eenduidig is
   const findings = useMemo(() => {
-    const out: { ytd: Finding[]; lastMonth: Finding[] } = { ytd: [], lastMonth: [] }
+    const out: Finding[] = []
     if (is2025) return out
+    // Voor Holdings (kosten-only) maakt omzet-vs-budget weinig zin; we focussen
+    // dan op kosten-afwijkingen en EBITDA-impact.
+    const bvsToScan = activeBvs
 
-    const ytdActual: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
-    const ytdBudget: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
-    const ytdMargin: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
-    const ytdEbitda: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
-    const ytdBudEbitda: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
-    for (const bv of BVS) {
-      const a = getYtd(bv, ACTUAL_MONTHS)
-      ytdActual[bv]    = a['netto_omzet'] ?? 0
-      ytdMargin[bv]    = a['brutomarge'] ?? 0
-      ytdEbitda[bv]    = a['ebitda'] ?? 0
-      ytdBudget[bv]    = ACTUAL_MONTHS.reduce((s, m) => s + budget2026(bv, m, 'netto_omzet'), 0)
-      ytdBudEbitda[bv] = ACTUAL_MONTHS.reduce((s, m) => s + budget2026(bv, m, 'ebitda'), 0)
-    }
-    const ytdActualTotal = BVS.reduce((s, bv) => s + ytdActual[bv], 0)
-    const ytdBudgetTotal = BVS.reduce((s, bv) => s + ytdBudget[bv], 0)
-    const ytdEbitdaTotal = BVS.reduce((s, bv) => s + ytdEbitda[bv], 0)
-    const ytdBudEbitdaTotal = BVS.reduce((s, bv) => s + ytdBudEbitda[bv], 0)
+    if (findingsView === 'ytd') {
+      // ── YTD findings ──
+      const ytdActual: Record<string, number> = {}
+      const ytdBudget: Record<string, number> = {}
+      const ytdMargin: Record<string, number> = {}
+      const ytdEbitda: Record<string, number> = {}
+      const ytdBudEbitda: Record<string, number> = {}
+      for (const bv of bvsToScan) {
+        const a = getYtd(bv, ACTUAL_MONTHS)
+        ytdActual[bv]    = a['netto_omzet'] ?? 0
+        ytdMargin[bv]    = a['brutomarge'] ?? 0
+        ytdEbitda[bv]    = a['ebitda'] ?? 0
+        ytdBudget[bv]    = ACTUAL_MONTHS.reduce((s, m) => s + budget2026(bv, m, 'netto_omzet'), 0)
+        ytdBudEbitda[bv] = ACTUAL_MONTHS.reduce((s, m) => s + budget2026(bv, m, 'ebitda'), 0)
+      }
+      const ytdActualTotal = bvsToScan.reduce((s, bv) => s + ytdActual[bv], 0)
+      const ytdBudgetTotal = bvsToScan.reduce((s, bv) => s + ytdBudget[bv], 0)
+      const ytdEbitdaTotal = bvsToScan.reduce((s, bv) => s + ytdEbitda[bv], 0)
+      const ytdBudEbitdaTotal = bvsToScan.reduce((s, bv) => s + ytdBudEbitda[bv], 0)
 
-    // YTD: omzet vs budget
-    const revGap = ytdActualTotal - ytdBudgetTotal
-    const revGapPct = ytdBudgetTotal > 0 ? (revGap / ytdBudgetTotal * 100) : 0
-    if (Math.abs(revGapPct) > 1) {
-      out.ytd.push({
-        type: revGap >= 0 ? 'good' : 'bad',
-        title: revGap >= 0 ? `YTD-omzet ${revGapPct.toFixed(1)}% boven budget` : `YTD-omzet ${Math.abs(revGapPct).toFixed(1)}% achter op budget`,
-        body: `Cumulatief Q1 ligt op ${fmt(ytdActualTotal)} vs budget ${fmt(ytdBudgetTotal)}. ${revGap >= 0 ? 'Voorsprong' : 'Achterstand'}: ${fmt(Math.abs(revGap))}.`,
-      })
-    }
+      if (!isHoldings) {
+        const revGap = ytdActualTotal - ytdBudgetTotal
+        const revGapPct = ytdBudgetTotal > 0 ? (revGap / ytdBudgetTotal * 100) : 0
+        if (Math.abs(revGapPct) > 1) {
+          out.push({
+            type: revGap >= 0 ? 'good' : 'bad',
+            title: revGap >= 0 ? `YTD-omzet ${revGapPct.toFixed(1)}% boven budget` : `YTD-omzet ${Math.abs(revGapPct).toFixed(1)}% achter op budget`,
+            body: `Cumulatief Q1: ${fmt(ytdActualTotal)} vs budget ${fmt(ytdBudgetTotal)}. ${revGap >= 0 ? 'Voorsprong' : 'Achterstand'}: ${fmt(Math.abs(revGap))}.`,
+          })
+        }
 
-    // YTD: per-BV variance (top winnaars/verliezers)
-    const bvDeltas = BVS.map(bv => {
-      const d = ytdActual[bv] - ytdBudget[bv]
-      const dPct = ytdBudget[bv] > 0 ? (d / ytdBudget[bv] * 100) : 0
-      return { bv, d, dPct }
-    }).sort((a, b) => Math.abs(b.dPct) - Math.abs(a.dPct))
-    const topBv = bvDeltas[0]
-    if (topBv && Math.abs(topBv.dPct) > 3) {
-      out.ytd.push({
-        type: topBv.d >= 0 ? 'good' : 'warn',
-        title: `${topBv.bv}: ${topBv.dPct >= 0 ? '+' : ''}${topBv.dPct.toFixed(1)}% vs budget YTD`,
-        body: `${topBv.bv} ${topBv.d >= 0 ? 'overtreft' : 'blijft achter op'} het budget met ${fmt(Math.abs(topBv.d))} cumulatief. ${topBv.d >= 0 ? 'Schaalbaarheid checken: kunnen we deze trend vasthouden?' : 'Onderzoek waarom; pijplijn-review nodig.'}`,
-      })
-    }
-    // Tweede grootste afwijking ook melden indien substantieel
-    const second = bvDeltas[1]
-    if (second && Math.abs(second.dPct) > 3 && second.bv !== topBv?.bv) {
-      out.ytd.push({
-        type: second.d >= 0 ? 'good' : 'warn',
-        title: `${second.bv}: ${second.dPct >= 0 ? '+' : ''}${second.dPct.toFixed(1)}% vs budget YTD`,
-        body: `Cumulatief verschil op netto-omzet: ${fmt(second.d)}.`,
-      })
-    }
+        const bvDeltas = bvsToScan.map(bv => {
+          const d = ytdActual[bv] - ytdBudget[bv]
+          const dPct = ytdBudget[bv] > 0 ? (d / ytdBudget[bv] * 100) : 0
+          return { bv, d, dPct }
+        }).sort((a, b) => Math.abs(b.dPct) - Math.abs(a.dPct))
+        for (const item of bvDeltas.slice(0, 2)) {
+          if (Math.abs(item.dPct) > 3) {
+            out.push({
+              type: item.d >= 0 ? 'good' : 'warn',
+              title: `${item.bv}: ${item.dPct >= 0 ? '+' : ''}${item.dPct.toFixed(1)}% vs budget YTD`,
+              body: `${item.bv} ${item.d >= 0 ? 'overtreft' : 'blijft achter op'} het budget met ${fmt(Math.abs(item.d))} cumulatief.`,
+            })
+          }
+        }
 
-    // YTD: marge%-druk per BV
-    for (const bv of BVS) {
-      const r = ytdActual[bv]
-      const g = ytdMargin[bv]
-      const m = r > 0 ? g / r * 100 : 0
-      const budR = ytdBudget[bv]
-      const budG = ACTUAL_MONTHS.reduce((s, mn) => s + budget2026(bv, mn, 'brutomarge'), 0)
-      const budM = budR > 0 ? budG / budR * 100 : 0
-      const delta = m - budM
-      if (Math.abs(delta) > 2 && r > 0) {
-        out.ytd.push({
-          type: delta >= 0 ? 'good' : 'bad',
-          title: `${bv} brutomarge ${m.toFixed(1)}% (budget ${budM.toFixed(1)}%)`,
-          body: delta >= 0
-            ? `${bv} draait ${delta.toFixed(1)} pp boven plan. Stuur op vasthouden van mix en uurtarieven.`
-            : `${bv} levert ${Math.abs(delta).toFixed(1)} pp marge in. Onderzoek directe kosten / declarabelheid.`,
+        for (const bv of bvsToScan) {
+          const r = ytdActual[bv]
+          const g = ytdMargin[bv]
+          const m = r > 0 ? g / r * 100 : 0
+          const budR = ytdBudget[bv]
+          const budG = ACTUAL_MONTHS.reduce((s, mn) => s + budget2026(bv, mn, 'brutomarge'), 0)
+          const budM = budR > 0 ? budG / budR * 100 : 0
+          const delta = m - budM
+          if (Math.abs(delta) > 2 && r > 0) {
+            out.push({
+              type: delta >= 0 ? 'good' : 'bad',
+              title: `${bv} brutomarge ${m.toFixed(1)}% (budget ${budM.toFixed(1)}%)`,
+              body: delta >= 0
+                ? `${bv} draait ${delta.toFixed(1)} pp boven plan. Stuur op vasthouden van mix en uurtarieven.`
+                : `${bv} levert ${Math.abs(delta).toFixed(1)} pp marge in. Onderzoek directe kosten / declarabelheid.`,
+            })
+          }
+        }
+      }
+
+      // EBITDA delta — voor zowel productie-BVs als Holdings relevant
+      const ebitGap = ytdEbitdaTotal - ytdBudEbitdaTotal
+      if (Math.abs(ebitGap) > 50000) {
+        out.push({
+          type: ebitGap >= 0 ? 'good' : 'bad',
+          title: `EBITDA YTD ${ebitGap >= 0 ? '+' : ''}${fmt(ebitGap)} vs budget`,
+          body: `Operationele winstgevendheid loopt ${ebitGap >= 0 ? 'voor' : 'achter'}. Q1-actual ${fmt(ytdEbitdaTotal)} vs plan ${fmt(ytdBudEbitdaTotal)}.`,
         })
       }
-    }
 
-    // YTD: EBITDA totaal
-    const ebitGap = ytdEbitdaTotal - ytdBudEbitdaTotal
-    if (Math.abs(ebitGap) > 50000) {
-      out.ytd.push({
-        type: ebitGap >= 0 ? 'good' : 'bad',
-        title: `EBITDA YTD ${ebitGap >= 0 ? '+' : ''}${fmt(ebitGap)} vs budget`,
-        body: `Operationele winstgevendheid loopt ${ebitGap >= 0 ? 'voor' : 'achter'}. Q1-actual ${fmt(ytdEbitdaTotal)} vs plan ${fmt(ytdBudEbitdaTotal)}.`,
-      })
-    }
+      // Holdings: directe kostenafwijking signaleren
+      if (isHoldings) {
+        const ytdOpex = activeBvs.reduce((s, bv) => s + (getYtd(bv, ACTUAL_MONTHS)['operationele_kosten'] ?? 0), 0)
+        const budOpex = activeBvs.reduce((s, bv) => s + ACTUAL_MONTHS.reduce((ss, m) => ss + budget2026(bv, m, 'operationele_kosten'), 0), 0)
+        const opexDelta = ytdOpex - budOpex
+        if (Math.abs(opexDelta) > 30000) {
+          out.push({
+            type: opexDelta <= 0 ? 'good' : 'warn',
+            title: `Holdings opex ${opexDelta <= 0 ? 'onder' : 'boven'} budget: ${fmt(Math.abs(opexDelta))}`,
+            body: `Operationele kosten YTD ${fmt(ytdOpex)} vs plan ${fmt(budOpex)}. Voor Holdings is dit hét stuur-signaal.`,
+          })
+        }
+      }
 
-    // ── Last closed month (Mar-26 normaal) ──
-    const lastM = ACTUAL_MONTHS[ACTUAL_MONTHS.length - 1]
-    const prevM = ACTUAL_MONTHS[ACTUAL_MONTHS.length - 2]
-    if (lastM && prevM) {
-      const lastRev = BVS.reduce((s, bv) => s + (getMonthly(bv, lastM)['netto_omzet'] ?? 0), 0)
-      const prevRev = BVS.reduce((s, bv) => s + (getMonthly(bv, prevM)['netto_omzet'] ?? 0), 0)
-      const momGap = lastRev - prevRev
-      const momGapPct = prevRev > 0 ? (momGap / prevRev * 100) : 0
-      if (Math.abs(momGapPct) > 3) {
-        out.lastMonth.push({
-          type: momGap >= 0 ? 'good' : 'warn',
-          title: `${lastM} omzet ${momGap >= 0 ? '+' : ''}${momGapPct.toFixed(1)}% MoM`,
-          body: `${lastM}: ${fmt(lastRev)} vs ${prevM}: ${fmt(prevRev)} (${momGap >= 0 ? '+' : ''}${fmt(momGap)}).`,
+      // Forward-looking
+      if (!isHoldings && Math.abs(leBudgetGapPct) > 2 && fyBudgetRev > 0) {
+        out.push({
+          type: leBudgetGap >= 0 ? 'good' : 'bad',
+          title: `FY-LE ${leBudgetGap >= 0 ? '+' : ''}${leBudgetGapPct.toFixed(1)}% vs FY-budget`,
+          body: `Latest Estimate FY 2026: ${fmt(fyLeRev)} (budget ${fmt(fyBudgetRev)}). ${leBudgetGap >= 0 ? 'Plan-overtreffen — accountable voor commit.' : 'Bijsturen vereist; review forecast in Budgetten-tab en pas LE-overrides aan.'}`,
         })
       }
-      // vs budget die maand
-      const lastBud = BVS.reduce((s, bv) => s + budget2026(bv, lastM, 'netto_omzet'), 0)
-      const lastGap = lastRev - lastBud
-      if (Math.abs(lastGap) > 30000) {
-        out.lastMonth.push({
-          type: lastGap >= 0 ? 'good' : 'bad',
-          title: `${lastM}: ${lastGap >= 0 ? '+' : ''}${fmt(lastGap)} vs budget`,
-          body: `Maandbudget ${fmt(lastBud)}, actual ${fmt(lastRev)}. ${lastGap >= 0 ? 'Houd deze rate vast Q2.' : 'Plan-call met BV-leads voor herstel Q2.'}`,
+      if (ebitdaGap < -100000) {
+        out.push({
+          type: 'bad',
+          title: `FY-EBITDA loopt achter: ${fmt(ebitdaGap)}`,
+          body: `LE FY EBITDA ${fmt(fyLeEbitda)} vs plan ${fmt(fyBudEbitda)}. Kosten + omzetdrivers herzien voor herstel.`,
         })
       }
-      // vs vorig jaar (Mar-26 vs Mar-25)
-      const py = lastM.replace('-26', '-25')
-      const lastPy = BVS.reduce((s, bv) => s + (monthlyActuals2025[bv as EntityName]?.[py]?.['netto_omzet'] ?? 0), 0)
-      const yoyGap = lastRev - lastPy
-      const yoyGapPct = lastPy > 0 ? (yoyGap / lastPy * 100) : 0
-      if (lastPy > 0 && Math.abs(yoyGapPct) > 2) {
-        out.lastMonth.push({
-          type: yoyGap >= 0 ? 'good' : 'warn',
-          title: `${lastM} vs ${py}: ${yoyGap >= 0 ? '+' : ''}${yoyGapPct.toFixed(1)}% YoY`,
-          body: `Volume groeit/krimpt met ${fmt(yoyGap)} t.o.v. dezelfde maand vorig jaar.`,
-        })
-      }
-      // OHW jump signaal
-      const wipLast = wipByMonth[lastM] ?? 0
-      const wipPrevM = wipByMonth[prevM] ?? 0
-      const wipChg = wipLast - wipPrevM
-      if (Math.abs(wipChg) > 200000) {
-        out.lastMonth.push({
-          type: wipChg > 0 ? 'warn' : 'good',
-          title: `OHW-mutatie ${lastM}: ${wipChg >= 0 ? '+' : ''}${fmt(wipChg)}`,
-          body: wipChg > 0
-            ? `OHW loopt op naar ${fmt(wipLast)}. Check of facturatie-cyclus achterloopt of dat dit projectstartups zijn.`
-            : `OHW daalt naar ${fmt(wipLast)} — facturatiestroom is op gang.`,
-        })
-      }
-      // Declarabelheid die maand
-      const decRecord = hoursData2026.filter(r => r.month === lastM)
-      const dW = decRecord.reduce((a, r) => a + r.written, 0)
-      const dD = decRecord.reduce((a, r) => a + r.declarable, 0)
-      const dPct = dW > 0 ? dD / dW * 100 : 0
-      if (dPct > 0 && dPct < 75) {
-        out.lastMonth.push({
-          type: 'warn',
-          title: `Declarabelheid ${dPct.toFixed(1)}% in ${lastM}`,
-          body: `Onder de 75%-streefnorm. Per BV evalueren waar de niet-declarabele uren naartoe gaan.`,
-        })
-      }
-    }
+    } else {
+      // ── Monthly findings — voor de geselecteerde maand ──
+      const curM  = period
+      const idx   = ACTUAL_MONTHS.indexOf(curM)
+      const prevM = idx > 0 ? ACTUAL_MONTHS[idx - 1] : null
 
-    // ── Forward-looking: LE vs Budget gap ──
-    if (Math.abs(leBudgetGapPct) > 2 && fyBudgetRev > 0) {
-      out.ytd.push({
-        type: leBudgetGap >= 0 ? 'good' : 'bad',
-        title: `FY-LE ${leBudgetGap >= 0 ? '+' : ''}${leBudgetGapPct.toFixed(1)}% vs FY-budget`,
-        body: `Latest Estimate FY 2026: ${fmt(fyLeRev)} (budget ${fmt(fyBudgetRev)}). ${leBudgetGap >= 0 ? 'Plan-overtreffen — accountable voor commit.' : 'Bijsturen vereist; review forecast in Budgetten-tab en pas LE-overrides aan.'}`,
-      })
-    }
-    if (ebitdaGap < -100000) {
-      out.ytd.push({
-        type: 'bad',
-        title: `FY-EBITDA loopt achter: ${fmt(ebitdaGap)}`,
-        body: `LE FY EBITDA ${fmt(fyLeEbitda)} vs plan ${fmt(fyBudEbitda)}. Kosten + omzetdrivers herzien voor herstel.`,
-      })
+      const curRev  = bvsToScan.reduce((s, bv) => s + (getMonthly(bv, curM)['netto_omzet'] ?? 0), 0)
+      const curBud  = bvsToScan.reduce((s, bv) => s + budget2026(bv, curM, 'netto_omzet'), 0)
+      const curEbi  = bvsToScan.reduce((s, bv) => s + (getMonthly(bv, curM)['ebitda'] ?? 0), 0)
+      const curBudE = bvsToScan.reduce((s, bv) => s + budget2026(bv, curM, 'ebitda'), 0)
+
+      if (!isHoldings) {
+        // MoM verschil
+        if (prevM) {
+          const prevRev = bvsToScan.reduce((s, bv) => s + (getMonthly(bv, prevM)['netto_omzet'] ?? 0), 0)
+          const momGap = curRev - prevRev
+          const momGapPct = prevRev > 0 ? (momGap / prevRev * 100) : 0
+          if (Math.abs(momGapPct) > 3) {
+            out.push({
+              type: momGap >= 0 ? 'good' : 'warn',
+              title: `${curM} omzet ${momGap >= 0 ? '+' : ''}${momGapPct.toFixed(1)}% MoM`,
+              body: `${curM}: ${fmt(curRev)} vs ${prevM}: ${fmt(prevRev)} (${momGap >= 0 ? '+' : ''}${fmt(momGap)}).`,
+            })
+          }
+        }
+        // vs budget
+        const budGap = curRev - curBud
+        if (Math.abs(budGap) > 30000 && curBud !== 0) {
+          const pct = curBud !== 0 ? (budGap / Math.abs(curBud) * 100) : 0
+          out.push({
+            type: budGap >= 0 ? 'good' : 'bad',
+            title: `${curM} omzet: ${budGap >= 0 ? '+' : ''}${fmt(budGap)} vs budget`,
+            body: `Maandbudget ${fmt(curBud)}, actual ${fmt(curRev)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%).`,
+          })
+        }
+        // vs vorig jaar
+        const py = curM.replace('-26', '-25')
+        const pyRev = bvsToScan.reduce((s, bv) => s + (monthlyActuals2025[bv as EntityName]?.[py]?.['netto_omzet'] ?? 0), 0)
+        if (pyRev > 0) {
+          const yoy = curRev - pyRev
+          const yoyPct = (yoy / pyRev * 100)
+          if (Math.abs(yoyPct) > 2) {
+            out.push({
+              type: yoy >= 0 ? 'good' : 'warn',
+              title: `${curM} vs ${py}: ${yoy >= 0 ? '+' : ''}${yoyPct.toFixed(1)}% YoY`,
+              body: `Volume ${yoy >= 0 ? 'groeit' : 'krimpt'} met ${fmt(Math.abs(yoy))} t.o.v. dezelfde maand vorig jaar.`,
+            })
+          }
+        }
+        // Per-BV variance voor deze maand
+        const bvDeltas = bvsToScan.map(bv => {
+          const a = getMonthly(bv, curM)['netto_omzet'] ?? 0
+          const b = budget2026(bv, curM, 'netto_omzet')
+          const d = a - b
+          const dPct = b !== 0 ? (d / Math.abs(b) * 100) : 0
+          return { bv, a, b, d, dPct }
+        }).sort((a, b) => Math.abs(b.dPct) - Math.abs(a.dPct))
+        for (const item of bvDeltas.slice(0, 2)) {
+          if (Math.abs(item.dPct) > 4 && Math.abs(item.d) > 20000) {
+            out.push({
+              type: item.d >= 0 ? 'good' : 'warn',
+              title: `${item.bv} ${curM}: ${item.dPct >= 0 ? '+' : ''}${item.dPct.toFixed(1)}% vs budget`,
+              body: `Actual ${fmt(item.a)} vs budget ${fmt(item.b)} (${fmt(item.d)}).`,
+            })
+          }
+        }
+        // OHW mutatie deze maand
+        const wipCur  = wipByMonth[curM] ?? 0
+        const wipPrev = prevM ? (wipByMonth[prevM] ?? 0) : 0
+        const wipChg  = wipCur - wipPrev
+        if (Math.abs(wipChg) > 200000 && wipPrev !== 0) {
+          out.push({
+            type: wipChg > 0 ? 'warn' : 'good',
+            title: `OHW-mutatie ${curM}: ${wipChg >= 0 ? '+' : ''}${fmt(wipChg)}`,
+            body: wipChg > 0
+              ? `OHW loopt op naar ${fmt(wipCur)}. Check of facturatie-cyclus achterloopt.`
+              : `OHW daalt naar ${fmt(wipCur)} — facturatiestroom is op gang.`,
+          })
+        }
+        // Declarabelheid deze maand
+        const decRec = hoursData2026.filter(r =>
+          r.month === curM && (filter.bv === 'all' || r.bv === filter.bv)
+        )
+        const dW = decRec.reduce((a, r) => a + r.written, 0)
+        const dD = decRec.reduce((a, r) => a + r.declarable, 0)
+        const dPct = dW > 0 ? dD / dW * 100 : 0
+        if (dPct > 0 && dPct < 75) {
+          out.push({
+            type: 'warn',
+            title: `Declarabelheid ${dPct.toFixed(1)}% in ${curM}`,
+            body: `Onder de 75%-streefnorm. Per BV evalueren waar de niet-declarabele uren naartoe gaan.`,
+          })
+        }
+      }
+
+      // EBITDA delta voor de maand (ook voor Holdings)
+      const ebiGap = curEbi - curBudE
+      if (Math.abs(ebiGap) > 30000) {
+        out.push({
+          type: ebiGap >= 0 ? 'good' : 'bad',
+          title: `${curM} EBITDA ${ebiGap >= 0 ? '+' : ''}${fmt(ebiGap)} vs budget`,
+          body: `Actual ${fmt(curEbi)} vs plan ${fmt(curBudE)}.`,
+        })
+      }
+
+      // Holdings: opex-delta voor de maand
+      if (isHoldings) {
+        const curOpex = bvsToScan.reduce((s, bv) => s + (getMonthly(bv, curM)['operationele_kosten'] ?? 0), 0)
+        const budOpex = bvsToScan.reduce((s, bv) => s + budget2026(bv, curM, 'operationele_kosten'), 0)
+        const opDelta = curOpex - budOpex
+        if (Math.abs(opDelta) > 20000) {
+          out.push({
+            type: opDelta <= 0 ? 'good' : 'warn',
+            title: `Holdings opex ${curM}: ${opDelta <= 0 ? 'onder' : 'boven'} budget`,
+            body: `Operationele kosten ${fmt(curOpex)} vs budget ${fmt(budOpex)} (${fmt(opDelta)}).`,
+          })
+        }
+      }
     }
 
     return out
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is2025, period, viewMode, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), JSON.stringify(activeBvs), fyLeRev, fyBudgetRev, fyLeEbitda, fyBudEbitda])
+  }, [is2025, period, findingsView, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), JSON.stringify(activeBvs), isHoldings, fyLeRev, fyBudgetRev, fyLeEbitda, fyBudEbitda, leBudgetGap, leBudgetGapPct, ebitdaGap])
 
   const periodLabel = viewMode === 'ytd' ? `YTD ${ACTUAL_MONTHS[ACTUAL_MONTHS.length-1]}` : period
 
   return (
     <div className="page">
+      {/* Eigen BV-filter rij — duidelijker dan alleen de Topbar; ondersteunt
+          ook Holdings (overhead/kosten-only) als aparte view. */}
+      {onFilterChange && (
+        <div className="card" style={{ padding: '10px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em', marginRight: 4 }}>
+              BV-filter
+            </span>
+            <BvFilterPill
+              active={filter.bv === 'all'}
+              label="Alle BV's"
+              sub="Cons + Proj + Soft"
+              onClick={() => onFilterChange({ bv: 'all' })}
+            />
+            {(['Consultancy', 'Projects', 'Software'] as ClosingBv[]).map(bv => (
+              <BvFilterPill
+                key={bv}
+                active={filter.bv === bv}
+                color={BV_COLORS[bv]}
+                label={bv}
+                onClick={() => onFilterChange({ bv })}
+              />
+            ))}
+            <BvFilterPill
+              active={filter.bv === 'Holdings'}
+              color={BV_COLORS.Holdings}
+              label="Holdings"
+              sub="alleen kosten / overhead"
+              onClick={() => onFilterChange({ bv: 'Holdings' })}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Period / view selector */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 4, alignItems: 'center', flexWrap: 'wrap' }}>
         <div className="tabs-row">
@@ -612,8 +763,8 @@ export function DashboardTab({ filter, onNav }: Props) {
           </div>
         )}
         {filter.bv !== 'all' && (
-          <span style={{ marginLeft: 8, fontSize: 11, color: BV_COLORS[filter.bv as BvId] ?? 'var(--blue)', background: 'var(--bd-blue)', padding: '2px 8px', borderRadius: 4 }}>
-            {filter.bv}
+          <span style={{ marginLeft: 8, fontSize: 11, color: BV_COLORS[filter.bv as ClosingBv] ?? 'var(--blue)', background: BV_COLORS[filter.bv as ClosingBv] + '22', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>
+            {filter.bv}{isHoldings ? ' · kosten' : ''}
           </span>
         )}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)' }}>
@@ -707,36 +858,30 @@ export function DashboardTab({ filter, onNav }: Props) {
         </>
       )}
 
-      {/* Bevindingen — alleen 2026, want 2025 is fully closed */}
-      {!is2025 && (findings.ytd.length + findings.lastMonth.length) > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div className="card">
-            <div className="card-hdr">
-              <span className="card-title">🎯 Opvallende bevindingen — YTD</span>
-              <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>{findings.ytd.length} signalen</span>
-            </div>
-            <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {findings.ytd.length === 0 && (
-                <div style={{ fontSize: 11, color: 'var(--t3)', textAlign: 'center', padding: 16 }}>
-                  Alles in lijn met plan — geen signalen om op te sturen.
-                </div>
-              )}
-              {findings.ytd.map((f, i) => <Finding key={i} {...f} />)}
-            </div>
+      {/* Bevindingen — view-mode aware: YTD-panel als YTD-filter actief is,
+          maand-panel als Maandelijks actief is (en dan voor de geselecteerde maand). */}
+      {!is2025 && (
+        <div className="card">
+          <div className="card-hdr">
+            <span className="card-title">
+              {viewMode === 'ytd'
+                ? '🎯 Opvallende bevindingen — YTD'
+                : `📅 Opvallende bevindingen — ${period}`}
+            </span>
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
+              {findings.length} signal{findings.length === 1 ? '' : 'en'}
+              {filter.bv !== 'all' ? ` · ${filter.bv}` : ''}
+            </span>
           </div>
-          <div className="card">
-            <div className="card-hdr">
-              <span className="card-title">📅 Bevindingen afgelopen maand</span>
-              <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>{findings.lastMonth.length} signalen</span>
-            </div>
-            <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {findings.lastMonth.length === 0 && (
-                <div style={{ fontSize: 11, color: 'var(--t3)', textAlign: 'center', padding: 16 }}>
-                  Geen significante afwijkingen voor de afgelopen maand.
-                </div>
-              )}
-              {findings.lastMonth.map((f, i) => <Finding key={i} {...f} />)}
-            </div>
+          <div style={{ padding: 14, display: 'grid', gridTemplateColumns: findings.length > 1 ? '1fr 1fr' : '1fr', gap: 8 }}>
+            {findings.length === 0 && (
+              <div style={{ fontSize: 11, color: 'var(--t3)', textAlign: 'center', padding: 16, gridColumn: '1 / -1' }}>
+                {viewMode === 'ytd'
+                  ? 'YTD ligt in lijn met plan — geen signalen om op te sturen.'
+                  : `Geen significante afwijkingen voor ${period}.`}
+              </div>
+            )}
+            {findings.map((f, i) => <Finding key={i} {...f} />)}
           </div>
         </div>
       )}
