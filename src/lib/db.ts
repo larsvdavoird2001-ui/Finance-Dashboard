@@ -5,8 +5,37 @@ import { supabase, supabaseEnabled } from './supabase'
 import type { ClosingEntry, FteEntry, ImportRecord, OhwEntityData } from '../data/types'
 import type { RawDataEntry } from '../store/useRawDataStore'
 import { emitDbEvent } from './dbEvents'
+import { useSaveStatus } from './saveStatus'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+/** Wrap een Supabase-write in save-status tracking + error-toast.
+ *  Hiermee wordt elke upsert zichtbaar in de Topbar-indicator: de user
+ *  ziet 'syncen...' tijdens de write en '✓ gesynchroniseerd' bij succes.
+ *  Accepteert elke thenable (Supabase query-builders zijn thenable maar
+ *  geen strikte Promises). */
+async function trackedWrite(
+  table: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  exec: () => PromiseLike<{ error: any }>,
+): Promise<void> {
+  const status = useSaveStatus.getState()
+  status.starting(table)
+  try {
+    const { error } = await exec()
+    if (error) {
+      const msg = error.message ?? String(error)
+      useSaveStatus.getState().failed(table, msg)
+      emitDbEvent({ type: 'save-error', table, message: msg })
+    } else {
+      useSaveStatus.getState().success(table)
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    useSaveStatus.getState().failed(table, msg)
+    emitDbEvent({ type: 'save-error', table, message: msg })
+  }
+}
+
 function camelToSnake(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) {
@@ -34,15 +63,17 @@ export async function fetchClosingEntries(): Promise<ClosingEntry[]> {
 export async function upsertClosingEntry(entry: ClosingEntry): Promise<void> {
   if (!supabaseEnabled) return
   const row = camelToSnake(entry as unknown as Record<string, unknown>)
-  const { error } = await supabase.from('closing_entries').upsert(row, { onConflict: 'id' })
-  if (error) emitDbEvent({ type: 'save-error', table: 'closing_entries', message: error.message })
+  await trackedWrite('closing_entries', () =>
+    supabase.from('closing_entries').upsert(row, { onConflict: 'id' }),
+  )
 }
 
 export async function upsertAllClosingEntries(entries: ClosingEntry[]): Promise<void> {
   if (!supabaseEnabled) return
   const rows = entries.map(e => camelToSnake(e as unknown as Record<string, unknown>))
-  const { error } = await supabase.from('closing_entries').upsert(rows, { onConflict: 'id' })
-  if (error) emitDbEvent({ type: 'save-error', table: 'closing_entries', message: error.message })
+  await trackedWrite('closing_entries', () =>
+    supabase.from('closing_entries').upsert(rows, { onConflict: 'id' }),
+  )
 }
 
 // ── FTE Entries ─────────────────────────────────────────────────────────────
@@ -56,15 +87,17 @@ export async function fetchFteEntries(): Promise<FteEntry[]> {
 export async function upsertFteEntry(entry: FteEntry): Promise<void> {
   if (!supabaseEnabled) return
   const row = camelToSnake(entry as unknown as Record<string, unknown>)
-  const { error } = await supabase.from('fte_entries').upsert(row, { onConflict: 'id' })
-  if (error) emitDbEvent({ type: 'save-error', table: 'fte_entries', message: error.message })
+  await trackedWrite('fte_entries', () =>
+    supabase.from('fte_entries').upsert(row, { onConflict: 'id' }),
+  )
 }
 
 export async function upsertAllFteEntries(entries: FteEntry[]): Promise<void> {
   if (!supabaseEnabled) return
   const rows = entries.map(e => camelToSnake(e as unknown as Record<string, unknown>))
-  const { error } = await supabase.from('fte_entries').upsert(rows, { onConflict: 'id' })
-  if (error) emitDbEvent({ type: 'save-error', table: 'fte_entries', message: error.message })
+  await trackedWrite('fte_entries', () =>
+    supabase.from('fte_entries').upsert(rows, { onConflict: 'id' }),
+  )
 }
 
 // ── Import Records ──────────────────────────────────────────────────────────
@@ -190,10 +223,9 @@ export async function upsertOhwEntity(year: string, entity: OhwEntityData): Prom
     entity: entity.entity,
     data: entity,
   }
-  const { error } = await supabase
-    .from('ohw_entities')
-    .upsert(row, { onConflict: 'year,entity' })
-  if (error) emitDbEvent({ type: 'save-error', table: 'ohw_entities', message: error.message })
+  await trackedWrite('ohw_entities', () =>
+    supabase.from('ohw_entities').upsert(row, { onConflict: 'year,entity' }),
+  )
 }
 
 export async function upsertAllOhwEntities(year: string, entities: OhwEntityData[]): Promise<void> {
@@ -203,10 +235,9 @@ export async function upsertAllOhwEntities(year: string, entities: OhwEntityData
     entity: e.entity,
     data: e,
   }))
-  const { error } = await supabase
-    .from('ohw_entities')
-    .upsert(rows, { onConflict: 'year,entity' })
-  if (error) emitDbEvent({ type: 'save-error', table: 'ohw_entities', message: error.message })
+  await trackedWrite('ohw_entities', () =>
+    supabase.from('ohw_entities').upsert(rows, { onConflict: 'year,entity' }),
+  )
 }
 
 // ── Budget Overrides (Budgetten tab — editable forward-month budgets) ──────
@@ -237,10 +268,9 @@ export async function upsertBudgetOverride(row: BudgetOverrideRow): Promise<void
     pl_key: row.plKey,
     value: row.value,
   }
-  const { error } = await supabase
-    .from('budget_overrides')
-    .upsert(payload, { onConflict: 'entity,month,pl_key' })
-  if (error) emitDbEvent({ type: 'save-error', table: 'budget_overrides', message: error.message })
+  await trackedWrite('budget_overrides', () =>
+    supabase.from('budget_overrides').upsert(payload, { onConflict: 'entity,month,pl_key' }),
+  )
 }
 
 export async function deleteBudgetOverridesForMonth(entity: string, month: string): Promise<void> {
