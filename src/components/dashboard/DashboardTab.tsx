@@ -467,6 +467,16 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   }
   const pctChartOpts = {
     ...chartOpts,
+    plugins: {
+      ...chartOpts.plugins,
+      tooltip: {
+        ...chartOpts.plugins.tooltip,
+        callbacks: {
+          label: (ctx: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+            ` ${ctx.dataset.label}: ${(ctx.parsed.y ?? 0).toFixed(1)}%`,
+        },
+      },
+    },
     scales: {
       ...chartOpts.scales,
       y: {
