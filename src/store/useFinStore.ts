@@ -160,24 +160,55 @@ export const useFinStore = create<FinStore>()(
       loaded: false,
 
       loadFromDb: async () => {
-        // Destructieve laad: Supabase is de single source of truth.
-        // Reset naar INITIAL_ENTRIES (de "lege" staat), merge dan in wat in
-        // Supabase staat. Hierdoor zien alle gebruikers altijd dezelfde data
-        // die werkelijk in de database is opgeslagen.
+        // Merge-laad + reconcile zodat lokaal-only data niet kwijtraakt.
+        //  - DB-rij bestaat → DB wint (gedeelde waarheid)
+        //  - alleen lokaal → behoud lokaal én push terug naar Supabase
+        //  - geen van beide → INITIAL_ENTRIES default
         try {
           const rows = await fetchClosingEntries()
-          const merged = mergeWithInitialEntries(rows)
-          console.info(`[useFinStore] loaded ${rows.length} closing_entries rows from Supabase`)
-          set({ entries: merged, loaded: true })
-          // Eerste keer ooit: seed Supabase met de defaults
-          if (rows.length === 0) {
+          const dbById = new Map(rows.map(r => [r.id, r]))
+          const localEntries = get().entries
+          const localOnly: ClosingEntry[] = []
+
+          // Bepaal of een lokale entry "data" heeft (anders dan default).
+          const hasLocalData = (e: ClosingEntry): boolean =>
+            e.factuurvolume !== 0 || e.debiteuren !== 0 || e.ohwMutatie !== 0 ||
+            e.kostencorrectie !== 0 || e.accruals !== 0 ||
+            e.handmatigeCorrectie !== 0 || (e.remark ?? '') !== '' ||
+            Object.keys(e.kostenOverrides ?? {}).length > 0 ||
+            (typeof e.financieelResultaat === 'number') ||
+            (typeof e.vennootschapsbelasting === 'number')
+
+          // Bouw merged: DB wint, dan lokaal-only, dan defaults voor wat ontbreekt
+          const seen = new Set<string>()
+          const merged: ClosingEntry[] = []
+          for (const r of rows) { merged.push(r); seen.add(r.id) }
+          for (const le of localEntries) {
+            if (seen.has(le.id)) continue
+            seen.add(le.id)
+            merged.push(le)
+            if (hasLocalData(le)) localOnly.push(le)
+          }
+          const finalMerged = mergeWithInitialEntries(merged)
+          console.info(`[useFinStore] DB=${rows.length}, local-only=${localOnly.length}, total=${finalMerged.length}`)
+          set({ entries: finalMerged, loaded: true })
+
+          // Reconcile: lokaal-only entries pushen naar Supabase
+          if (localOnly.length > 0) {
+            console.info(`[useFinStore] reconcile: pushing ${localOnly.length} local-only entries`)
+            await upsertAllClosingEntries(localOnly)
+          }
+
+          // Eerste keer ooit (alles leeg) → seed defaults
+          if (rows.length === 0 && localOnly.length === 0) {
             await upsertAllClosingEntries(INITIAL_ENTRIES)
-          } else if (merged.length > rows.length) {
-            // Nieuwe BV/maanden zijn toegevoegd in code → push die naar DB
-            const existingIds = new Set(rows.map(r => r.id))
-            const newOnes = merged.filter(e => !existingIds.has(e.id))
+          } else if (finalMerged.length > rows.length + localOnly.length) {
+            // Nieuwe BV/maanden in code → push die ook
+            const known = new Set([...rows.map(r => r.id), ...localOnly.map(e => e.id)])
+            const newOnes = finalMerged.filter(e => !known.has(e.id))
             if (newOnes.length > 0) await upsertAllClosingEntries(newOnes)
           }
+          void dbById  // typescript-tevreden, anders 'never used'
         } catch (err) {
           console.error('[useFinStore] Supabase load failed:', err)
           set({ loaded: true })

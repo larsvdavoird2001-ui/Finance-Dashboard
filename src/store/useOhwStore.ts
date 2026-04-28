@@ -62,10 +62,11 @@ export const useOhwStore = create<OhwStore>()(
       deletedRowIds: [],
 
       loadFromDb: async () => {
-        // Destructieve load: Supabase = bron van waarheid. Eerst reset naar
-        // de seed-defaults, dan invullen wat in Supabase staat. Hierdoor
-        // ziet een ander apparaat dezelfde data, ook als hun localStorage
-        // out-of-sync was.
+        // Merge-load + reconcile voor OHW:
+        //  - per BV: als Supabase een versie heeft, gebruik die (gedeelde
+        //    waarheid). Maar lokale rijen met VALUES die niet in Supabase
+        //    staan worden behouden + gepusht naar Supabase.
+        //  - als Supabase leeg is voor een BV, behouden we lokale state.
         try {
           const [entities2025, entities2026] = await Promise.all([
             fetchOhwEntities('2025'),
@@ -74,9 +75,10 @@ export const useOhwStore = create<OhwStore>()(
           console.info(`[useOhwStore] loaded ohw_entities: 2025=${entities2025.length}, 2026=${entities2026.length}`)
 
           const state = get()
-          // Reset naar seed-defaults zodat oude lokale state wegvalt.
-          let d2025 = initYear(ohwYearData2025)
-          let d2026 = initYear(ohwYearData2026)
+          // Start vanuit huidige (= localStorage-gehydrateerde) state zodat
+          // we geen edits kwijtraken.
+          let d2025 = state.data2025
+          let d2026 = state.data2026
           const tombstones = new Set(state.deletedRowIds)
 
           // Filter-helper: verwijder rijen uit onderhanden-secties én uit
@@ -93,30 +95,56 @@ export const useOhwStore = create<OhwStore>()(
             vooruitgefactureerd: e.vooruitgefactureerd?.filter(r => !tombstones.has(r.id)),
           })
 
-          if (entities2025.length > 0) {
-            const filtered = entities2025.map(stripTombstones)
-            const recomputed = filtered.map(e => recomputeEntity(e, d2025.allMonths))
-            d2025 = { ...d2025, entities: recomputed }
-          } else {
-            // Supabase leeg: alleen seeden als lokaal óók nog de defaults zijn
-            // (heuristiek: geen remarks aanwezig — anders zou de user al edits
-            // hebben gemaakt die we niet willen overschrijven)
-            const hasLocalEdits = d2025.entities.some(e =>
-              e.onderhanden.some(s => s.rows.some(r => r.remarks && Object.keys(r.remarks).length > 0)),
+          // Bevat een entity zinnige data (rijen met values, IC, remarks)?
+          const hasEntityData = (e: OhwEntityData): boolean => {
+            const anyValue = (vals: Record<string, number | null>) =>
+              Object.values(vals ?? {}).some(v => v != null && v !== 0)
+            return (
+              e.onderhanden.some(s => s.rows.some(r =>
+                anyValue(r.values) ||
+                (r.remarks && Object.keys(r.remarks).length > 0) ||
+                !!r.contactPerson
+              )) ||
+              (e.icVerrekening ?? []).some(r => anyValue(r.values)) ||
+              (e.vooruitgefactureerd ?? []).some(r => anyValue(r.values))
             )
-            if (!hasLocalEdits) await upsertAllOhwEntities('2025', d2025.entities)
           }
 
-          if (entities2026.length > 0) {
-            const filtered = entities2026.map(stripTombstones)
-            const recomputed = filtered.map(e => recomputeEntity(e, d2026.allMonths))
-            d2026 = { ...d2026, entities: recomputed }
-          } else {
-            const hasLocalEdits = d2026.entities.some(e =>
-              e.onderhanden.some(s => s.rows.some(r => r.remarks && Object.keys(r.remarks).length > 0)),
-            )
-            if (!hasLocalEdits) await upsertAllOhwEntities('2026', d2026.entities)
+          // Per entity: DB-versie wint, anders lokale versie behouden,
+          // anders default. Push lokaal-only entities naar Supabase.
+          const mergeYear = async (
+            year: '2025' | '2026',
+            dbEntities: OhwEntityData[],
+            localData: OhwYearData,
+          ): Promise<OhwYearData> => {
+            const dbByName = new Map(dbEntities.map(e => [e.entity, e]))
+            const merged: OhwEntityData[] = []
+            const toPush: OhwEntityData[] = []
+            for (const localEnt of localData.entities) {
+              const dbEnt = dbByName.get(localEnt.entity)
+              if (dbEnt) {
+                const stripped = stripTombstones(dbEnt)
+                merged.push(recomputeEntity(stripped, localData.allMonths))
+              } else if (hasEntityData(localEnt)) {
+                merged.push(localEnt)
+                toPush.push(localEnt)
+              } else {
+                merged.push(localEnt) // default seed
+              }
+            }
+            if (toPush.length > 0) {
+              console.info(`[useOhwStore] reconcile ${year}: pushing ${toPush.length} local-only entities`)
+              await upsertAllOhwEntities(year, toPush)
+            }
+            // Eerste keer (DB volledig leeg en geen lokale data) → seed
+            if (dbEntities.length === 0 && toPush.length === 0) {
+              await upsertAllOhwEntities(year, localData.entities)
+            }
+            return { ...localData, entities: merged }
           }
+
+          d2025 = await mergeYear('2025', entities2025, d2025)
+          d2026 = await mergeYear('2026', entities2026, d2026)
 
           set({ data2025: d2025, data2026: d2026, loaded: true })
         } catch (err) {
