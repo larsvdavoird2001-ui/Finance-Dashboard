@@ -383,23 +383,55 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         })),
       }
     }
-    // 2026: marge% over alle 12 maanden, actual+LE — null waar geen data
-    return {
-      labels: BUDGET_MONTHS_2026,
-      datasets: activeBvs.map(bv => ({
-        label: bv,
-        data: BUDGET_MONTHS_2026.map(m => {
-          if (!le.hasLE(bv as EntityName, m, 'netto_omzet')) return null
-          const r = le.getLE(bv as EntityName, m, 'netto_omzet')
-          const g = le.getLE(bv as EntityName, m, 'brutomarge')
-          return r > 0 ? (g / r * 100) : null
-        }),
+    // 2026: marge% per BV — solid voor closed maanden (actuals), dashed
+    // voor open maanden (LE), met visuele continuïteit op de overgang.
+    const lastClosedIdx = (() => {
+      let idx = -1
+      for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
+        if (le.isClosed(BUDGET_MONTHS_2026[i])) idx = i
+      }
+      return idx
+    })()
+    const calcMargin = (bv: ClosingBv, m: string): number | null => {
+      const r = le.getLE(bv as EntityName, m, 'netto_omzet')
+      const g = le.getLE(bv as EntityName, m, 'brutomarge')
+      if (r <= 0) return null
+      return g / r * 100
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const datasets: any[] = []
+    for (const bv of activeBvs) {
+      const actData = BUDGET_MONTHS_2026.map((m, i) =>
+        i <= lastClosedIdx ? calcMargin(bv, m) : null
+      )
+      const leData = BUDGET_MONTHS_2026.map((m, i) => {
+        if (i === lastClosedIdx) return calcMargin(bv, m)  // bridge punt
+        if (i < lastClosedIdx) return null
+        if (!le.hasLE(bv as EntityName, m, 'netto_omzet')) return null
+        return calcMargin(bv, m)
+      })
+      datasets.push({
+        label: `${bv} — Actual`,
+        data: actData,
         borderColor: BV_COLORS[bv],
         backgroundColor: 'transparent',
-        tension: 0.3, fill: false, pointRadius: 3, borderWidth: 2,
+        tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2.5,
+        pointBackgroundColor: BV_COLORS[bv],
         spanGaps: false,
-      })),
+      })
+      datasets.push({
+        label: `${bv} — LE`,
+        data: leData,
+        borderColor: BV_COLORS[bv],
+        borderDash: [5, 4],
+        backgroundColor: 'transparent',
+        tension: 0.3, fill: false, pointRadius: 3, borderWidth: 2,
+        pointStyle: 'rectRot' as const,
+        pointBackgroundColor: BV_COLORS[bv],
+        spanGaps: false,
+      })
     }
+    return { labels: BUDGET_MONTHS_2026, datasets }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides)])
 
