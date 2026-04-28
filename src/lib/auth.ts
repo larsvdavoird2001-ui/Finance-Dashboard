@@ -185,7 +185,12 @@ export function useAuth(): AuthState & {
       data: { password_set: true },
     })
     if (error) return { error: error.message }
-    if (data?.user) setState(s => ({ ...s, user: data.user }))
+    // Forceer een verse user-fetch, want updateUser geeft soms een user object
+    // terug zonder de zojuist geschreven user_metadata. Met getUser() lezen we
+    // de definitieve state van Supabase en triggeren we een correcte rerender.
+    const fresh = await supabase.auth.getUser()
+    const finalUser = fresh.data?.user ?? data?.user ?? null
+    if (finalUser) setState(s => ({ ...s, user: finalUser }))
     return { error: null }
   }
 

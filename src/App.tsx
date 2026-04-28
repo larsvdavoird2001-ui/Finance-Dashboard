@@ -26,6 +26,10 @@ export default function App() {
   const [filter, setFilter] = useState<GlobalFilter>(DEFAULT_FILTER)
   // Lokale "skip wachtwoord-instellen"-flag, alleen voor deze sessie.
   const [skipSetPw, setSkipSetPw] = useState(false)
+  // Tweede gate: zodra de user succesvol een wachtwoord heeft ingesteld
+  // tijdens deze sessie, slaan we de SetPasswordPage altijd over — onafhankelijk
+  // van of user_metadata.password_set al gepropageerd is in de session.
+  const [pwJustSet, setPwJustSet] = useState(false)
 
   const auth = useAuth()
   const {
@@ -81,11 +85,20 @@ export default function App() {
   }
 
   // Ingelogd via magic-link, maar nog geen wachtwoord ingesteld → prompt
-  if (!authDisabled && user && !userHasPassword(user) && !skipSetPw) {
+  if (!authDisabled && user && !userHasPassword(user) && !skipSetPw && !pwJustSet) {
+    const handleSetPassword = async (newPw: string) => {
+      const result = await setPassword(newPw)
+      if (!result.error) {
+        // Direct doorzetten naar dashboard, zelfs als user_metadata nog niet
+        // gerefresht is.
+        setPwJustSet(true)
+      }
+      return result
+    }
     return (
       <SetPasswordPage
         email={user.email ?? ''}
-        onSetPassword={setPassword}
+        onSetPassword={handleSetPassword}
         onSkip={() => setSkipSetPw(true)}
       />
     )
