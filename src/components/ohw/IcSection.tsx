@@ -265,13 +265,43 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
     onChange([...rows, { id: `ic-${Date.now()}`, description: '', values: {} }])
   }, [rows, onChange])
 
+  // Check of de IC-rij één of meerdere ingevulde maand-waardes heeft.
+  // Voor IC-pairs (icPairId gezet) kijken we óók naar de andere kant van
+  // de pair via de OhwStore — pair-mirroring zou ze synchroon moeten houden,
+  // maar we verifiëren het zodat we never een rij met data weggooien aan
+  // de andere kant.
+  const allYearData = useOhwStore(s => year === '2025' ? s.data2025 : s.data2026)
+  const rowHasAnyValue = useCallback((row: OhwRow): boolean => {
+    const hasOwn = months.some(m => {
+      const v = gv(row.values, m)
+      return v !== null && v !== 0
+    })
+    if (hasOwn) return true
+    // Voor pair-rijen: check de mirror in een andere BV
+    if (row.icPairId) {
+      for (const ent of allYearData.entities) {
+        if (ent.entity === currentBv) continue
+        const mirror = ent.icVerrekening.find(r => r.icPairId === row.icPairId)
+        if (mirror) {
+          const mirrorHas = months.some(m => {
+            const v = gv(mirror.values, m)
+            return v !== null && v !== 0
+          })
+          if (mirrorHas) return true
+        }
+      }
+    }
+    return false
+  }, [months, allYearData, currentBv])
+
   const removeRow = useCallback((row: OhwRow) => {
+    if (rowHasAnyValue(row)) return  // safety-net — UI-knop is al uitgeschakeld
     if (row.icPairId) {
       removeIcPair(year, row.icPairId)
     } else {
       onChange(rows.filter(r => r.id !== row.id))
     }
-  }, [rows, onChange, removeIcPair, year])
+  }, [rows, onChange, removeIcPair, year, rowHasAnyValue])
 
   const hdrBg = 'rgba(59,130,246,0.06)'
 
@@ -354,12 +384,29 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
               )
             })}
             <td style={{ background: 'var(--bg2)', width: 40, textAlign: 'center' }}>
-              <button
-                className="btn sm ghost"
-                style={{ color: 'var(--red)', padding: '2px 6px' }}
-                onClick={() => removeRow(row)}
-                title={isPaired ? 'Verwijdert de IC-pair bij beide BVs' : 'Verwijder deze regel'}
-              >✕</button>
+              {(() => {
+                const hasValue = rowHasAnyValue(row)
+                return (
+                  <button
+                    className="btn sm ghost"
+                    style={{
+                      color: hasValue ? 'var(--t3)' : 'var(--red)',
+                      padding: '2px 6px',
+                      cursor: hasValue ? 'not-allowed' : 'pointer',
+                      opacity: hasValue ? 0.4 : 1,
+                    }}
+                    onClick={() => !hasValue && removeRow(row)}
+                    title={
+                      hasValue
+                        ? (isPaired
+                            ? 'Maak eerst alle cellen leeg aan beide kanten van de IC-pair om deze regel te kunnen verwijderen'
+                            : 'Maak eerst alle cellen leeg om deze regel te kunnen verwijderen')
+                        : (isPaired ? 'Verwijdert de IC-pair bij beide BVs' : 'Verwijder deze regel')
+                    }
+                    data-rw="hide"
+                  >✕</button>
+                )
+              })()}
             </td>
           </tr>
         )
