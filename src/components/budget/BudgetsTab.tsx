@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { Line } from 'react-chartjs-2'
 import '../../lib/chartSetup'
 import { baseChartOptions } from '../../lib/chartSetup'
-import { PL_STRUCTURE, ytdActuals2025, ytdBudget2025, monthlyActuals2026 } from '../../data/plData'
+import { PL_STRUCTURE, ytdActuals2025, ytdBudget2025 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
@@ -187,8 +187,11 @@ export function BudgetsTab({ filter: _filter }: Props) {
   }
 
   // ── Actuals-lookup ──
+  // useAdjustedActuals.getMonthly accepteert ClosingBv (incl. Holdings) en
+  // incorporeert de Maandafsluiting (FinStore) — kosten, financieel
+  // resultaat, etc. Hierdoor overschrijft een ingevulde maandafsluiting voor
+  // Holdings (en elke andere BV) automatisch de LE in deze tab.
   const getActualsFor = (e: EntityName, m: string): Record<string, number> => {
-    if (e === 'Holdings') return monthlyActuals2026['Holdings']?.[m] ?? {}
     return getMonthly(e as BvId, m)
   }
 

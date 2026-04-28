@@ -1,6 +1,6 @@
 import { useAdjustedActuals } from './useAdjustedActuals'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../store/useBudgetStore'
-import { monthlyActuals2026, monthlyBudget2026 } from '../data/plData'
+import { monthlyBudget2026 } from '../data/plData'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../data/plData2025'
 import type { EntityName } from '../data/plData'
 import { derivePL, SUBS_OF } from '../lib/plDerive'
@@ -66,7 +66,10 @@ export function useLatestEstimate(currentDate?: Date) {
   }
 
   const rawActual2026 = (bv: EntityName, month: string, key: string): number => {
-    if (bv === 'Holdings') return monthlyActuals2026['Holdings']?.[month]?.[key] ?? 0
+    // getMonthly accepteert ClosingBv (incl. Holdings) en incorporeert de
+    // Maandafsluiting (FinStore). Voor Holdings was dit eerder een aparte
+    // branch die alleen plData las → ingevulde Maandafsluiting werkte niet
+    // door in de LE. Nu uniform één pad voor alle BV's.
     return getMonthly(bv as BvId, month)[key] ?? 0
   }
   const rawActual2025 = (bv: EntityName, m25: string, key: string): number =>
