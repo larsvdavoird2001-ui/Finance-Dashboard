@@ -1,0 +1,16 @@
+{
+  "exportedAt": "2026-04-29T19:27:20.843Z",
+  "totalRows": 0,
+  "tables": {
+    "closing_entries": [],
+    "fte_entries": [],
+    "import_records": [],
+    "import_raw_data": [],
+    "ohw_entities": [],
+    "budget_overrides": [],
+    "tariff_entries": [],
+    "ohw_evidence": [],
+    "closing_archives": [],
+    "user_profiles": []
+  }
+}
