@@ -339,7 +339,12 @@ export interface FinalizedMonth {
 export async function fetchFinalizedMonths(): Promise<FinalizedMonth[]> {
   if (!supabaseEnabled) return []
   const { data, error } = await supabase.from('closing_finalized').select('*')
-  if (error) { console.error('fetchFinalizedMonths:', error); return [] }
+  // Bij fout: throwen zodat de caller (useFinStore.loadFromDb) de bestaande
+  // (mogelijk net optimistisch ge-update) finalized-state behoudt i.p.v. te
+  // overschrijven met een lege array. Anders zou een tijdelijke read-fout
+  // (RLS, netwerk, replicatie-lag) de zojuist afgesloten Maandafsluiting
+  // weer als 'open' tonen.
+  if (error) { console.error('fetchFinalizedMonths:', error); throw new Error(error.message) }
   return (data ?? []).map(row => ({
     month:       String(row.month),
     finalizedAt: String(row.finalized_at ?? ''),
@@ -373,9 +378,13 @@ export async function deleteFinalizedMonth(month: string): Promise<{ error: stri
 // ── User Profiles (multi-user beheer) ───────────────────────────────────────
 import type { ClosingBv } from '../data/types'
 
+/** 4-niveau-rolsysteem (zie ook lib/permissions.ts). 'user' is de legacy-naam
+ *  uit de 2-rollen-tijd en wordt bij read mapping naar 'viewer' geconverteerd. */
+export type UserRole = 'viewer' | 'editor' | 'approver' | 'admin'
+
 export interface UserProfile {
   email: string
-  role: 'admin' | 'user'
+  role: UserRole
   active: boolean
   needsPassword: boolean
   invitedBy: string
@@ -392,6 +401,12 @@ function parseBv(v: unknown): ClosingBv | null {
   return (allowed as string[]).includes(v) ? (v as ClosingBv) : null
 }
 
+function parseRole(v: unknown): UserRole {
+  if (v === 'admin' || v === 'approver' || v === 'editor' || v === 'viewer') return v
+  if (v === 'user') return 'viewer'  // legacy → viewer
+  return 'viewer'
+}
+
 export async function fetchUserProfiles(): Promise<UserProfile[]> {
   if (!supabaseEnabled) return []
   const { data, error } = await supabase
@@ -401,7 +416,7 @@ export async function fetchUserProfiles(): Promise<UserProfile[]> {
   if (error) { console.error('fetchUserProfiles:', error); return [] }
   return (data ?? []).map(row => ({
     email:         String(row.email ?? ''),
-    role:          (row.role === 'admin' ? 'admin' : 'user') as 'admin' | 'user',
+    role:          parseRole(row.role),
     active:        !!row.active,
     needsPassword: !!row.needs_password,
     invitedBy:     String(row.invited_by ?? ''),
@@ -413,7 +428,7 @@ export async function fetchUserProfiles(): Promise<UserProfile[]> {
 
 export async function upsertUserProfile(p: {
   email: string
-  role?: 'admin' | 'user'
+  role?: UserRole
   active?: boolean
   needsPassword?: boolean
   invitedBy?: string

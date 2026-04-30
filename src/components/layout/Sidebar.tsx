@@ -1,11 +1,12 @@
 import type { TabId } from '../../data/types'
+import type { UserRole } from '../../lib/db'
 
 interface Props {
   active: TabId
   onNav: (t: TabId) => void
   userEmail?: string | null
   isAdmin?: boolean
-  userRole?: 'admin' | 'user'
+  userRole?: UserRole
   onSignOut?: () => void | Promise<void>
 }
 
@@ -65,7 +66,11 @@ export function Sidebar({ active, onNav, userEmail, isAdmin, userRole, onSignOut
             </span>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>
-                {isAdmin ? 'Admin' : userRole === 'admin' ? 'Admin' : 'Gebruiker'}
+                {isAdmin ? 'Beheerder'
+                  : userRole === 'admin' ? 'Beheerder'
+                  : userRole === 'approver' ? 'Controller'
+                  : userRole === 'editor' ? 'Fin. administratie'
+                  : 'Lezer'}
               </div>
               <div style={{
                 fontSize: 10, color: 'var(--t2)',

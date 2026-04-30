@@ -14,6 +14,7 @@ import { useNavStore } from '../../store/useNavStore'
 import { useBudgetStore } from '../../store/useBudgetStore'
 import { derivePL, READONLY_KEYS as PL_DERIVED_KEYS } from '../../lib/plDerive'
 import { useLockedBv } from '../../lib/permissions'
+import { LeReflectionPanel } from './LeReflectionPanel'
 
 type ColType = 'actual' | 'budget' | 'delta'
 
@@ -718,6 +719,20 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
           </button>
         </div>
       </div>
+
+      {/* ── Maandafsluiting → LE-leerlus ────────────────────────────
+          AI-controle-vragen voor de geselecteerde maand. Volgt de page-level
+          filters (jaar / BV / periode) zodat het direct boven de detail-tabel
+          staat en synchroniseert wanneer de gebruiker een andere periode
+          aanklikt. Bij een YTD-keuze pakken we de laatst-afgesloten maand
+          want reflecteren op meerdere maanden tegelijk werkt averechts. */}
+      {filter.year === '2026' && (() => {
+        const cur = periods.find(p => p.id === period)
+        const targetMonth = cur?.month
+          ?? (cur?.ytdMonths && cur.ytdMonths.length > 0 ? cur.ytdMonths[cur.ytdMonths.length - 1] : null)
+        if (!targetMonth) return null
+        return <LeReflectionPanel filter={filter} targetMonth={targetMonth} />
+      })()}
 
       {/* ── Analyse & redenen card — top ─────────────────────────── */}
       <div className="card" style={{ borderLeft: `3px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--amber)'}` }}>

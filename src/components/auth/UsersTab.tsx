@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import type { UserProfile } from '../../lib/db'
+import type { UserProfile, UserRole } from '../../lib/db'
 import type { ClosingBv } from '../../data/types'
 import { ADMIN_EMAIL } from '../../lib/auth'
+import { roleLabel } from '../../lib/permissions'
 
 const BV_OPTIONS: ClosingBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 const BV_COLORS: Record<ClosingBv, string> = {
@@ -11,13 +12,21 @@ const BV_COLORS: Record<ClosingBv, string> = {
   Holdings:    '#8fa3c0',
 }
 
+const ROLE_OPTIONS: UserRole[] = ['viewer', 'editor', 'approver', 'admin']
+const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
+  viewer:   'Alleen-lezen',
+  editor:   'Mag invullen (Maandafsluiting, OHW, FTE, uploads) — geen goedkeuring',
+  approver: 'Editor + mag goedkeuren / definitief afsluiten / IC-tarieven controleren',
+  admin:    'Alle rechten + gebruikersbeheer & backups',
+}
+
 interface Props {
   currentEmail: string | null
   profiles: UserProfile[]
   isAdmin: boolean
-  inviteUser: (email: string, role: 'admin' | 'user', bv?: ClosingBv | null) => Promise<{ error: string | null }>
+  inviteUser: (email: string, role: UserRole, bv?: ClosingBv | null) => Promise<{ error: string | null }>
   setUserActive: (email: string, active: boolean) => Promise<{ error: string | null }>
-  setUserRole: (email: string, role: 'admin' | 'user') => Promise<{ error: string | null }>
+  setUserRole: (email: string, role: UserRole) => Promise<{ error: string | null }>
   setUserBv: (email: string, bv: ClosingBv | null) => Promise<{ error: string | null }>
   removeUser: (email: string) => Promise<{ error: string | null }>
   refreshProfiles: () => Promise<void>
@@ -46,7 +55,7 @@ export function UsersTab({
   refreshProfiles,
 }: Props) {
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<'admin' | 'user'>('user')
+  const [role, setRole] = useState<UserRole>('viewer')
   const [bv, setBv] = useState<ClosingBv | ''>('')
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
@@ -80,7 +89,7 @@ export function UsersTab({
         const bvLabel = bvArg ? ` (alleen ${bvArg})` : ''
         setInfo(`✉ Uitnodiging verzonden naar ${email}${bvLabel}. De gebruiker ontvangt een magic-link en kan daarna een wachtwoord instellen.`)
         setEmail('')
-        setRole('user')
+        setRole('viewer')
         setBv('')
       }
     } finally {
@@ -94,7 +103,7 @@ export function UsersTab({
     if (error) setError(error)
   }
 
-  const onChangeRole = async (p: UserProfile, newRole: 'admin' | 'user') => {
+  const onChangeRole = async (p: UserProfile, newRole: UserRole) => {
     setError(null); setInfo(null)
     const { error } = await setUserRole(p.email, newRole)
     if (error) setError(error)
@@ -175,10 +184,11 @@ export function UsersTab({
               <select
                 value={role}
                 onChange={e => {
-                  const r = e.target.value as 'admin' | 'user'
+                  const r = e.target.value as UserRole
                   setRole(r)
                   if (r === 'admin') setBv('')  // admins zien altijd alles
                 }}
+                title={ROLE_DESCRIPTIONS[role]}
                 style={{
                   background: 'var(--bg3)', border: '1px solid var(--bd2)',
                   borderRadius: 7, color: 'var(--t1)', fontSize: 13,
@@ -186,9 +196,15 @@ export function UsersTab({
                   marginTop: 6, height: 36,
                 }}
               >
-                <option value="user">Gebruiker</option>
-                <option value="admin">Admin</option>
+                {ROLE_OPTIONS.map(r => (
+                  <option key={r} value={r} title={ROLE_DESCRIPTIONS[r]}>
+                    {roleLabel(r)}
+                  </option>
+                ))}
               </select>
+              <div style={{ fontSize: 9.5, color: 'var(--t3)', marginTop: 4, lineHeight: 1.4 }}>
+                {ROLE_DESCRIPTIONS[role]}
+              </div>
             </div>
             <div>
               <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
@@ -275,15 +291,19 @@ export function UsersTab({
                     </td>
                     <td>
                       {isMain ? (
-                        <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 600 }}>Admin</span>
+                        <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 600 }}>{roleLabel('admin')}</span>
                       ) : (
                         <select
                           value={p.role}
-                          onChange={e => onChangeRole(p, e.target.value as 'admin' | 'user')}
+                          onChange={e => onChangeRole(p, e.target.value as UserRole)}
+                          title={ROLE_DESCRIPTIONS[p.role]}
                           style={{ background: 'var(--bg3)', border: '1px solid var(--bd2)', borderRadius: 5, color: 'var(--t1)', fontSize: 11, padding: '3px 6px', fontFamily: 'var(--font)' }}
                         >
-                          <option value="user">Gebruiker</option>
-                          <option value="admin">Admin</option>
+                          {ROLE_OPTIONS.map(r => (
+                            <option key={r} value={r} title={ROLE_DESCRIPTIONS[r]}>
+                              {roleLabel(r)}
+                            </option>
+                          ))}
                         </select>
                       )}
                     </td>

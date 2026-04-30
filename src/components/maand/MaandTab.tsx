@@ -28,6 +28,7 @@ import { generateMonthPptx, monthLabelFromCode } from '../../lib/exportPptx'
 import { useRawDataStore as useRawDataStoreFull } from '../../store/useRawDataStore'
 import { useFteStore } from '../../store/useFteStore'
 import { useEvidenceStore } from '../../store/useEvidenceStore'
+import { notifyImportPending, clearImportPendingFor } from '../../store/useNotificationStore'
 import { useLockedBv } from '../../lib/permissions'
 import { ExportOptionsModal } from './ExportOptionsModal'
 import { MaandChecklist } from './MaandChecklist'
@@ -554,6 +555,8 @@ export function MaandTab({ filter: _filter }: Props) {
         warnings: result.warnings,
       }
       addRecord(record)
+      // Notificatie naar approvers — er staat iets klaar voor goedkeuring.
+      notifyImportPending(slot.label, uploadMonth, currentUserEmail ?? 'editor')
       // Stash geschreven-uren batch voor later push bij approve
       if (slotId === 'geschreven_uren' && result.hoursEntries && result.hoursEntries.length > 0) {
         setPendingHoursByRecord(prev => ({ ...prev, [record.id]: result.hoursEntries! }))
@@ -698,6 +701,8 @@ export function MaandTab({ filter: _filter }: Props) {
     // quota, maar OHW-regel moet nog steeds geupdated worden).
     try { approveRecord(record.id) } catch (err) { console.error('approveRecord faalde:', err) }
     try { approveRawEntry(record.id) } catch (err) { console.error('approveRawEntry faalde:', err) }
+    // Pending-notificatie wegruimen — de approver heeft er nu naar gekeken.
+    try { clearImportPendingFor(record.slotLabel, record.month) } catch { /* noop */ }
     // Voor geschreven_uren: push de geparseerde BV × maand × uren-entries
     // naar de hours-store zodat Uren Dashboard en LE-forecast live bijwerken.
     try {

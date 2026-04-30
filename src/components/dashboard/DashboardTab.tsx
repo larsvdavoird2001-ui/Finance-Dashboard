@@ -11,6 +11,9 @@ import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useLatestEstimate } from '../../hooks/useLatestEstimate'
 import { useOhwStore } from '../../store/useOhwStore'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
+import { useFinStore } from '../../store/useFinStore'
+import { useFteStore } from '../../store/useFteStore'
+import { useHoursStore } from '../../store/useHoursStore'
 import { derivePL } from '../../lib/plDerive'
 import { useLockedBv } from '../../lib/permissions'
 
@@ -126,6 +129,48 @@ interface Props {
   onFilterChange?: (patch: Partial<GlobalFilter>) => void
 }
 
+// LE-narrative: per BV één compacte kolom met (1) een grote headline
+// "Verwachting [maand]" voor de eerstvolgende prognose-maand, (2) een korte
+// rij driver-metrics die deze prognose bepalen, (3) een mini-uitleg over
+// hoe de blend tot stand komt. Emphasis kleurt het value-veld groen/oranje
+// voor snelle scan; neutral=geen kleurcodering.
+type NarrativeBullet = {
+  label: string
+  value: string
+  sub?: string
+  emphasis?: 'good' | 'warn' | 'neutral'
+}
+type LeNarrative = {
+  bv: ClosingBv
+  /** Hoofd-prognose ("Verwachting Apr-26") — groot weergegeven boven de rest. */
+  headline: NarrativeBullet | null
+  /** Drijvers achter de prognose: FTE, declarabiliteit, omzet/FTE, marge,
+   *  YoY-trend, FY-LE. Compact getoond. */
+  drivers: NarrativeBullet[]
+  /** Korte uitleg hoe de Latest Estimate is bepaald. */
+  explanation: string
+}
+function NarrativeBulletRow({ bullet }: { bullet: NarrativeBullet }) {
+  const valueColor =
+    bullet.emphasis === 'good' ? 'var(--green)' :
+    bullet.emphasis === 'warn' ? 'var(--amber)' :
+    'var(--t1)'
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'baseline', gap: 6,
+      padding: '2px 0',
+      fontSize: 10.5, lineHeight: 1.4,
+    }}>
+      <span style={{ color: 'var(--t3)', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {bullet.label}
+      </span>
+      <span style={{ color: valueColor, fontWeight: 700, flex: '0 0 auto' }}>
+        {bullet.value}
+      </span>
+    </div>
+  )
+}
+
 type ViewMode = 'monthly' | 'ytd'
 
 export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
@@ -156,6 +201,11 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const getBudgetMonth = useBudgetStore(s => s.getMonth)
   useBudgetStore(s => s.overrides)
   useBudgetStore(s => s.leOverrides)
+  // Subscribe op finalized — bepaalt of een maand op de solid actual-lijn
+  // staat (vs gestreepte LE-lijn) in de Omzet-trend en Brutomarge-charts.
+  // Zonder deze subscription + deps-entry blijven de useMemo-charts hangen
+  // op de cached versie van vóór de finaliseer-actie.
+  const finalizedMonths = useFinStore(s => s.finalized)
   const budget2026 = (bv: ClosingBv, month: string, key: string): number => {
     const raw = getBudgetMonth(bv as EntityName, month)
     return derivePL(k => raw[k] ?? 0, key)
@@ -276,29 +326,32 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         })),
       }
     }
-    // 2026: actuals (solid) Jan→last-actual-filled + LE (dashed) forward.
-    // Per BV bepalen we de last-closed-idx: alleen kalender-gesloten ÉN
-    // ingevulde maanden tellen als 'actual'. Voor maanden waar de
-    // closing-entry nog niet is gemaakt valt de chart automatisch terug op
-    // de LE-forecast.
+    // 2026: actuals (solid) Jan→laatste-calendar-past + LE (dashed) forward.
+    // We gebruiken expliciet le.isClosed (calendar-only) zodat de actuals-lijn
+    // altijd doorloopt tot en met de laatste afgesloten kalendermaand —
+    // ongeacht of de Maandafsluiting nog niet is ingevuld of de checklist
+    // nog niet definitief is gemarkeerd. Een lege maand toont gewoon zijn
+    // (eventueel nog 0) actual-waarde; zo ziet de gebruiker direct dat hij
+    // data moet aanvullen i.p.v. dat de maand op de gestreepte LE-lijn
+    // verdwijnt.
+    const lastCalIdx = (() => {
+      let idx = -1
+      for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
+        if (le.isClosed(BUDGET_MONTHS_2026[i])) idx = i
+      }
+      return idx
+    })()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const datasets: any[] = []
     for (const bv of activeBvs) {
-      const lastActualIdx = (() => {
-        let idx = -1
-        for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
-          if (le.getLeSource(bv as EntityName, BUDGET_MONTHS_2026[i], 'netto_omzet') === 'actual') idx = i
-        }
-        return idx
-      })()
       const actData = BUDGET_MONTHS_2026.map((m, i) =>
-        i <= lastActualIdx ? (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000 : null
+        i <= lastCalIdx ? (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000 : null
       )
       const leData = BUDGET_MONTHS_2026.map((m, i) => {
         // Op laatste actual-idx tonen we de actual-waarde óók als startpunt
         // van de LE-lijn (visuele continuïteit met het laatste actual-punt).
-        if (i === lastActualIdx) return (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000
-        if (i < lastActualIdx)   return null
+        if (i === lastCalIdx) return (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000
+        if (i < lastCalIdx)   return null
         // Open maand: alleen tonen als er echt LE-data is (override of budget)
         if (!le.hasLE(bv as EntityName, m, 'netto_omzet')) return null
         return le.getLE(bv as EntityName, m, 'netto_omzet') / 1000
@@ -326,7 +379,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
     }
     return { labels: BUDGET_MONTHS_2026, datasets }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is2025, JSON.stringify(activeBvs), period, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides)])
+  }, [is2025, JSON.stringify(activeBvs), period, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths])
 
   // ── Cumulative omzet vs budget ──────────────────────────────────────────
   const cumulativeChart = useMemo(() => {
@@ -350,26 +403,46 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         ],
       }
     }
-    // 2026: cumulatief LE (combineert actuals + forecast) vs cumulatief budget
-    let cLe = 0, cBudget = 0
-    const leData: number[] = []
+    // 2026: split de cumulatieve LE-lijn in twee datasets:
+    //   - Actual cumulatief (solid): som t/m laatste afgesloten kalendermaand,
+    //     met fill voor visuele kracht.
+    //   - LE cumulatief forward (dashed): vanaf het bridge-punt op de
+    //     overgang doortekenen tot Dec, zonder fill.
+    // Zo zie je in één oogopslag wáár de gerealiseerde lijn ophoudt en de
+    // forecast begint, exact zoals in de Omzet-trend chart.
+    let cCum = 0, cBudget = 0
+    const cumData: number[] = []
     const budData: number[] = []
     for (const m of BUDGET_MONTHS_2026) {
       const lev = activeBvs.reduce((s, bv) => s + le.getLE(bv as EntityName, m, 'netto_omzet'), 0)
       const bv2 = activeBvs.reduce((s, bv) => s + budget2026(bv, m, 'netto_omzet'), 0)
-      cLe += lev; cBudget += bv2
-      leData.push(cLe / 1000)
+      cCum += lev; cBudget += bv2
+      cumData.push(cCum / 1000)
       budData.push(cBudget / 1000)
     }
+    const lastCalIdx = (() => {
+      let idx = -1
+      for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
+        if (le.isClosed(BUDGET_MONTHS_2026[i])) idx = i
+      }
+      return idx
+    })()
+    const actCumul = cumData.map((v, i) => i <= lastCalIdx ? v : null)
+    const leForward = cumData.map((v, i) => {
+      if (i === lastCalIdx) return v   // bridge — visuele continuïteit
+      if (i < lastCalIdx)   return null
+      return v
+    })
     return {
       labels: BUDGET_MONTHS_2026,
       datasets: [
-        { label: 'LE cumulatief (Actual + LE)', data: leData, borderColor: '#00a9e0', backgroundColor: '#00a9e022', borderWidth: 2.5, tension: 0.3, fill: true, pointRadius: 3 },
-        { label: 'Budget cumulatief', data: budData, borderColor: '#fbbf24', backgroundColor: 'transparent', borderDash: [6, 4], borderWidth: 2, tension: 0.3, fill: false, pointRadius: 2 },
+        { label: 'Actual cumulatief',  data: actCumul,  borderColor: '#00a9e0', backgroundColor: '#00a9e022', borderWidth: 2.5, tension: 0.3, fill: true,  pointRadius: 3, spanGaps: false },
+        { label: 'LE cumulatief',      data: leForward, borderColor: '#00a9e0', backgroundColor: 'transparent', borderWidth: 2,   borderDash: [5, 4], tension: 0.3, fill: false, pointRadius: 3, pointStyle: 'rectRot' as const, spanGaps: false },
+        { label: 'Budget cumulatief',  data: budData,   borderColor: '#fbbf24', backgroundColor: 'transparent', borderWidth: 2,   borderDash: [6, 4], tension: 0.3, fill: false, pointRadius: 2 },
       ],
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides)])
+  }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths])
 
   // ── Brutomarge% per BV trend ─────────────────────────────────────────────
   const marginTrendChart = useMemo(() => {
@@ -389,32 +462,33 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         })),
       }
     }
-    // 2026: marge% per BV — solid voor closed+ingevulde maanden (actuals),
-    // dashed voor open of niet-ingevulde maanden (LE), met visuele
-    // continuïteit op de overgang. Bridge per-BV (zelfde als omzet-trend)
-    // voorkomt dat een BV zonder Maandafsluiting-data een 0-actual toont.
+    // 2026: marge% per BV — solid Jan→laatste-calendar-past, dashed forward.
+    // calcMargin geeft null bij r=0 (kan niet delen) — die punten worden door
+    // Chart.js overgeslagen op de lijn (spanGaps:false). Voor ingevulde
+    // calendar-past maanden worden ze normaal getekend.
     const calcMargin = (bv: ClosingBv, m: string): number | null => {
       const r = le.getLE(bv as EntityName, m, 'netto_omzet')
       const g = le.getLE(bv as EntityName, m, 'brutomarge')
       if (r <= 0) return null
       return g / r * 100
     }
+    // Calendar-only — zelfde reden als bij de omzet-trend chart hierboven.
+    const lastCalIdxM = (() => {
+      let idx = -1
+      for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
+        if (le.isClosed(BUDGET_MONTHS_2026[i])) idx = i
+      }
+      return idx
+    })()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const datasets: any[] = []
     for (const bv of activeBvs) {
-      const lastActualIdx = (() => {
-        let idx = -1
-        for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
-          if (le.getLeSource(bv as EntityName, BUDGET_MONTHS_2026[i], 'netto_omzet') === 'actual') idx = i
-        }
-        return idx
-      })()
       const actData = BUDGET_MONTHS_2026.map((m, i) =>
-        i <= lastActualIdx ? calcMargin(bv, m) : null
+        i <= lastCalIdxM ? calcMargin(bv, m) : null
       )
       const leData = BUDGET_MONTHS_2026.map((m, i) => {
-        if (i === lastActualIdx) return calcMargin(bv, m)  // bridge punt
-        if (i < lastActualIdx) return null
+        if (i === lastCalIdxM) return calcMargin(bv, m)  // bridge punt
+        if (i < lastCalIdxM) return null
         if (!le.hasLE(bv as EntityName, m, 'netto_omzet')) return null
         return calcMargin(bv, m)
       })
@@ -441,7 +515,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
     }
     return { labels: BUDGET_MONTHS_2026, datasets }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides)])
+  }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths])
 
   // ── EBITDA per BV (LE vs Budget) FY ──────────────────────────────────────
   const ebitdaCompareChart = {
@@ -767,6 +841,225 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [is2025, period, findingsView, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), JSON.stringify(activeBvs), isHoldings, fyLeRev, fyBudgetRev, fyLeEbitda, fyBudEbitda, leBudgetGap, leBudgetGapPct, ebitdaGap])
 
+  // ── AI-gedreven LE-prognose narrative ───────────────────────────────────
+  // Per BV: een set bullets met de drijvers (FTE, declarabiliteit, omzet/FTE,
+  // brutomarge, YoY-trend per maand, verwachting volgende maand, FY-LE) plus
+  // een korte uitleg-paragraaf hoe de Latest Estimate is bepaald. Schaalt
+  // automatisch mee met elke nieuwe input in FTE-tab, Maandafsluiting,
+  // Hours-store of Budgetten-tab (alle inputs zijn dependencies).
+  const fteEntries  = useFteStore(s => s.entries)
+  const hoursEntries = useHoursStore(s => s.entries)
+  const leNarratives = useMemo(() => {
+    if (is2025) return [] as LeNarrative[]
+    const closedMonths = ACTUAL_PERIODS_2026
+    const lastClosed = closedMonths[closedMonths.length - 1] ?? null
+    const lastClosedIdx = lastClosed ? BUDGET_MONTHS_2026.indexOf(lastClosed) : -1
+    const nextMonth = lastClosedIdx >= 0 && lastClosedIdx + 1 < BUDGET_MONTHS_2026.length
+      ? BUDGET_MONTHS_2026[lastClosedIdx + 1]
+      : null
+
+    const buildForBv = (bv: ClosingBv): LeNarrative => {
+      const drivers: NarrativeBullet[] = []
+      let headline: NarrativeBullet | null = null
+
+      if (bv === 'Holdings') {
+        // Holdings: kosten-only — focus op overhead + EBITDA-impact.
+        const ytd = getYtd(bv, closedMonths)
+        const opex = ytd['operationele_kosten'] ?? 0
+        const amort = ytd['amortisatie_afschrijvingen'] ?? 0
+        const ebitda = ytd['ebitda'] ?? 0
+        // Per-maand YoY gemiddelde over closed months met data.
+        const monthlyYoy: number[] = []
+        for (const m of closedMonths) {
+          const a26 = getMonthly(bv, m)['operationele_kosten'] ?? 0
+          const a25 = monthlyActuals2025[bv]?.[m.replace('-26', '-25')]?.['operationele_kosten'] ?? 0
+          if (a25 !== 0) monthlyYoy.push((a26 / a25 - 1) * 100)
+        }
+        const avgYoy = monthlyYoy.length > 0
+          ? monthlyYoy.reduce((s, v) => s + v, 0) / monthlyYoy.length
+          : 0
+
+        const fyLE = le.fyLE(bv as EntityName, 'ebitda')
+        const fyBud = BUDGET_MONTHS_2026.reduce((s, m) => s + budget2026(bv, m, 'ebitda'), 0)
+        const nextOpex = nextMonth ? le.getLE(bv as EntityName, nextMonth, 'operationele_kosten') : 0
+        const nextEbitda = nextMonth ? le.getLE(bv as EntityName, nextMonth, 'ebitda') : 0
+
+        const fyGap = fyBud !== 0 ? ((fyLE - fyBud) / Math.abs(fyBud) * 100) : 0
+        if (nextMonth) {
+          headline = {
+            label: `Verwachting ${nextMonth}`,
+            value: `${fmt(nextEbitda)} EBITDA`,
+            sub: `${fmt(nextOpex)} opex`,
+            emphasis: nextEbitda >= 0 ? 'good' : 'warn',
+          }
+        }
+        drivers.push({ label: 'Opex YTD', value: fmt(opex) })
+        drivers.push({ label: 'Amortisatie YTD', value: fmt(amort) })
+        drivers.push({ label: 'EBITDA YTD', value: fmt(ebitda), emphasis: ebitda >= 0 ? 'good' : 'warn' })
+        if (monthlyYoy.length > 0) {
+          drivers.push({
+            label: 'Opex YoY/mnd',
+            value: `${avgYoy >= 0 ? '+' : ''}${avgYoy.toFixed(1)}%`,
+            emphasis: avgYoy <= 0 ? 'good' : 'warn',
+          })
+        }
+        drivers.push({
+          label: 'FY-LE EBITDA',
+          value: fmt(fyLE),
+          emphasis: fyGap >= 0 ? 'good' : 'warn',
+        })
+        if (fyBud !== 0) {
+          drivers.push({ label: 'FY vs budget', value: `${fyGap >= 0 ? '+' : ''}${fyGap.toFixed(1)}%`, emphasis: fyGap >= 0 ? 'good' : 'warn' })
+        }
+
+        const explanation = nextMonth
+          ? `Geen omzet — prognose volgt de YTD-run-rate van overhead, gecorrigeerd voor seizoen 2025. Gemiddelde YoY-mutatie ${avgYoy >= 0 ? '+' : ''}${avgYoy.toFixed(1)}%/mnd → FY-LE EBITDA ${fmt(fyLE)}.`
+          : `Holdings-prognose volgt de YTD-run-rate × seizoen 2025.`
+        return { bv, headline, drivers, explanation }
+      }
+
+      // ── Productie-BV (Cons / Proj / Soft) ─────────────────────────────
+      const fteEntry = fteEntries.find(e => e.bv === bv && e.month === lastClosed)
+      const fteCount = fteEntry?.fte ?? 0
+      const headcount = fteEntry?.headcount ?? 0
+
+      // Declarabiliteit gemiddeld over closed months met hours-data.
+      let declarableSum = 0, workSum = 0
+      for (const m of closedMonths) {
+        const he = hoursEntries.find(e => e.bv === bv && e.month === m)
+        if (he) {
+          declarableSum += he.declarable
+          workSum += he.declarable + he.internal
+        }
+      }
+      const declarability = workSum > 0 ? (declarableSum / workSum * 100) : 0
+
+      // Omzet per maand + per FTE.
+      const ytd = getYtd(bv, closedMonths)
+      const ytdRev = ytd['netto_omzet'] ?? 0
+      const monthsWithData = closedMonths.filter(m => (getMonthly(bv, m)['netto_omzet'] ?? 0) > 0).length
+      const avgMonthly = monthsWithData > 0 ? ytdRev / monthsWithData : 0
+      const revPerFte = fteCount > 0 ? avgMonthly / fteCount : 0
+
+      // Brutomarge%-gemiddeld YTD.
+      const ytdGm = ytd['brutomarge'] ?? 0
+      const marginPct = ytdRev > 0 ? (ytdGm / ytdRev * 100) : 0
+
+      // YoY-trend per maand: voor elke gesloten maand met '25-data berekenen
+      // we (m26 / m25 - 1) × 100, en nemen daarvan het rekenkundig gemiddelde.
+      // Naast YTD-perfMult (gewogen) geeft dit de échte trend per maand.
+      const monthlyYoy: number[] = []
+      for (const m of closedMonths) {
+        const a26 = getMonthly(bv, m)['netto_omzet'] ?? 0
+        const a25 = monthlyActuals2025[bv]?.[m.replace('-26', '-25')]?.['netto_omzet'] ?? 0
+        if (a25 > 0 && a26 > 0) monthlyYoy.push((a26 / a25 - 1) * 100)
+      }
+      const avgMonthlyYoy = monthlyYoy.length > 0
+        ? monthlyYoy.reduce((s, v) => s + v, 0) / monthlyYoy.length
+        : 0
+      // YTD-perfMult als referentie (wat de forecast formule gebruikt om
+      // het seizoenspatroon op te schalen).
+      const py25Total = closedMonths.reduce((s, m) => s + (monthlyActuals2025[bv]?.[m.replace('-26', '-25')]?.['netto_omzet'] ?? 0), 0)
+
+      // Volgende maand-prognose.
+      const nextLE = nextMonth ? le.getLE(bv as EntityName, nextMonth, 'netto_omzet') : 0
+      const nextBudget = nextMonth ? budget2026(bv, nextMonth, 'netto_omzet') : 0
+      const nextLeMargin = nextMonth ? le.getLE(bv as EntityName, nextMonth, 'brutomarge') : 0
+      const nextMarginPct = nextLE > 0 ? (nextLeMargin / nextLE * 100) : 0
+      const sameMonth2025Next = nextMonth ? monthlyActuals2025[bv]?.[nextMonth.replace('-26', '-25')]?.['netto_omzet'] ?? 0 : 0
+
+      // Geplande FTE-mutatie + vakantie voor de prognose-maand.
+      const plannedFte = nextMonth ? fteEntries.find(e => e.bv === bv && e.month === nextMonth)?.fte ?? null : null
+      const fteDelta = plannedFte != null && fteCount > 0 ? plannedFte - fteCount : 0
+      const plannedVakantie = nextMonth ? hoursEntries.find(e => e.bv === bv && e.month === nextMonth)?.vakantie ?? 0 : 0
+
+      // FY-LE 2026.
+      const fyLE = le.fyLE(bv as EntityName, 'netto_omzet')
+      const fyBud = BUDGET_MONTHS_2026.reduce((s, m) => s + budget2026(bv, m, 'netto_omzet'), 0)
+      const fyGap = fyBud > 0 ? ((fyLE / fyBud - 1) * 100) : 0
+
+      // Headline: de eerstvolgende prognose-maand groot weergegeven.
+      if (nextMonth && nextLE > 0) {
+        const diff = nextBudget > 0 ? ((nextLE / nextBudget - 1) * 100) : 0
+        const subParts: string[] = []
+        if (nextBudget > 0) subParts.push(`${diff >= 0 ? '+' : ''}${diff.toFixed(0)}% vs budget`)
+        if (nextMarginPct > 0) subParts.push(`marge ${nextMarginPct.toFixed(1)}%`)
+        headline = {
+          label: `Verwachting ${nextMonth}`,
+          value: fmt(nextLE),
+          sub: subParts.join(' · '),
+          emphasis: nextBudget === 0 ? undefined : (diff >= 0 ? 'good' : 'warn'),
+        }
+      } else if (nextMonth) {
+        headline = { label: `Verwachting ${nextMonth}`, value: 'n.v.t.', sub: 'vul Q1-data aan' }
+      }
+
+      // Drivers: compact, één regel per metric.
+      drivers.push({
+        label: 'FTE',
+        value: fteCount > 0 ? `${fteCount.toFixed(1)}${headcount > 0 ? ` · ${headcount} hc` : ''}` : '—',
+      })
+      if (declarability > 0) {
+        drivers.push({
+          label: 'Declarabiliteit',
+          value: `${declarability.toFixed(0)}%`,
+          emphasis: declarability >= 75 ? 'good' : declarability >= 60 ? 'neutral' : 'warn',
+        })
+      }
+      if (revPerFte > 0) {
+        drivers.push({
+          label: 'Omzet/FTE',
+          value: `€${(revPerFte / 1000).toFixed(1)}k/mnd`,
+        })
+      }
+      if (marginPct !== 0) {
+        drivers.push({
+          label: 'Brutomarge YTD',
+          value: `${marginPct.toFixed(1)}%`,
+          emphasis: marginPct >= 25 ? 'good' : marginPct >= 15 ? 'neutral' : 'warn',
+        })
+      }
+      if (monthlyYoy.length > 0) {
+        drivers.push({
+          label: 'YoY-trend/mnd',
+          value: `${avgMonthlyYoy >= 0 ? '+' : ''}${avgMonthlyYoy.toFixed(1)}%`,
+          emphasis: avgMonthlyYoy >= 0 ? 'good' : 'warn',
+        })
+      }
+      drivers.push({
+        label: 'FY-LE',
+        value: fmt(fyLE),
+        emphasis: fyGap >= 0 ? 'good' : 'warn',
+      })
+      if (fyBud > 0) {
+        drivers.push({
+          label: 'FY vs budget',
+          value: `${fyGap >= 0 ? '+' : ''}${fyGap.toFixed(1)}%`,
+          emphasis: fyGap >= 0 ? 'good' : 'warn',
+        })
+      }
+
+      // Korte uitleg — compact, 1-2 zinnen.
+      const expParts: string[] = []
+      if (nextMonth && nextLE > 0) {
+        const perfMult = py25Total > 0 ? (ytdRev / py25Total) : 1
+        expParts.push(`60% seizoen 2025 (${nextMonth.replace('-26', '-25')} ${fmt(sameMonth2025Next)} × ${perfMult.toFixed(2)}×) + 40% run-rate Q1 (${fmt(avgMonthly)}/mnd)`)
+      } else {
+        expParts.push(`60% seizoen 2025 × YTD-perfMult + 40% run-rate Q1`)
+      }
+      const corrections: string[] = []
+      if (fteDelta !== 0) corrections.push(`FTE ${fteDelta >= 0 ? '+' : ''}${fteDelta.toFixed(1)}`)
+      if (plannedVakantie > 0) corrections.push(`${plannedVakantie}u vakantie`)
+      if (corrections.length > 0) expParts.push(`incl. ${corrections.join(' + ')}`)
+      const explanation = expParts.join('; ') + '.'
+
+      return { bv, headline, drivers, explanation }
+    }
+
+    return activeBvs.map(buildForBv)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [is2025, JSON.stringify(activeBvs), period, fteEntries, hoursEntries, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), useFinStore(s => s.entries), finalizedMonths])
+
   const periodLabel = viewMode === 'ytd' ? `YTD ${ACTUAL_MONTHS[ACTUAL_MONTHS.length-1]}` : period
 
   return (
@@ -943,6 +1236,89 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
               </div>
             )}
             {findings.map((f, i) => <Finding key={i} {...f} />)}
+          </div>
+        </div>
+      )}
+
+      {/* AI-gedreven LE-prognose — compact horizontaal raster: per BV een
+          smalle kaart met (1) grote "Verwachting [maand]"-headline, (2) een
+          rij driver-metrics, (3) één regel uitleg over de blend-formule.
+          Past in dezelfde rij als 1-3 BVs zonder verticale ruimte te slurpen. */}
+      {!is2025 && leNarratives.length > 0 && (
+        <div className="card">
+          <div className="card-hdr" style={{ padding: '6px 12px' }}>
+            <span className="card-title" style={{ fontSize: 12 }}>🤖 AI-prognose — Latest Estimate</span>
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
+              {leNarratives.length} BV{leNarratives.length === 1 ? '' : 's'}
+              {filter.bv !== 'all' ? ` · ${filter.bv}` : ''}
+            </span>
+          </div>
+          <div style={{
+            padding: 10,
+            display: 'grid',
+            gridTemplateColumns: `repeat(${Math.min(leNarratives.length, 4)}, minmax(0, 1fr))`,
+            gap: 8,
+          }}>
+            {leNarratives.map(({ bv, headline, drivers, explanation }) => {
+              const headlineColor =
+                headline?.emphasis === 'good' ? 'var(--green)' :
+                headline?.emphasis === 'warn' ? 'var(--amber)' :
+                BV_COLORS[bv as ClosingBv]
+              return (
+                <div
+                  key={bv as string}
+                  style={{
+                    padding: '8px 10px', borderRadius: 6,
+                    background: `${BV_COLORS[bv as ClosingBv]}0E`,
+                    border: `1px solid ${BV_COLORS[bv as ClosingBv]}55`,
+                    display: 'flex', flexDirection: 'column', gap: 6,
+                    minWidth: 0,
+                  }}
+                >
+                  {/* BV-label */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{
+                      display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+                      background: BV_COLORS[bv as ClosingBv],
+                    }} />
+                    <span style={{
+                      fontSize: 9.5, fontWeight: 700,
+                      color: BV_COLORS[bv as ClosingBv],
+                      textTransform: 'uppercase', letterSpacing: '.06em',
+                    }}>
+                      {bv}
+                    </span>
+                  </div>
+
+                  {/* Headline: groot weergegeven, eerste-aandacht. */}
+                  {headline && (
+                    <div>
+                      <div style={{ fontSize: 9.5, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 1 }}>
+                        {headline.label}
+                      </div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: headlineColor, lineHeight: 1.1, letterSpacing: '-0.01em' }}>
+                        {headline.value}
+                      </div>
+                      {headline.sub && (
+                        <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 1 }}>
+                          {headline.sub}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Drivers: kleine label/value-paren. */}
+                  <div style={{ borderTop: '1px solid var(--bd2)', paddingTop: 4 }}>
+                    {drivers.map((d, i) => <NarrativeBulletRow key={i} bullet={d} />)}
+                  </div>
+
+                  {/* Compacte uitleg onderaan. */}
+                  <div style={{ fontSize: 9.5, color: 'var(--t3)', lineHeight: 1.4, fontStyle: 'italic', borderTop: '1px solid var(--bd2)', paddingTop: 4 }}>
+                    {explanation}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

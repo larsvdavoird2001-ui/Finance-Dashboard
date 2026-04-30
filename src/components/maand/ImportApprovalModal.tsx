@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ImportRecord, BvId } from '../../data/types'
 import type { ParsedHoursEntry } from '../../lib/parseImport'
 import { fmt } from '../../lib/format'
+import { useCanApprove } from '../../lib/permissions'
 
 const BV_COLORS: Record<string, string> = {
   Consultancy: '#00a9e0',
@@ -73,6 +74,10 @@ export function ImportApprovalModal({ record, hoursEntries, onApprove, onReject,
   const [selectedAmountCol, setSelectedAmountCol] = useState(record.detectedAmountCol)
   const [selectedBvCol, setSelectedBvCol] = useState(record.detectedBvCol)
   const [reparsing, setReparsing] = useState(false)
+  // Goedkeuren / afkeuren is een approver-actie. Editors mogen wel naar de
+  // import-detail kijken (zodat ze hun eigen upload kunnen valideren) maar
+  // de definitieve goedkeuring loopt via de controller.
+  const canApprove = useCanApprove()
 
   const singleBv = SINGLE_BV_SLOTS[record.slotId] ?? null
   const bvDetected = BVS.some(bv => (record.perBv[bv] ?? 0) > 0)
@@ -532,20 +537,26 @@ export function ImportApprovalModal({ record, hoursEntries, onApprove, onReject,
             </div>
           )}
 
-          {/* Actieknoppen */}
+          {/* Actieknoppen — goedkeuren/afkeuren alleen voor approver/admin */}
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               className="btn success"
               style={{ flex: 1, justifyContent: 'center', fontSize: 12, padding: '8px 12px' }}
               onClick={onApprove}
+              disabled={!canApprove}
+              title={canApprove
+                ? 'Importbestand definitief toepassen'
+                : '🔒 Wacht op goedkeuring controller — alleen Controller / CFO kan importbestanden definitief maken.'}
             >
-              ✓ Bevestigen & Toepassen
+              {canApprove ? '✓ Bevestigen & Toepassen' : '🔒 Wacht op goedkeuring'}
             </button>
             {!showReject ? (
               <button
                 className="btn ghost"
                 style={{ color: 'var(--red)', border: '1px solid var(--red)', padding: '8px 12px', fontSize: 12 }}
                 onClick={() => setShowReject(true)}
+                disabled={!canApprove}
+                title={canApprove ? 'Importbestand afkeuren' : 'Alleen controller/admin'}
               >
                 ✕ Afkeuren
               </button>

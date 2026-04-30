@@ -4,9 +4,12 @@ import { create } from 'zustand'
  *  - `tab: 'maand'`  → springen naar Maandafsluiting (sub-section via `section`)
  *  - `tab: 'ohw'`    → springen naar OHW Overzicht met optionele entity + rowId
  *                      zodat een specifieke rij in view komt en knippert.
+ *  - `tab: 'budget'` → springen naar Budget vs Actuals (na een
+ *                      Maandafsluiting-finalisatie, om de LE-leerlus voor die
+ *                      maand te tonen).
  */
 export interface NavTarget {
-  tab: 'maand' | 'ohw'
+  tab: 'maand' | 'ohw' | 'budget'
   /** Voor tab='maand' */
   section?: 'import' | 'afsluiting' | 'tarieven' | 'fte' | 'export'
   /** Voor tab='maand' met section='import' (slot-highlight in importoverzicht) */

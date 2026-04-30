@@ -135,7 +135,13 @@ CREATE TABLE IF NOT EXISTS ohw_evidence (
 --     (auth.users); deze tabel houdt alleen email, rol en uitnodiging-status bij.
 CREATE TABLE IF NOT EXISTS user_profiles (
   email text PRIMARY KEY,
-  role text NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+  -- 4-niveau rol-systeem (zie src/lib/permissions.ts):
+  --   viewer   = alleen-lezen
+  --   editor   = financiële administratie (invullen, geen goedkeuring)
+  --   approver = controller / CFO (goedkeuren + definitief afsluiten)
+  --   admin    = beheer + alle approver-rechten
+  -- Legacy 'user' wordt door de app gemapt naar 'viewer' bij read.
+  role text NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer','editor','approver','admin','user')),
   active boolean NOT NULL DEFAULT true,
   -- True voor net-uitgenodigde users die nog hun wachtwoord moeten instellen.
   -- App toont alleen aan deze users de SetPasswordPage. Wordt false gezet zodra
@@ -154,6 +160,14 @@ ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS needs_password boolean NOT NU
 -- Projects / Software / Holdings). De filter wordt afgedwongen in de UI.
 ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS bv text
   CHECK (bv IS NULL OR bv IN ('Consultancy','Projects','Software','Holdings'));
+
+-- Migratie voor bestaande databases: het oude CHECK kende alleen 'admin'/'user'.
+-- We gooien hem opnieuw zodat de 4-niveau-rollen geaccepteerd worden. Bestaande
+-- 'user'-rijen blijven geldig (we accepteren 'user' als legacy-alias).
+ALTER TABLE user_profiles DROP CONSTRAINT IF EXISTS user_profiles_role_check;
+ALTER TABLE user_profiles
+  ADD CONSTRAINT user_profiles_role_check
+  CHECK (role IN ('viewer','editor','approver','admin','user'));
 
 -- 9. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
 CREATE TABLE IF NOT EXISTS tariff_entries (
@@ -293,6 +307,15 @@ CREATE TABLE IF NOT EXISTS closing_finalized (
   checklist jsonb DEFAULT '{}'::jsonb,    -- snapshot van afgevinkte items
   created_at timestamptz DEFAULT now()
 );
+
+-- RLS: zelfde "open"-policy als de andere tabellen (intern dashboard, geen
+-- multi-tenant). Zonder policy zou een Supabase-project met RLS aan-by-default
+-- alle reads blokkeren — waardoor fetchFinalizedMonths leeg terugkomt en de
+-- net-afgesloten Maandafsluiting weer als 'open' zou tonen na een realtime
+-- refetch.
+ALTER TABLE closing_finalized ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all on closing_finalized" ON closing_finalized;
+CREATE POLICY "Allow all on closing_finalized" ON closing_finalized FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================================
 -- Bootstrap: zorg dat de TPG Finance hoofd-admin altijd aanwezig is.

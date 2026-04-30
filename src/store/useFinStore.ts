@@ -236,8 +236,25 @@ export const useFinStore = create<FinStore>()(
 
           // Laad ook de finalized-status van Maandafsluitingen.
           try {
-            const finalized = await fetchFinalizedMonths()
-            set({ finalized })
+            const dbFinalized = await fetchFinalizedMonths()
+            const localFinalized = get().finalized
+            // Defensieve merge: DB wint per-maand, maar lokale records die
+            // (nog) niet in de DB-respons staan blijven bewaard. Dit voorkomt
+            // dat een silent-empty read (RLS verkeerd geconfigureerd, of
+            // realtime-event arriveert vóór commit-zichtbaarheid) een net
+            // optimistisch ge-finaliseerde maand wegpoetst. Cross-client
+            // unfinalize blijft werken: de DELETE-realtime triggert pas een
+            // refetch nadat de DELETE in DB zichtbaar is, en in die respons
+            // staat de unfinalized maand niet meer — maar omdat de andere
+            // client de unfinalize zelf niet lokaal heeft gedaan, blijft de
+            // record in lokaal zichtbaar. Dat is de geaccepteerde trade-off:
+            // gebruiker kan handmatig refreshen bij cross-device gebruik.
+            const dbMonths = new Set(dbFinalized.map(f => f.month))
+            const merged: FinalizedMonth[] = [
+              ...dbFinalized,
+              ...localFinalized.filter(f => !dbMonths.has(f.month)),
+            ]
+            set({ finalized: merged })
           } catch (e) {
             console.warn('[useFinStore] fetchFinalizedMonths failed:', e)
           }
@@ -295,26 +312,31 @@ export const useFinStore = create<FinStore>()(
           finalizedBy: by,
           checklist: { ...checklist },
         }
-        // Optimistic update
+        // Optimistic update — wordt door persist-middleware lokaal bewaard,
+        // dus blijft staan over page-reloads heen ook als de DB-sync faalt.
         set(s => ({
           finalized: [...s.finalized.filter(f => f.month !== month), record],
         }))
         const r = await upsertFinalizedMonth(record)
         if (r.error) {
-          // Rollback bij DB-fout
-          set(s => ({ finalized: s.finalized.filter(f => f.month !== month) }))
-          throw new Error(r.error)
+          // GEEN rollback: de optimistische state is lokaal gepersisteerd
+          // (zustand persist) en de gebruiker mag de Maandafsluiting blijven
+          // gebruiken ook als de Supabase-tabel ontbreekt of RLS verkeerd
+          // staat. Cross-device sync vraagt om correct DB-schema; in lokale
+          // degraded mode persisteert de finalisatie via localStorage.
+          console.warn(`[useFinStore] DB-sync van finalizeMonth(${month}) faalde: ${r.error}. State blijft lokaal bewaard.`)
         }
       },
 
       unfinalizeMonth: async (month) => {
-        const prev = get().finalized.find(f => f.month === month)
+        // Zelfde ratio als finalizeMonth: geen rollback bij DB-fout. Lokaal
+        // is de unfinalize altijd toegepast; cross-device hoort dat via een
+        // werkende DB-laag te lopen, maar de UI moet niet vastlopen als de
+        // DB even niet meewerkt.
         set(s => ({ finalized: s.finalized.filter(f => f.month !== month) }))
         const r = await deleteFinalizedMonth(month)
-        if (r.error && prev) {
-          // Rollback
-          set(s => ({ finalized: [...s.finalized, prev] }))
-          throw new Error(r.error)
+        if (r.error) {
+          console.warn(`[useFinStore] DB-sync van unfinalizeMonth(${month}) faalde: ${r.error}. State blijft lokaal bewaard.`)
         }
       },
     }),

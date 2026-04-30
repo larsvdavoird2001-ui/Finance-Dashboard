@@ -21,7 +21,8 @@ import { useRealtimeSync } from './hooks/useRealtimeSync'
 import { useUserProfileGuard } from './hooks/useUserProfileGuard'
 import { useDataRefresh } from './hooks/useDataRefresh'
 import { useAuth, profileNeedsPassword } from './lib/auth'
-import { PermissionsContext } from './lib/permissions'
+import { PermissionsContext, rolePermissions } from './lib/permissions'
+import { notifyMaandStart } from './store/useNotificationStore'
 import { onDbEvent } from './lib/dbEvents'
 import { snapshotLocalStorage } from './lib/localBackup'
 import { autoDownloadIfStale } from './lib/dataExport'
@@ -91,6 +92,7 @@ export default function App() {
   useEffect(() => {
     if (navPending?.tab === 'maand') setTab('maand')
     else if (navPending?.tab === 'ohw') setTab('ohw')
+    else if (navPending?.tab === 'budget') setTab('budget')
   }, [navPending])
 
   // Non-admin op admin-only tabs → terug naar dashboard
@@ -112,6 +114,17 @@ export default function App() {
     if (!userEmailKey) return
     localStorage.setItem('tpg-last-user', userEmailKey)
     refreshAllData().catch(e => console.warn('[refresh on login] failed:', e))
+    // Maandafsluiting-trigger bij inloggen: vanaf de 1e van een nieuwe maand
+    // moet de financiële administratie weten dat de vorige maand klaar staat
+    // om afgesloten te worden. Dedupe-key per maand zorgt dat het maar één
+    // keer per maand verschijnt (ook als de user 100x inlogt).
+    const now = new Date()
+    const MC = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const prevIdx = (now.getMonth() - 1 + 12) % 12
+    const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+    const prevYy = String(prevYear).slice(-2)
+    const prevMonth = `${MC[prevIdx]}-${prevYy}`
+    notifyMaandStart(prevMonth)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userEmailKey])
 
@@ -218,7 +231,15 @@ export default function App() {
     )
   }
 
-  const canEdit = isAdmin
+  // Effectieve rol: hoofd-admin (hard-coded ADMIN_EMAIL) → admin; anders het
+  // role-veld uit user_profiles (defaulting op 'viewer'). canEdit en
+  // canApprove worden afgeleid via rolePermissions.
+  const effectiveRole: import('./lib/permissions').Role = isAdmin
+    ? 'admin'
+    : (currentProfile?.role && ['viewer', 'editor', 'approver', 'admin'].includes(currentProfile.role)
+      ? currentProfile.role as import('./lib/permissions').Role
+      : 'viewer')
+  const { canEdit, canApprove } = rolePermissions(effectiveRole)
 
   // BV-filter wrapper: blokkeer pogingen om de bv te wijzigen voor locked users.
   const onLockedFilterChange = (patch: Partial<GlobalFilter>) => {
@@ -234,7 +255,7 @@ export default function App() {
   }
 
   return (
-    <PermissionsContext.Provider value={{ canEdit, isAdmin, lockedBv }}>
+    <PermissionsContext.Provider value={{ canEdit, canApprove, isAdmin, role: effectiveRole, lockedBv }}>
       <Sidebar
         active={tab}
         onNav={setTab}
@@ -267,7 +288,7 @@ export default function App() {
             </button>
           </div>
         )}
-        <Topbar tab={tab} filter={filter} onFilterChange={onLockedFilterChange} />
+        <Topbar tab={tab} filter={filter} onFilterChange={onLockedFilterChange} userEmail={userEmailKey} />
 
         {tab === 'dashboard'  && <DashboardTab filter={filter} onFilterChange={onLockedFilterChange} onNav={(t) => setTab(t)} />}
         {tab === 'hours'      && <HoursTab filter={filter} />}

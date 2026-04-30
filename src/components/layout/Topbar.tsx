@@ -1,6 +1,7 @@
 import type { GlobalFilter, ClosingBv, TabId } from '../../data/types'
 import { useSaveStatus } from '../../lib/saveStatus'
 import { useLockedBv } from '../../lib/permissions'
+import { NotificationInbox } from './NotificationInbox'
 
 const TITLES: Record<TabId, string> = {
   dashboard:  'Executive Overview',
@@ -41,6 +42,9 @@ interface Props {
   tab: TabId
   filter: GlobalFilter
   onFilterChange: (f: Partial<GlobalFilter>) => void
+  /** Email van de huidige gebruiker — gebruikt voor de notificatie-inbox
+   *  (wie heeft een melding wel/niet gelezen). */
+  userEmail?: string | null
 }
 
 function fmtSyncTime(ts: number | null): string {
@@ -97,7 +101,7 @@ function SyncIndicator() {
   )
 }
 
-export function Topbar({ tab, filter, onFilterChange }: Props) {
+export function Topbar({ tab, filter, onFilterChange, userEmail }: Props) {
   const showFilters = FILTER_TABS.includes(tab)
   const lockedBv = useLockedBv()
 
@@ -233,6 +237,7 @@ export function Topbar({ tab, filter, onFilterChange }: Props) {
         )}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <NotificationInbox userEmail={userEmail ?? null} />
           <SyncIndicator />
           <div style={{ fontSize: 11, color: 'var(--t3)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', animation: 'pulse 2s infinite' }} />

@@ -4,6 +4,9 @@ import { useFteStore } from '../../store/useFteStore'
 import { useImportStore } from '../../store/useImportStore'
 import { useOhwStore } from '../../store/useOhwStore'
 import { useCostBreakdownStore } from '../../store/useCostBreakdownStore'
+import { useNavStore } from '../../store/useNavStore'
+import { notifyMaandFinalized } from '../../store/useNotificationStore'
+import { useCanApprove } from '../../lib/permissions'
 import type { ClosingBv } from '../../data/types'
 
 interface ChecklistItem {
@@ -68,6 +71,11 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
   const getFinalized   = useFinStore(s => s.getFinalized)
   const finalizeMonth  = useFinStore(s => s.finalizeMonth)
   const unfinalizeMonth = useFinStore(s => s.unfinalizeMonth)
+  const navigateTo     = useNavStore(s => s.navigateTo)
+  // Definitief afsluiten / heropenen mag alleen door approver of admin —
+  // de financiële administratie (editor) vult de checklist wél in maar het
+  // groene "Definitief"-vinkje moet door de controller / CFO gezet worden.
+  const canApprove     = useCanApprove()
 
   const finalized = isMonthFinalized(month)
   const finalRecord = getFinalized(month)
@@ -324,7 +332,15 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
       const snapshot: Record<string, boolean> = {}
       for (const it of items) snapshot[it.key] = effectiveDone(it)
       await finalizeMonth(month, currentUserEmail ?? 'unknown', snapshot)
-      showToast(`✓ ${month} is definitief afgesloten`, 'g')
+      showToast(`✓ ${month} definitief afgesloten — ga naar Budget vs Actuals voor de LE-leerlus`, 'g')
+      // Inbox-melding voor editors + approvers (LE-leerlus klaar om te
+      // beoordelen). Notification dedupe-key voorkomt dubbele berichten als
+      // dezelfde maand opnieuw definitief gemaakt zou worden.
+      notifyMaandFinalized(month, currentUserEmail ?? 'controller')
+      // Stuur de gebruiker direct door naar de Budget vs Actuals tab waar de
+      // LE-leerlus voor deze maand opent: variantie-overzicht + AI-vragen
+      // zodat de afwijkingen kunnen worden geduid voor toekomstige forecasts.
+      navigateTo({ tab: 'budget', month })
     } catch (e) {
       showToast(`Afsluiten mislukt: ${e instanceof Error ? e.message : String(e)}`, 'r')
     }
@@ -387,26 +403,37 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
           </span>
         )}
         {!finalized ? (
-          <button
-            className="btn sm primary"
-            onClick={handleFinalize}
-            disabled={!allRequiredOk}
-            title={allRequiredOk
-              ? `Definitief afsluiten ${month} — Executive Overview gebruikt vanaf nu actuals i.p.v. LE`
-              : `Nog ${stillToDo} verplicht${stillToDo === 1 ? '' : 'e'} item${stillToDo === 1 ? '' : 's'} af te vinken`}
-            style={{ marginLeft: 6, fontSize: 11 }}
-          >
-            ✅ Definitief afsluiten
-          </button>
+          canApprove ? (
+            <button
+              className="btn sm primary"
+              onClick={handleFinalize}
+              disabled={!allRequiredOk}
+              title={allRequiredOk
+                ? `Definitief afsluiten ${month} — Executive Overview gebruikt vanaf nu actuals i.p.v. LE`
+                : `Nog ${stillToDo} verplicht${stillToDo === 1 ? '' : 'e'} item${stillToDo === 1 ? '' : 's'} af te vinken`}
+              style={{ marginLeft: 6, fontSize: 11 }}
+            >
+              ✅ Definitief afsluiten
+            </button>
+          ) : (
+            <span
+              title="Alleen Controller / CFO kan een maand definitief maken. Vink de checklist af zodat zij kunnen afsluiten."
+              style={{ marginLeft: 6, fontSize: 10, color: 'var(--t3)', fontStyle: 'italic' }}
+            >
+              🔒 Wacht op goedkeuring controller
+            </span>
+          )
         ) : (
-          <button
-            className="btn sm ghost"
-            onClick={handleUnfinalize}
-            style={{ marginLeft: 6, fontSize: 10, color: 'var(--amber)', borderColor: 'var(--amber)' }}
-            title={`Heropen ${month} — schakelt terug naar Latest Estimate in alle trends`}
-          >
-            ⟲ Heropenen
-          </button>
+          canApprove ? (
+            <button
+              className="btn sm ghost"
+              onClick={handleUnfinalize}
+              style={{ marginLeft: 6, fontSize: 10, color: 'var(--amber)', borderColor: 'var(--amber)' }}
+              title={`Heropen ${month} — schakelt terug naar Latest Estimate in alle trends`}
+            >
+              ⟲ Heropenen
+            </button>
+          ) : null
         )}
       </div>
 
