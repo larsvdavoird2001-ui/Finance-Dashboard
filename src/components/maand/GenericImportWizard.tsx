@@ -34,13 +34,16 @@ interface SlotMeta {
 }
 
 const SLOT_META: Record<string, SlotMeta> = {
-  factuurvolume:   { id: 'factuurvolume',   label: 'Factuurvolume',    icon: '🧾', unit: 'eur' },
-  geschreven_uren: { id: 'geschreven_uren', label: 'Geschreven uren',  icon: '⏱',  unit: 'hours' },
-  // uren-lijst: de waarde die we willen sommeren is de NETTO WAARDE (€) per BV,
-  // niet de uren zelf. Output gaat naar een OHW-rij per BV.
-  uren_lijst:      { id: 'uren_lijst',      label: 'Uren lijst',       icon: '📋', unit: 'eur' },
-  d_lijst:         { id: 'd_lijst',         label: 'D Lijst',          icon: '📊', unit: 'eur' },
-  conceptfacturen: { id: 'conceptfacturen', label: 'Conceptfacturen',  icon: '📄', unit: 'eur' },
+  factuurvolume:           { id: 'factuurvolume',           label: 'Factuurvolume',           icon: '🧾', unit: 'eur' },
+  geschreven_uren:         { id: 'geschreven_uren',         label: 'Geschreven uren YTD',     icon: '⏱',  unit: 'hours' },
+  // uren-lijst (slot-id stabiel om bestaande imports niet te breken): de
+  // NTF-uren-lijst — Nog Te Factureren netto waarde (€) per BV → OHW.
+  uren_lijst:              { id: 'uren_lijst',              label: 'NTF Uren',                icon: '📋', unit: 'eur' },
+  // Uren Facturering Totaal — alleen Consultancy. TOTALE facturatiewaarde
+  // per maand → Uren Dashboard "Waarde Declarabel".
+  uren_facturering_totaal: { id: 'uren_facturering_totaal', label: 'Uren Facturering Totaal (Consultancy)', icon: '💶', unit: 'eur' },
+  d_lijst:                 { id: 'd_lijst',                 label: 'D Lijst',                 icon: '📊', unit: 'eur' },
+  conceptfacturen:         { id: 'conceptfacturen',         label: 'Conceptfacturen',         icon: '📄', unit: 'eur' },
 }
 
 interface Props {
@@ -68,6 +71,11 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
   const [step, setStep] = useState<Step>(1)
   const [searchTerm, setSearchTerm] = useState('')
   const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set())
+  // Render-cap voor de details-tabel op stap 4. Voorkomt dat een D-Lijst
+  // van 10k+ rijen de browser doodtimet bij het renderen. Eerste 500 zijn
+  // direct zichtbaar; "toon meer" voegt 500 erbij. Search + exclude blijven
+  // op de volledige set werken (de data wordt niet weggegooid).
+  const [visibleLimit, setVisibleLimit] = useState(500)
 
   // Step 1 — sheet
   const sheetNames = workbook.SheetNames
@@ -148,8 +156,11 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
     [filters],
   )
 
-  // Live preview
-  const livePreview: ParseResult | null = useMemo(() => {
+  // Base-preview = volledige compute zonder handmatige exclusions. Heavy
+  // O(N) scan, herberekent alleen wanneer de config (sheet/header/kolommen/
+  // filters) wijzigt — NIET bij elke checkbox-klik op stap 4. Dat scheelt
+  // bij grote bestanden (D-Lijst e.d.) seconden per klik.
+  const basePreview: ParseResult | null = useMemo(() => {
     if (step < 3) return null
     if (!amountCol) return null
     if (!isSingleBv && !bvCol) return null
@@ -159,29 +170,53 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
         bvCol: bvCol || undefined,
         bvFilter: bvFilter || undefined,
         filters: activeFilters.length > 0 ? activeFilters : undefined,
-        excludedRowIndices: step === 4 ? excludedRows : undefined,
+        // BEWUST geen excludedRowIndices hier — exclusions worden in
+        // livePreview goedkoop verrekend via de details.
       }
       return computeGenericImport(headers, dataRows, slotId, cfg)
     } catch {
       return null
     }
-  }, [step, amountCol, bvCol, bvFilter, activeFilters, excludedRows, headers, dataRows, slotId, isSingleBv])
+  }, [step, amountCol, bvCol, bvFilter, activeFilters, headers, dataRows, slotId, isSingleBv])
 
-  // Alle details voor stap 4 (zonder handmatige exclusions)
-  const detailsInline: GenericImportDetail[] = useMemo(() => {
-    if (!amountCol) return []
-    if (!isSingleBv && !bvCol) return []
-    try {
-      const cfg: GenericImportConfig = {
-        amountCol,
-        bvCol: bvCol || undefined,
-        bvFilter: bvFilter || undefined,
-        filters: activeFilters.length > 0 ? activeFilters : undefined,
-      }
-      const r = computeGenericImport(headers, dataRows, slotId, cfg)
-      return r.genericImportDetails ?? []
-    } catch { return [] }
-  }, [amountCol, bvCol, bvFilter, activeFilters, headers, dataRows, slotId, isSingleBv])
+  // Alle details voor stap 4 = basePreview.genericImportDetails. Eén
+  // referentie houdt React-keys stabiel zodat individuele <tr>-toggles niet
+  // de hele tabel re-mounten.
+  const detailsInline: GenericImportDetail[] = useMemo(
+    () => basePreview?.genericImportDetails ?? [],
+    [basePreview],
+  )
+
+  // Live preview = basePreview met excluded rijen afgetrokken. Goedkope
+  // O(excluded) reductie in plaats van O(N) opnieuw scannen — clicks op
+  // checkboxes voelen nu instantané.
+  const livePreview: ParseResult | null = useMemo(() => {
+    if (!basePreview) return null
+    if (excludedRows.size === 0) return basePreview
+    let excludedTotal = 0
+    let excludedMatched = 0
+    const excludedPerBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
+    const fallbackBv = (slotConfig?.targetBv ?? 'Consultancy') as BvId
+    for (const d of detailsInline) {
+      if (!excludedRows.has(d.rowIndex)) continue
+      excludedTotal += d.amount
+      excludedMatched++
+      const bv = (d.bv ?? fallbackBv) as BvId
+      excludedPerBv[bv] = (excludedPerBv[bv] ?? 0) + d.amount
+    }
+    const isHoursSlot = meta.unit === 'hours'
+    const round = (v: number) => isHoursSlot ? Math.round(v * 10) / 10 : Math.round(v)
+    const adjustedPerBv = { ...basePreview.perBv }
+    for (const k of Object.keys(excludedPerBv) as BvId[]) {
+      adjustedPerBv[k] = round((adjustedPerBv[k] ?? 0) - excludedPerBv[k])
+    }
+    return {
+      ...basePreview,
+      totalAmount: round(basePreview.totalAmount - excludedTotal),
+      perBv: adjustedPerBv,
+      parsedCount: basePreview.parsedCount - excludedMatched,
+    }
+  }, [basePreview, detailsInline, excludedRows, slotConfig?.targetBv, meta.unit])
 
   const canAdvance = () => {
     if (step === 1) return !!sheetName
@@ -632,65 +667,104 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                     </tr>
                   </thead>
                   <tbody>
-                    {detailsInline
-                      .filter(d => !searchTerm || [String(d.amount), d.rawAmount, d.rawBv, d.bv ?? ''].join(' ').toLowerCase().includes(searchTerm.toLowerCase()))
-                      .map(d => {
-                        const included = !excludedRows.has(d.rowIndex)
-                        return (
-                          <tr
-                            key={d.rowIndex}
-                            onClick={() => {
-                              setExcludedRows(prev => {
-                                const next = new Set(prev)
-                                if (included) next.add(d.rowIndex); else next.delete(d.rowIndex)
-                                return next
-                              })
-                            }}
-                            style={{
-                              cursor: 'pointer',
-                              opacity: included ? 1 : 0.45,
-                              textDecoration: included ? 'none' : 'line-through',
-                              borderBottom: '1px solid var(--bd)',
-                            }}
-                          >
-                            <td style={{ padding: '6px 10px', textAlign: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={included}
-                                onChange={() => {}}
-                                onClick={e => e.stopPropagation()}
-                                style={{ cursor: 'pointer', accentColor: 'var(--blue)' }}
-                              />
-                            </td>
-                            <td style={{ padding: '6px 10px', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 10 }}>
-                              #{d.rowIndex + 1}
-                            </td>
-                            {!isSingleBv && (
-                              <td style={{ padding: '6px 10px' }}>
-                                {d.bv ? (
-                                  <span style={{
-                                    fontSize: 10, padding: '1px 6px', borderRadius: 3, fontWeight: 700,
-                                    background: BV_COLORS[d.bv] + '22', color: BV_COLORS[d.bv],
-                                  }}>
-                                    {d.bv}
-                                  </span>
-                                ) : <span style={{ color: 'var(--t3)' }}>—</span>}
-                                {d.rawBv && d.rawBv !== d.bv && (
-                                  <span style={{ color: 'var(--t3)', fontSize: 10, marginLeft: 6, fontFamily: 'var(--mono)' }}>
-                                    ({d.rawBv.slice(0, 24)})
-                                  </span>
+                    {(() => {
+                      const term = searchTerm.toLowerCase().trim()
+                      const filtered = term
+                        ? detailsInline.filter(d => [String(d.amount), d.rawAmount, d.rawBv, d.bv ?? ''].join(' ').toLowerCase().includes(term))
+                        : detailsInline
+                      // Cap: render alleen de eerste `visibleLimit` rijen.
+                      // Bij actieve search overrulen we de cap (de gebruiker
+                      // heeft al gefilterd) zodat alle hits zichtbaar zijn.
+                      const shown = term ? filtered : filtered.slice(0, visibleLimit)
+                      const totalRows = filtered.length
+                      const hiddenCount = totalRows - shown.length
+                      return (
+                        <>
+                          {shown.map(d => {
+                            const included = !excludedRows.has(d.rowIndex)
+                            return (
+                              <tr
+                                key={d.rowIndex}
+                                onClick={() => {
+                                  setExcludedRows(prev => {
+                                    const next = new Set(prev)
+                                    if (included) next.add(d.rowIndex); else next.delete(d.rowIndex)
+                                    return next
+                                  })
+                                }}
+                                style={{
+                                  cursor: 'pointer',
+                                  opacity: included ? 1 : 0.45,
+                                  textDecoration: included ? 'none' : 'line-through',
+                                  borderBottom: '1px solid var(--bd)',
+                                }}
+                              >
+                                <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={included}
+                                    onChange={() => {}}
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ cursor: 'pointer', accentColor: 'var(--blue)' }}
+                                  />
+                                </td>
+                                <td style={{ padding: '6px 10px', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 10 }}>
+                                  #{d.rowIndex + 1}
+                                </td>
+                                {!isSingleBv && (
+                                  <td style={{ padding: '6px 10px' }}>
+                                    {d.bv ? (
+                                      <span style={{
+                                        fontSize: 10, padding: '1px 6px', borderRadius: 3, fontWeight: 700,
+                                        background: BV_COLORS[d.bv] + '22', color: BV_COLORS[d.bv],
+                                      }}>
+                                        {d.bv}
+                                      </span>
+                                    ) : <span style={{ color: 'var(--t3)' }}>—</span>}
+                                    {d.rawBv && d.rawBv !== d.bv && (
+                                      <span style={{ color: 'var(--t3)', fontSize: 10, marginLeft: 6, fontFamily: 'var(--mono)' }}>
+                                        ({d.rawBv.slice(0, 24)})
+                                      </span>
+                                    )}
+                                  </td>
+                                )}
+                                <td style={{ padding: '6px 10px', fontSize: 10, color: 'var(--t3)', fontFamily: 'var(--mono)' }}>
+                                  "{d.rawAmount.slice(0, 30)}"
+                                </td>
+                                <td className="r mono" style={{ padding: '6px 10px', fontWeight: 600 }}>
+                                  {isHoursSlot ? `${d.amount.toFixed(1)} u` : fmt(Math.round(d.amount))}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                          {hiddenCount > 0 && (
+                            <tr>
+                              <td colSpan={isSingleBv ? 4 : 5} style={{ padding: '10px 14px', textAlign: 'center', background: 'var(--bg4)' }}>
+                                <span style={{ fontSize: 11, color: 'var(--t3)', marginRight: 10 }}>
+                                  {hiddenCount.toLocaleString('nl-NL')} extra rij(en) verborgen — gebruik zoek om gericht te filteren
+                                </span>
+                                <button
+                                  className="btn sm ghost"
+                                  onClick={() => setVisibleLimit(v => v + 500)}
+                                  style={{ fontSize: 10 }}
+                                >
+                                  ▾ Toon volgende 500
+                                </button>
+                                {visibleLimit < totalRows && (
+                                  <button
+                                    className="btn sm ghost"
+                                    onClick={() => setVisibleLimit(totalRows)}
+                                    style={{ fontSize: 10, marginLeft: 6 }}
+                                  >
+                                    Toon alles ({totalRows.toLocaleString('nl-NL')})
+                                  </button>
                                 )}
                               </td>
-                            )}
-                            <td style={{ padding: '6px 10px', fontSize: 10, color: 'var(--t3)', fontFamily: 'var(--mono)' }}>
-                              "{d.rawAmount.slice(0, 30)}"
-                            </td>
-                            <td className="r mono" style={{ padding: '6px 10px', fontWeight: 600 }}>
-                              {isHoursSlot ? `${d.amount.toFixed(1)} u` : fmt(Math.round(d.amount))}
-                            </td>
-                          </tr>
-                        )
-                      })}
+                            </tr>
+                          )}
+                        </>
+                      )
+                    })()}
                     {detailsInline.length === 0 && (
                       <tr>
                         <td colSpan={isSingleBv ? 4 : 5} style={{ padding: 20, textAlign: 'center', color: 'var(--t3)', fontSize: 11 }}>

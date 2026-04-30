@@ -1,7 +1,15 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ClosingEntry, ClosingBv } from '../data/types'
-import { fetchClosingEntries, upsertClosingEntry, upsertAllClosingEntries } from '../lib/db'
+import {
+  fetchClosingEntries,
+  upsertClosingEntry,
+  upsertAllClosingEntries,
+  fetchFinalizedMonths,
+  upsertFinalizedMonth,
+  deleteFinalizedMonth,
+  type FinalizedMonth,
+} from '../lib/db'
 
 // Financieel resultaat & vennootschapsbelasting per BV/maand — bekende
 // actuals-waardes uit de P&L (plData 2026). Jan/Feb worden voor-ingevuld
@@ -131,6 +139,12 @@ export function getVpbDefault(bv: ClosingBv, month: string): number {
 
 interface FinStore {
   entries: ClosingEntry[]
+  /** Maanden waarvoor de Maandafsluiting expliciet definitief is gemaakt.
+   *  ALLEEN deze maanden worden door de LE-hook als 'actual' gezien — open
+   *  maanden (incl. kalender-gesloten maar nog niet finaliseerde) blijven LE-
+   *  forecast. Bewaart óók de checklist-snapshot zodat een unfinalize→
+   *  refinalize de eerder afgevinkte items niet kwijtraakt. */
+  finalized: FinalizedMonth[]
   loaded: boolean
   loadFromDb: () => Promise<void>
   updateEntry: (id: string, patch: Partial<Omit<ClosingEntry, 'id'>>) => void
@@ -141,6 +155,15 @@ interface FinStore {
    *  (bv. voor Holdings werd toegevoegd). Lazy create maakt een lege
    *  entry met INITIAL_ENTRIES-defaults. */
   ensureEntry: (bv: ClosingBv, month: string) => ClosingEntry
+  /** Is deze maand definitief afgesloten? */
+  isMonthFinalized: (month: string) => boolean
+  /** Geef het record terug (incl. checklist-snapshot) of undefined. */
+  getFinalized: (month: string) => FinalizedMonth | undefined
+  /** Markeer een maand als definitief afgesloten. checklist = snapshot van
+   *  afgevinkte items op het moment van finaliseren. */
+  finalizeMonth: (month: string, by: string, checklist: Record<string, boolean>) => Promise<void>
+  /** Onderwijs een maand opnieuw als open. */
+  unfinalizeMonth: (month: string) => Promise<void>
 }
 
 /** Merge: voeg ontbrekende INITIAL_ENTRIES toe aan de gegeven lijst.
@@ -157,6 +180,7 @@ export const useFinStore = create<FinStore>()(
   persist(
     (set, get) => ({
       entries: INITIAL_ENTRIES,
+      finalized: [],
       loaded: false,
 
       loadFromDb: async () => {
@@ -209,6 +233,14 @@ export const useFinStore = create<FinStore>()(
             if (newOnes.length > 0) await upsertAllClosingEntries(newOnes)
           }
           void dbById  // typescript-tevreden, anders 'never used'
+
+          // Laad ook de finalized-status van Maandafsluitingen.
+          try {
+            const finalized = await fetchFinalizedMonths()
+            set({ finalized })
+          } catch (e) {
+            console.warn('[useFinStore] fetchFinalizedMonths failed:', e)
+          }
         } catch (err) {
           console.error('[useFinStore] Supabase load failed:', err)
           set({ loaded: true })
@@ -249,11 +281,47 @@ export const useFinStore = create<FinStore>()(
         upsertClosingEntry(fresh)
         return fresh
       },
+
+      isMonthFinalized: (month) =>
+        get().finalized.some(f => f.month === month),
+
+      getFinalized: (month) =>
+        get().finalized.find(f => f.month === month),
+
+      finalizeMonth: async (month, by, checklist) => {
+        const record: FinalizedMonth = {
+          month,
+          finalizedAt: new Date().toISOString(),
+          finalizedBy: by,
+          checklist: { ...checklist },
+        }
+        // Optimistic update
+        set(s => ({
+          finalized: [...s.finalized.filter(f => f.month !== month), record],
+        }))
+        const r = await upsertFinalizedMonth(record)
+        if (r.error) {
+          // Rollback bij DB-fout
+          set(s => ({ finalized: s.finalized.filter(f => f.month !== month) }))
+          throw new Error(r.error)
+        }
+      },
+
+      unfinalizeMonth: async (month) => {
+        const prev = get().finalized.find(f => f.month === month)
+        set(s => ({ finalized: s.finalized.filter(f => f.month !== month) }))
+        const r = await deleteFinalizedMonth(month)
+        if (r.error && prev) {
+          // Rollback
+          set(s => ({ finalized: [...s.finalized, prev] }))
+          throw new Error(r.error)
+        }
+      },
     }),
     {
       name: 'tpg-closing-entries',
-      // Alleen entries persisten; `loaded` blijft lokaal bij elke reload false
-      partialize: (state) => ({ entries: state.entries }) as unknown as FinStore,
+      // Entries en finalized lokaal persisten; `loaded` blijft false bij reload
+      partialize: (state) => ({ entries: state.entries, finalized: state.finalized }) as unknown as FinStore,
       // Bij rehydratie: merge ontbrekende default-entries. Zonder deze stap
       // missen users met oudere localStorage de Holdings-entries, waardoor
       // updateKosten voor Holdings silently failt (entry niet gevonden → bail).
@@ -266,4 +334,4 @@ export const useFinStore = create<FinStore>()(
   ),
 )
 
-export const CLOSING_MONTHS = ['Jan-26', 'Feb-26', 'Mar-26']
+export const CLOSING_MONTHS = ['Jan-26', 'Feb-26', 'Mar-26', 'Apr-26']

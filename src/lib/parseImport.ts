@@ -43,9 +43,12 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     positiveOnly: true,
   },
   uren_lijst: {
-    // Uren-lijst is nu een multi-BV slot: per rij de BV uit de BV-kolom, en de
-    // NETTO WAARDE (in €) als bedrag. De totalen per BV landen in een OHW-rij
-    // per BV (zie UPLOAD_SLOTS.targetRowByBv in MaandTab).
+    // NTF Uren (slot-id 'uren_lijst' om compat met bestaande imports te
+    // behouden). Multi-BV slot: per rij de BV uit de BV-kolom, en de
+    // NETTO WAARDE (in €) als nog-te-factureren bedrag. De totalen per BV
+    // landen in een OHW-rij per BV (zie UPLOAD_SLOTS.targetRowByBv in
+    // MaandTab). Tegenhanger: `uren_facturering_totaal` levert de TOTALE
+    // facturatiewaarde voor het Uren Dashboard.
     amountCols: [
       'netto waarde', 'nettowaarde', 'netto bedrag', 'nettobedrag',
       'netto excl btw', 'netto excl. btw', 'netto',
@@ -61,6 +64,30 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     absoluteValue: false,   // credits kunnen negatief zijn, respecteer teken
     positiveOnly: false,
     // Geen targetBv/targetRowId meer — multi-BV
+  },
+  uren_facturering_totaal: {
+    // Uren Facturering Totaal — slot voor de Uren Analyse, ALLEEN Consultancy.
+    // Bevat de TOTALE facturatiewaarde per maand (in tegenstelling tot
+    // 'uren_lijst' / NTF Uren dat alleen de openstaande/te-factureren waarde
+    // bevat). Wordt gebruikt om "Waarde Declarabel" in het Uren Dashboard
+    // voor Consultancy te bepalen. Multi-BV bron-bestanden worden naar
+    // Consultancy gemapt — alleen die kolom is relevant voor de analyse.
+    amountCols: [
+      'netto waarde', 'nettowaarde', 'netto bedrag', 'nettobedrag',
+      'netto excl btw', 'netto excl. btw', 'netto',
+      'waarde declarabel', 'declarabele waarde', 'totale waarde',
+      'waarde', 'bedrag', 'amount', 'totaal', 'factuurwaarde',
+    ],
+    bvCols: [
+      'verantwoordelijke eenheid', 'verantw. eenheid', 'verantw eenheid',
+      'winstcentrum', 'winst centrum', 'profit center', 'profitcenter',
+      'vennootschap', 'bv naam', 'entiteit', 'organisatorische eenheid',
+      'afdeling', 'department', 'bedrijfstak', 'business unit', 'businessunit',
+      'bv', 'bedrijf', 'entity', 'company', 'organisatie', 'eenheid',
+    ],
+    absoluteValue: false,
+    positiveOnly: false,
+    targetBv: 'Consultancy',
   },
   d_lijst: {
     // D-lijst = declarabele uren Consultancy met tarief. We sommeren de
@@ -1324,10 +1351,15 @@ export async function parseImportFile(
         if (slotId === 'geschreven_uren' && isSapTimesheetHeaders(headers)) {
           const { entries, parsedCount: pc, skippedCount: sc, warnings: ws } =
             aggregateSapTimesheet(rows, headers)
-          // perBv-totaal = declarable + internal (= werkuren, exclusief verlof)
+          // perBv-totaal = ALLE uren in het bestand per BV (gewerkte tijd +
+          // afwezigheidstijd) — dat geeft de gebruiker direct zicht op het
+          // totaal aantal uren per BV in de upload, ook al is dat een mix
+          // van declarable, internal en verlof. De feitelijke split per
+          // categorie blijft beschikbaar in `hoursEntries` voor de Hours-
+          // store en het Uren Dashboard.
           const perBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
           for (const e of entries) {
-            perBv[e.bv] += e.declarable + e.internal
+            perBv[e.bv] += e.declarable + e.internal + e.vakantie + e.ziekte + e.overigVerlof
           }
           const totalAmount = perBv.Consultancy + perBv.Projects + perBv.Software
           resolve({

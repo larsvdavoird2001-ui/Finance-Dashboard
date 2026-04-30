@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react'
 import type { BvId } from '../../data/types'
 import { useFteStore, FTE_YEARS, monthsForYear } from '../../store/useFteStore'
+import { useLockedBv } from '../../lib/permissions'
 
-const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
+const BVS_FULL: BvId[] = ['Consultancy', 'Projects', 'Software']
 const BV_COLORS: Record<BvId, string> = {
   Consultancy: '#00a9e0',
   Projects:    '#26c997',
@@ -40,6 +41,12 @@ function fmtDelta(v: number | undefined | null, isFte: boolean): string {
 export function FteTab() {
   const entries = useFteStore(s => s.entries)
   const upsertEntry = useFteStore(s => s.upsertEntry)
+  const lockedBv = useLockedBv()
+  // Holdings heeft geen FTE-flow — voor een Holdings-locked user blijft de
+  // lijst leeg. Voor andere BV-locked users tonen we alleen die BV.
+  const BVS: BvId[] = lockedBv && lockedBv !== 'Holdings'
+    ? [lockedBv as BvId]
+    : (lockedBv === 'Holdings' ? [] : BVS_FULL)
 
   const [year, setYear] = useState<'2025' | '2026'>('2026')
   const [metric, setMetric] = useState<Metric>('fte')

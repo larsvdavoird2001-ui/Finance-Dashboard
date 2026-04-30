@@ -4,6 +4,7 @@ import '../../lib/chartSetup'
 import { baseChartOptions } from '../../lib/chartSetup'
 import { PL_STRUCTURE, ytdActuals2025, ytdBudget2025 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
+import { useLockedBv } from '../../lib/permissions'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useFteStore } from '../../store/useFteStore'
@@ -130,6 +131,9 @@ function MonthTableColgroup({ hasMethodiek = false }: { hasMethodiek?: boolean }
 interface Props { filter: GlobalFilter }
 
 export function BudgetsTab({ filter: _filter }: Props) {
+  // BV-locked users zien alleen hun eigen BV in de Budgetten-matrix.
+  // Voor admins: alle entiteiten.
+  const _lockedBv = useLockedBv()
   const store = useBudgetStore()
   const fteGetEntry = useFteStore(s => s.getEntry)
   // Trigger re-render bij FTE wijzigingen
@@ -149,7 +153,9 @@ export function BudgetsTab({ filter: _filter }: Props) {
   const [showTotal,    setShowTotal]    = useState<boolean>(false)
 
   const months = BUDGET_MONTHS_2026
-  const activeEntities: EntityName[] = ENTITIES
+  const activeEntities: EntityName[] = _lockedBv
+    ? (ENTITIES.includes(_lockedBv as EntityName) ? [_lockedBv as EntityName] : [])
+    : ENTITIES
 
   // Map Apr-26 → Apr-25 (voor seizoenspatroon vanuit vorig jaar)
   const toPY = (m: string): string => {

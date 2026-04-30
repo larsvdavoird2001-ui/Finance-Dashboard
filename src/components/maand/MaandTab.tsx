@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { Fragment, useRef, useState, useEffect } from 'react'
 import { flushSync } from 'react-dom'
 import { useFinStore, CLOSING_MONTHS, getFinResDefault, getVpbDefault } from '../../store/useFinStore'
 import { useImportStore } from '../../store/useImportStore'
@@ -22,9 +22,35 @@ import type * as XLSX from 'xlsx'
 import { MissingHoursWizard } from './MissingHoursWizard'
 import { GenericImportWizard } from './GenericImportWizard'
 import { BijlagenSection } from './BijlagenSection'
-import { buildMonthBundleZip, downloadBlob } from '../../lib/exportMonthBundle'
+import { buildMonthBundleZip, buildFullMonthReportZip, downloadBlob } from '../../lib/exportMonthBundle'
+import type { FullReportSections } from '../../lib/exportMonthBundle'
 import { generateMonthPptx, monthLabelFromCode } from '../../lib/exportPptx'
 import { useRawDataStore as useRawDataStoreFull } from '../../store/useRawDataStore'
+import { useFteStore } from '../../store/useFteStore'
+import { useEvidenceStore } from '../../store/useEvidenceStore'
+import { useLockedBv } from '../../lib/permissions'
+import { ExportOptionsModal } from './ExportOptionsModal'
+import { MaandChecklist } from './MaandChecklist'
+import { restoreKeysFromBackups, listBackups } from '../../lib/localBackup'
+import { supabase, supabaseEnabled } from '../../lib/supabase'
+
+// Light-weight current-user email getter — vermijden om de hele useAuth-hook
+// hier te importeren (zou de hooks-tree onnodig zwaar maken). Lees direct
+// uit de actieve Supabase-sessie. Bij dev-mode zonder Supabase: null.
+function useCurrentUserEmail(): string | null {
+  const [email, setEmail] = useState<string | null>(null)
+  useEffect(() => {
+    if (!supabaseEnabled) return
+    supabase.auth.getSession().then(({ data }) => {
+      setEmail(data.session?.user?.email ?? null)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setEmail(session?.user?.email ?? null)
+    })
+    return () => { listener.subscription.unsubscribe() }
+  }, [])
+  return email
+}
 
 // Alle "generic wizard"-slots doorlopen stap-voor-stap kolom-detectie.
 // geschreven_uren staat hier ook in zodat de user kan verifiëren welke
@@ -33,7 +59,11 @@ import { useRawDataStore as useRawDataStoreFull } from '../../store/useRawDataSt
 // Afwezigheidstijd) naar ParsedHoursEntry[] voor de uren-store. Deze
 // import wordt NIET toegepast op maandafsluiting-regels — alleen op het
 // Uren Dashboard en de LE-forecast.
-const GENERIC_WIZARD_SLOTS = new Set(['factuurvolume', 'geschreven_uren', 'uren_lijst', 'd_lijst', 'conceptfacturen'])
+const GENERIC_WIZARD_SLOTS = new Set(['factuurvolume', 'geschreven_uren', 'uren_lijst', 'uren_facturering_totaal', 'd_lijst', 'conceptfacturen'])
+// Slots die bij de Uren Analyse horen (Uren Dashboard) i.p.v. de
+// maandafsluiting. Worden in de Bestanden Importeren-sectie als aparte
+// groep getoond met eigen sub-header.
+const UREN_ANALYSE_SLOTS = new Set(['geschreven_uren', 'uren_facturering_totaal'])
 import { useTariffStore } from '../../store/useTariffStore'
 import { useRawDataStore } from '../../store/useRawDataStore'
 import type { BvId, ClosingBv, ClosingEntry, ImportRecord, GlobalFilter } from '../../data/types'
@@ -51,7 +81,7 @@ import type { ParsedHoursEntry } from '../../lib/parseImport'
 // OHW-gerelateerde flows blijven op de 3 "productie" BVs (OHW heeft geen
 // Holdings-entity). Maar de maandafsluiting en derived P&L-flow nemen
 // Holdings wél mee als 4e kolom — daar is-ie beschikbaar voor kosten-invoer.
-const BVS: ClosingBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
+const BVS_FULL: ClosingBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 
 const BV_COLORS: Record<ClosingBv, string> = {
   Consultancy: '#00a9e0',
@@ -78,9 +108,12 @@ interface UploadSlot {
 }
 
 const UPLOAD_SLOTS: UploadSlot[] = [
+  // ── Uren Analyse (Uren Dashboard) ──────────────────────────────────────
+  { id: 'geschreven_uren',          label: 'Geschreven uren YTD',      icon: '⏱', description: 'SAP urenregistratie YTD — declarabele/interne/verlof uren per BV → Uren Dashboard', appliesTo: [] },
+  { id: 'uren_facturering_totaal',  label: 'Uren Facturering Totaal',  icon: '💶', description: 'Alleen Consultancy — TOTALE facturatiewaarde per maand → "Waarde Declarabel" in Uren Analyse', appliesTo: [], targetBv: 'Consultancy' },
+  // ── Maandafsluiting ────────────────────────────────────────────────────
   { id: 'factuurvolume',   label: 'Factuurvolume',    icon: '🧾', description: 'SAP facturenlijst — gefactureerde omzet per BV (alle BVs)', appliesTo: ['factuurvolume'] },
-  { id: 'geschreven_uren', label: 'Geschreven uren',  icon: '⏱', description: 'SAP urenregistratie — totaal geschreven uren per BV (alle BVs)', appliesTo: [] },
-  { id: 'uren_lijst',      label: 'Uren lijst',       icon: '📋', description: 'Alle BVs — nettowaarde per BV → OHW-regel "U-Projecten met tarief" per BV', appliesTo: [], targetRowByBv: { Consultancy: 'c_ul', Projects: 'p1', Software: 's_ul' } },
+  { id: 'uren_lijst',      label: 'NTF Uren',         icon: '📋', description: 'Alle BVs — Nog Te Factureren nettowaarde per BV → OHW-regel "U-Projecten met tarief" per BV', appliesTo: [], targetRowByBv: { Consultancy: 'c_ul', Projects: 'p1', Software: 's_ul' } },
   { id: 'd_lijst',         label: 'D Lijst',          icon: '📊', description: 'Alleen Consultancy — vult OHW-regel "D facturatie"', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c1', targetEntity: 'Consultancy' },
   { id: 'conceptfacturen', label: 'Conceptfacturen',  icon: '📄', description: 'Alleen Projects — vult OHW-regel "E-Projecten (concept facturen) wachtend op inkooporder"', appliesTo: [], targetBv: 'Projects', targetRowId: 'p4', targetEntity: 'Projects' },
   { id: 'missing_hours',   label: 'Missing Hours',    icon: '⚠', description: 'Alleen Consultancy — berekent missing hours × tarief × 0,9 → OHW', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c4', targetEntity: 'Consultancy' },
@@ -209,6 +242,12 @@ const AMORTISATIE_SUBS = [
 ]
 
 export function MaandTab({ filter: _filter }: Props) {
+  const lockedBv = useLockedBv()
+  const currentUserEmail = useCurrentUserEmail()
+  // Voor BV-locked users: alle BV-lijsten beperken tot de eigen BV. Module-
+  // niveau `BVS_FULL` blijft de canonieke 4-BV lijst; binnen deze component
+  // gebruiken we `BVS` (geshadowd) voor renders, totalen en validaties.
+  const BVS: ClosingBv[] = lockedBv ? [lockedBv] : BVS_FULL
   const [month, setMonth] = useState<string>('Mar-26')
   const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'fte' | 'bijlagen'>('afsluiting')
   const [expandedCosts, setExpandedCosts] = useState<Set<CostSectionId>>(new Set())
@@ -257,6 +296,11 @@ export function MaandTab({ filter: _filter }: Props) {
   // hours-store zodra de user ze goedkeurt in de ImportApprovalModal.
   const [pendingHoursByRecord, setPendingHoursByRecord] = useState<Record<string, ParsedHoursEntry[]>>({})
   const { records: importRecords, addRecord, approveRecord, rejectRecord, removeRecord, updateRecordValues, exportPeriod } = useImportStore()
+  const reloadImports = useImportStore(s => s.loadFromDb)
+  const reloadRaw = useRawDataStoreFull(s => s.loadFromDb)
+  const [reloading, setReloading] = useState(false)
+  // State voor de "Volledig rapport"-export-modal
+  const [showExportModal, setShowExportModal] = useState(false)
   const { addEntry: addRawEntry, approveEntry: approveRawEntry, rejectEntry: rejectRawEntry, entries: rawDataEntries } = useRawDataStore()
   const { toasts, showToast } = useToast()
   const ohwData2026 = useOhwStore(s => s.data2026)
@@ -1161,17 +1205,115 @@ export function MaandTab({ filter: _filter }: Props) {
               Je kunt ook altijd handmatig invullen in de Maandafsluiting — dan verschijnt wel een waarschuwing dat onderbouwing ontbreekt.
             </div>
 
+            {/* Recovery-balk: reload uit DB + restore uit lokale backup */}
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
+              padding: '8px 12px', borderRadius: 7,
+              background: 'var(--bg3)', border: '1px solid var(--bd2)',
+            }}>
+              <span style={{ fontSize: 11, color: 'var(--t2)' }}>
+                <strong style={{ color: 'var(--t1)' }}>{importRecords.length}</strong> records geladen
+                {' · '}
+                <strong style={{ color: 'var(--t1)' }}>{monthImports.length}</strong> in {uploadMonth}
+              </span>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                <button
+                  className="btn sm ghost"
+                  disabled={reloading}
+                  onClick={async () => {
+                    setReloading(true)
+                    try {
+                      await Promise.all([reloadImports(), reloadRaw()])
+                      const count = useImportStore.getState().records.length
+                      showToast(`↻ ${count} records herladen uit database`, 'g')
+                    } catch (e) {
+                      showToast(`Herladen mislukt: ${e instanceof Error ? e.message : String(e)}`, 'r')
+                    } finally {
+                      setReloading(false)
+                    }
+                  }}
+                  title="Haal de geüploade bestanden opnieuw op uit Supabase"
+                >
+                  {reloading ? '⏳ bezig...' : '↻ Herlaad uit database'}
+                </button>
+                <button
+                  className="btn sm ghost"
+                  style={{ color: 'var(--amber)', borderColor: 'var(--amber)' }}
+                  disabled={reloading}
+                  onClick={async () => {
+                    const backups = listBackups()
+                    if (backups.length === 0) {
+                      showToast('Geen lokale backups gevonden', 'r')
+                      return
+                    }
+                    const newest = backups[0]
+                    const dt = new Date(newest.ts).toLocaleString('nl-NL')
+                    if (!confirm(
+                      `Imports terughalen uit lokale backup?\n\n` +
+                      `Nieuwste backup: ${dt}\n` +
+                      `(${backups.length} backups beschikbaar — automatisch wordt teruggevallen op oudere als de nieuwste de imports niet heeft)\n\n` +
+                      `Alleen de geüploade bestanden + ruwe rijen worden hersteld. ` +
+                      `Andere instellingen blijven ongewijzigd. Een snapshot van de huidige staat wordt eerst gemaakt.`,
+                    )) return
+                    const r = restoreKeysFromBackups(['tpg-import-records', 'tpg-raw-data'])
+                    if (r.ok) {
+                      // Herlaad de stores vanuit de nu-herstelde localStorage
+                      // door een page reload — zustand persist rehydrateert dan.
+                      showToast(`✓ ${r.restored.length} keys hersteld uit ${r.fromBackup} — pagina wordt herladen`, 'g')
+                      setTimeout(() => window.location.reload(), 1500)
+                    } else {
+                      showToast(`Geen imports in beschikbare backups gevonden`, 'r')
+                    }
+                  }}
+                  title="Haalt tpg-import-records + tpg-raw-data terug uit de meest recente lokale snapshot"
+                >
+                  ↺ Herstel uit backup
+                </button>
+              </div>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-              {UPLOAD_SLOTS.map(slot => {
+              {/* Section-header voor de Uren Analyse-tegels (geschreven_uren +
+                  uren_facturering_totaal). Beslaat de volledige rasterbreedte
+                  zodat hij visueel scheidt van de maandafsluiting-tegels. */}
+              <div style={{
+                gridColumn: '1 / -1',
+                display: 'flex', alignItems: 'center', gap: 8,
+                paddingBottom: 4, borderBottom: '1px dashed var(--bd2)',
+              }}>
+                <span style={{ fontSize: 16 }}>📈</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>Uren Analyse</span>
+                <span style={{ fontSize: 11, color: 'var(--t3)' }}>
+                  — bron voor het Uren Dashboard (declarabel %, ziekte/verlof, Waarde Declarabel)
+                </span>
+              </div>
+              {UPLOAD_SLOTS.map((slot, idx) => {
                 const approved = monthImports.filter(r => r.slotId === slot.id && r.status === 'approved')
                 const pending  = monthImports.filter(r => r.slotId === slot.id && r.status === 'pending')
                 const rejected = monthImports.filter(r => r.slotId === slot.id && r.status === 'rejected')
                 const latest   = approved[approved.length - 1]
                 const loading  = uploadLoading[slot.id]
+                // Eerste Maandafsluiting-tegel? Dan hier de tweede section-
+                // header injecteren als full-width grid-item, vóór de tegel.
+                const firstNonAnalyseIdx = UPLOAD_SLOTS.findIndex(s => !UREN_ANALYSE_SLOTS.has(s.id))
+                const isFirstNonAnalyse = idx === firstNonAnalyseIdx
 
                 return (
+                  <Fragment key={slot.id}>
+                    {isFirstNonAnalyse && (
+                      <div style={{
+                        gridColumn: '1 / -1',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        marginTop: 6, paddingBottom: 4, borderBottom: '1px dashed var(--bd2)',
+                      }}>
+                        <span style={{ fontSize: 16 }}>🧾</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>Maandafsluiting</span>
+                        <span style={{ fontSize: 11, color: 'var(--t3)' }}>
+                          — bron voor OHW Overzicht en de closing-entries van deze maand
+                        </span>
+                      </div>
+                    )}
                   <div
-                    key={slot.id}
                     className="card"
                     id={`import-slot-${slot.id}`}
                     style={{
@@ -1207,8 +1349,16 @@ export function MaandTab({ filter: _filter }: Props) {
                     <div style={{ padding: '12px 14px' }}>
                       <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 10 }}>{slot.description}</div>
 
-                      {/* Approved data summary */}
-                      {latest && (
+                      {/* Approved data summary — voor geschreven_uren tonen we
+                          het aantal UREN i.p.v. een €-bedrag, want de upload
+                          bevat tijden, geen factuurwaarde. */}
+                      {latest && (() => {
+                        const isHours = slot.id === 'geschreven_uren'
+                        const fmtVal = (v: number) =>
+                          isHours
+                            ? `${Math.round(v).toLocaleString('nl-NL')} u`
+                            : fmt(v)
+                        return (
                         <div style={{ marginBottom: 10, background: 'var(--bd-green)', borderRadius: 6, padding: '8px 10px' }}>
                           <div style={{ fontSize: 10, color: 'var(--green)', fontWeight: 600, marginBottom: 5 }}>
                             {latest.fileName} · {latest.uploadedAt}
@@ -1218,13 +1368,13 @@ export function MaandTab({ filter: _filter }: Props) {
                               <span key={bv} style={{ fontSize: 11 }}>
                                 <span style={{ color: BV_COLORS[bv] }}>{bv}:</span>
                                 <strong style={{ marginLeft: 3, fontFamily: 'var(--mono)', fontSize: 11 }}>
-                                  {(latest.perBv[bv] ?? 0) > 0 ? fmt(latest.perBv[bv]) : '—'}
+                                  {(latest.perBv[bv] ?? 0) > 0 ? fmtVal(latest.perBv[bv]) : '—'}
                                 </strong>
                               </span>
                             ))}
                           </div>
                           <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>
-                            Totaal: <strong>{fmt(latest.totalAmount)}</strong> · {latest.rowCount} rijen
+                            Totaal: <strong>{fmtVal(latest.totalAmount)}</strong> · {latest.rowCount} rijen
                           </div>
                           <button
                             className="btn sm ghost"
@@ -1234,7 +1384,8 @@ export function MaandTab({ filter: _filter }: Props) {
                             ✕ Verwijderen
                           </button>
                         </div>
-                      )}
+                        )
+                      })()}
 
                       {/* Pending */}
                       {pending.map(r => (
@@ -1280,6 +1431,7 @@ export function MaandTab({ filter: _filter }: Props) {
                       )}
                     </div>
                   </div>
+                  </Fragment>
                 )
               })}
             </div>
@@ -1365,7 +1517,61 @@ export function MaandTab({ filter: _filter }: Props) {
               >
                 📊 Maandrapportage (PPTX)
               </button>
+
+              <button
+                className="btn sm primary"
+                title="Open de export-opties: kies welke onderdelen (PowerPoint, OHW Overzicht, FTE & headcount, geïmporteerde bestanden, bijlagen, kosten-specs) je in één ZIP wil"
+                onClick={() => {
+                  if (exportMonths.length === 0) { showToast('Selecteer eerst een maand', 'r'); return }
+                  setShowExportModal(true)
+                }}
+              >
+                🗂 Volledig rapport (ZIP)…
+              </button>
             </div>
+
+            <ExportOptionsModal
+              open={showExportModal}
+              months={exportMonths}
+              lockedBv={lockedBv ?? null}
+              onCancel={() => setShowExportModal(false)}
+              onConfirm={async (sections: FullReportSections) => {
+                try {
+                  const fteEntriesAll = useFteStore.getState().entries
+                  const breakdownsAll = useCostBreakdownStore.getState().entries
+                  const evidenceAll   = useEvidenceStore.getState().entries
+                  const ohw2025       = useOhwStore.getState().data2025
+                  const ohw2026       = useOhwStore.getState().data2026
+
+                  for (const m of exportMonths) {
+                    const mEntries = entries.filter(e => e.month === m)
+                    const mImports = importRecords.filter(r => r.month === m)
+                    const mRawData = useRawDataStoreFull.getState().entries.filter(r => r.month === m)
+                    const blob = await buildFullMonthReportZip({
+                      month: m,
+                      closingEntries: mEntries,
+                      importRecords: mImports,
+                      rawData: mRawData,
+                      ohwData2025: ohw2025,
+                      ohwData2026: ohw2026,
+                      fteEntries: fteEntriesAll,
+                      costBreakdowns: breakdownsAll,
+                      evidence: evidenceAll,
+                      ytdMonths: CLOSING_MONTHS.slice(0, CLOSING_MONTHS.indexOf(m) + 1),
+                      generatedAt: new Date().toLocaleString('nl-NL'),
+                      sections,
+                      bvFilter: lockedBv ?? null,
+                    })
+                    const bvSuffix = lockedBv ? `_${lockedBv}` : ''
+                    downloadBlob(blob, `TPG_Volledig_Rapport_${m.replace(/\s+/g, '_')}${bvSuffix}.zip`)
+                  }
+                  showToast(`Volledig rapport gedownload voor ${exportMonths.join(', ')}`, 'g')
+                  setShowExportModal(false)
+                } catch (err) {
+                  showToast(`Volledig rapport mislukt: ${err instanceof Error ? err.message : String(err)}`, 'r')
+                }
+              }}
+            />
 
             {/* Import log */}
             <div className="card">
@@ -1442,6 +1648,15 @@ export function MaandTab({ filter: _filter }: Props) {
         {/* ── AFSLUITING ──────────────────────────────────────────────────── */}
         {activeSection === 'afsluiting' && (
           <>
+            {/* Checklist + finalize-knop. Pas wanneer hier op "Definitief
+                afsluiten" wordt geklikt, gaan de Executive Overview-trends
+                voor deze maand op de werkelijke actuals i.p.v. LE/forecast. */}
+            <MaandChecklist
+              month={month}
+              currentUserEmail={currentUserEmail}
+              showToast={showToast}
+            />
+
             {/* Onderbouwing status */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: 'var(--t3)' }}>Onderbouwing {month}:</span>

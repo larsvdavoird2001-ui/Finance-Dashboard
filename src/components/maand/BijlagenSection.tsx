@@ -1,12 +1,13 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { useEvidenceStore, fileToBase64, downloadEvidence, formatFileSize, fileIcon } from '../../store/useEvidenceStore'
 import type { EvidenceEntry } from '../../store/useEvidenceStore'
 import { useOhwStore } from '../../store/useOhwStore'
 import { useToast } from '../../hooks/useToast'
 import { Toast } from '../common/Toast'
+import { useLockedBv } from '../../lib/permissions'
 import type { BvId, OhwEntityData, OhwRow } from '../../data/types'
 
-const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
+const BVS_FULL: BvId[] = ['Consultancy', 'Projects', 'Software']
 const BV_COLORS: Record<BvId, string> = {
   Consultancy: '#00a9e0',
   Projects:    '#26c997',
@@ -33,25 +34,39 @@ export function BijlagenSection({ month, closingMonths, onMonthChange }: Props) 
   const removeEvidence = useEvidenceStore(s => s.removeEntry)
   const ohwData = useOhwStore(s => s.data2026)
   const { toasts, showToast } = useToast()
+  const lockedBv = useLockedBv()
+  // Holdings heeft geen OHW-flow, dus voor een Holdings-locked user is er
+  // geen koppelbare rij — we tonen geen BVs.
+  const BVS: BvId[] = lockedBv && lockedBv !== 'Holdings'
+    ? [lockedBv as BvId]
+    : (lockedBv === 'Holdings' ? [] : BVS_FULL)
 
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   // Form state voor nieuwe upload
-  const [uploadBv, setUploadBv] = useState<BvId>('Consultancy')
+  const [uploadBv, setUploadBv] = useState<BvId>(BVS[0] ?? 'Consultancy')
   const [uploadRowId, setUploadRowId] = useState<string>('')
   const [uploadDescription, setUploadDescription] = useState('')
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // Filter-state
-  const [filterBv, setFilterBv] = useState<BvId | 'all'>('all')
+  // Als de locked BV verandert (bv. account-switch in dezelfde sessie),
+  // synchroniseer upload-bv zodat de form niet op de oude waarde blijft hangen.
+  useEffect(() => {
+    if (lockedBv && lockedBv !== 'Holdings' && uploadBv !== lockedBv) {
+      setUploadBv(lockedBv as BvId)
+    }
+  }, [lockedBv, uploadBv])
+
+  // Filter-state — voor BV-locked users vergrendeld op hun eigen BV.
+  const [filterBv, setFilterBv] = useState<BvId | 'all'>(lockedBv && lockedBv !== 'Holdings' ? (lockedBv as BvId) : 'all')
   const [filterRowId, setFilterRowId] = useState<string>('')
   const [showAllMonths, setShowAllMonths] = useState(false)
 
   // OHW rijen per BV (voor dropdown)
   const rowsByBv = useMemo(() => {
     const out: Record<BvId, OhwRow[]> = { Consultancy: [], Projects: [], Software: [] }
-    for (const bv of BVS) {
+    for (const bv of BVS_FULL) {
       const ent = ohwData.entities.find(e => e.entity === bv)
       out[bv] = rowsOfEntity(ent)
     }
@@ -61,11 +76,14 @@ export function BijlagenSection({ month, closingMonths, onMonthChange }: Props) 
   const uploadRows = rowsByBv[uploadBv] ?? []
   const filterRows = filterBv !== 'all' ? (rowsByBv[filterBv] ?? []) : []
 
-  // Gefilterde lijst
+  // Gefilterde lijst — voor BV-locked users altijd óók op hun eigen BV
+  // (defense-in-depth: zelfs als filterBv ergens ge-overruled is, mag een
+  // BV-locked user nooit andermans bijlagen zien).
   const filtered = evidence.filter(e => {
     if (!showAllMonths && e.month !== month) return false
     if (filterBv !== 'all' && e.entity !== filterBv) return false
     if (filterRowId && e.ohwRowId !== filterRowId) return false
+    if (lockedBv && e.entity !== lockedBv) return false
     return true
   })
 

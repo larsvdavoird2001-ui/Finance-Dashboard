@@ -12,6 +12,7 @@ import { useLatestEstimate } from '../../hooks/useLatestEstimate'
 import { useOhwStore } from '../../store/useOhwStore'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { derivePL } from '../../lib/plDerive'
+import { useLockedBv } from '../../lib/permissions'
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
@@ -130,6 +131,9 @@ type ViewMode = 'monthly' | 'ytd'
 export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const is2025 = filter.year === '2025'
   const ACTUAL_PERIODS = is2025 ? MONTHS_2025_LABELS : ACTUAL_PERIODS_2026
+  // BV-locked gebruikers krijgen geen BV-switcher te zien — App.tsx forceert
+  // filter.bv al naar de eigen BV; verbergen voorkomt dode klikken.
+  const lockedBv = useLockedBv()
 
   const [period, setPeriod] = useState<string>('Mar-26')
   const [viewMode, setViewMode] = useState<ViewMode>('monthly')
@@ -272,27 +276,29 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         })),
       }
     }
-    // 2026: actuals (solid) Jan→last-closed + LE (dashed) forward.
-    // LE-stippen alleen waar er info is (override of budget); waar niets staat
-    // krijgt de chart een gat (null).
-    const lastClosedIdx = (() => {
-      let idx = -1
-      for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
-        if (le.isClosed(BUDGET_MONTHS_2026[i])) idx = i
-      }
-      return idx
-    })()
+    // 2026: actuals (solid) Jan→last-actual-filled + LE (dashed) forward.
+    // Per BV bepalen we de last-closed-idx: alleen kalender-gesloten ÉN
+    // ingevulde maanden tellen als 'actual'. Voor maanden waar de
+    // closing-entry nog niet is gemaakt valt de chart automatisch terug op
+    // de LE-forecast.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const datasets: any[] = []
     for (const bv of activeBvs) {
+      const lastActualIdx = (() => {
+        let idx = -1
+        for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
+          if (le.getLeSource(bv as EntityName, BUDGET_MONTHS_2026[i], 'netto_omzet') === 'actual') idx = i
+        }
+        return idx
+      })()
       const actData = BUDGET_MONTHS_2026.map((m, i) =>
-        i <= lastClosedIdx ? (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000 : null
+        i <= lastActualIdx ? (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000 : null
       )
       const leData = BUDGET_MONTHS_2026.map((m, i) => {
-        // Op laatste closed-idx tonen we de actual-waarde óók als startpunt
+        // Op laatste actual-idx tonen we de actual-waarde óók als startpunt
         // van de LE-lijn (visuele continuïteit met het laatste actual-punt).
-        if (i === lastClosedIdx) return (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000
-        if (i < lastClosedIdx)   return null
+        if (i === lastActualIdx) return (getMonthly(bv, m)['netto_omzet'] ?? 0) / 1000
+        if (i < lastActualIdx)   return null
         // Open maand: alleen tonen als er echt LE-data is (override of budget)
         if (!le.hasLE(bv as EntityName, m, 'netto_omzet')) return null
         return le.getLE(bv as EntityName, m, 'netto_omzet') / 1000
@@ -383,15 +389,10 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         })),
       }
     }
-    // 2026: marge% per BV — solid voor closed maanden (actuals), dashed
-    // voor open maanden (LE), met visuele continuïteit op de overgang.
-    const lastClosedIdx = (() => {
-      let idx = -1
-      for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
-        if (le.isClosed(BUDGET_MONTHS_2026[i])) idx = i
-      }
-      return idx
-    })()
+    // 2026: marge% per BV — solid voor closed+ingevulde maanden (actuals),
+    // dashed voor open of niet-ingevulde maanden (LE), met visuele
+    // continuïteit op de overgang. Bridge per-BV (zelfde als omzet-trend)
+    // voorkomt dat een BV zonder Maandafsluiting-data een 0-actual toont.
     const calcMargin = (bv: ClosingBv, m: string): number | null => {
       const r = le.getLE(bv as EntityName, m, 'netto_omzet')
       const g = le.getLE(bv as EntityName, m, 'brutomarge')
@@ -401,12 +402,19 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const datasets: any[] = []
     for (const bv of activeBvs) {
+      const lastActualIdx = (() => {
+        let idx = -1
+        for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {
+          if (le.getLeSource(bv as EntityName, BUDGET_MONTHS_2026[i], 'netto_omzet') === 'actual') idx = i
+        }
+        return idx
+      })()
       const actData = BUDGET_MONTHS_2026.map((m, i) =>
-        i <= lastClosedIdx ? calcMargin(bv, m) : null
+        i <= lastActualIdx ? calcMargin(bv, m) : null
       )
       const leData = BUDGET_MONTHS_2026.map((m, i) => {
-        if (i === lastClosedIdx) return calcMargin(bv, m)  // bridge punt
-        if (i < lastClosedIdx) return null
+        if (i === lastActualIdx) return calcMargin(bv, m)  // bridge punt
+        if (i < lastActualIdx) return null
         if (!le.hasLE(bv as EntityName, m, 'netto_omzet')) return null
         return calcMargin(bv, m)
       })
@@ -764,8 +772,9 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   return (
     <div className="page">
       {/* Eigen BV-filter rij — duidelijker dan alleen de Topbar; ondersteunt
-          ook Holdings (overhead/kosten-only) als aparte view. */}
-      {onFilterChange && (
+          ook Holdings (overhead/kosten-only) als aparte view.
+          Voor BV-locked gebruikers verbergen we deze rij volledig. */}
+      {onFilterChange && !lockedBv && (
         <div className="card" style={{ padding: '10px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em', marginRight: 4 }}>

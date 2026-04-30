@@ -44,7 +44,7 @@ export default function App() {
     user, loading: authLoading, disabled: authDisabled,
     profiles, isAdmin,
     signIn, signOut, sendMagicLink, sendPasswordReset, setPassword,
-    inviteUser, setUserActive, setUserRole, removeUser, refreshProfiles,
+    inviteUser, setUserActive, setUserRole, setUserBv, removeUser, refreshProfiles,
   } = auth
   const { data2025, data2026, updateEntity } = useOhwState()
   const { toasts, showToast } = useToast()
@@ -139,6 +139,20 @@ export default function App() {
   const onFilterChange = (patch: Partial<GlobalFilter>) =>
     setFilter(prev => ({ ...prev, ...patch }))
 
+  // BV-restrictie: deze afleidingen + effect MOETEN vóór de early returns
+  // staan, anders wisselt het aantal hook-calls per render (Rules of Hooks).
+  const currentProfile = profiles.find(p => p.email.toLowerCase() === (user?.email ?? '').toLowerCase())
+  const lockedBv = isAdmin ? null : (currentProfile?.bv ?? null)
+
+  // Forceer de BV-filter naar de toegewezen BV — de Topbar verbergt de
+  // BV-switcher, maar dit afdwingen voorkomt dat een eerdere `bv: 'all'` of
+  // `bv: <andere BV>` uit App-state blijft hangen na switchen van account.
+  useEffect(() => {
+    if (lockedBv && filter.bv !== lockedBv) {
+      setFilter(prev => ({ ...prev, bv: lockedBv }))
+    }
+  }, [lockedBv, filter.bv])
+
   // Auth loading
   if (authLoading) {
     return (
@@ -204,11 +218,23 @@ export default function App() {
     )
   }
 
-  const currentProfile = profiles.find(p => p.email.toLowerCase() === (user?.email ?? '').toLowerCase())
   const canEdit = isAdmin
 
+  // BV-filter wrapper: blokkeer pogingen om de bv te wijzigen voor locked users.
+  const onLockedFilterChange = (patch: Partial<GlobalFilter>) => {
+    if (lockedBv && patch.bv !== undefined && patch.bv !== lockedBv) {
+      // Negeer bv-overrides — andere velden (year) mogen wel door.
+      const { bv: _drop, ...rest } = patch
+      void _drop
+      if (Object.keys(rest).length === 0) return
+      setFilter(prev => ({ ...prev, ...rest }))
+      return
+    }
+    onFilterChange(patch)
+  }
+
   return (
-    <PermissionsContext.Provider value={{ canEdit, isAdmin }}>
+    <PermissionsContext.Provider value={{ canEdit, isAdmin, lockedBv }}>
       <Sidebar
         active={tab}
         onNav={setTab}
@@ -241,9 +267,9 @@ export default function App() {
             </button>
           </div>
         )}
-        <Topbar tab={tab} filter={filter} onFilterChange={onFilterChange} />
+        <Topbar tab={tab} filter={filter} onFilterChange={onLockedFilterChange} />
 
-        {tab === 'dashboard'  && <DashboardTab filter={filter} onFilterChange={onFilterChange} onNav={(t) => setTab(t)} />}
+        {tab === 'dashboard'  && <DashboardTab filter={filter} onFilterChange={onLockedFilterChange} onNav={(t) => setTab(t)} />}
         {tab === 'hours'      && <HoursTab filter={filter} />}
         {tab === 'ohw' && (
           <OhwTab
@@ -253,10 +279,10 @@ export default function App() {
             showToast={showToast}
           />
         )}
-        {tab === 'budget'  && <BudgetTab filter={filter} onFilterChange={onFilterChange} />}
+        {tab === 'budget'  && <BudgetTab filter={filter} onFilterChange={onLockedFilterChange} />}
         {tab === 'budgets' && <BudgetsTab filter={filter} />}
         {tab === 'maand'   && <MaandTab filter={filter} />}
-        {tab === 'users'   && (
+        {tab === 'users'   && isAdmin && (
           <UsersTab
             currentEmail={user?.email ?? null}
             profiles={profiles}
@@ -264,11 +290,12 @@ export default function App() {
             inviteUser={inviteUser}
             setUserActive={setUserActive}
             setUserRole={setUserRole}
+            setUserBv={setUserBv}
             removeUser={removeUser}
             refreshProfiles={refreshProfiles}
           />
         )}
-        {tab === 'backups' && <BackupsTab isAdmin={isAdmin} currentEmail={userEmailKey} />}
+        {tab === 'backups' && isAdmin && <BackupsTab isAdmin={isAdmin} currentEmail={userEmailKey} />}
       </div>
       <Toast toasts={toasts} />
       <AiChat />

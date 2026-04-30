@@ -149,6 +149,11 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 );
 -- Migratie voor bestaande projecten: voeg de kolom toe als die ontbreekt.
 ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS needs_password boolean NOT NULL DEFAULT false;
+-- BV-toewijzing per gebruiker. NULL = geen restrictie (admin/algemeen).
+-- Een ingestelde BV beperkt de gebruiker tot data van die BV (Consultancy /
+-- Projects / Software / Holdings). De filter wordt afgedwongen in de UI.
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS bv text
+  CHECK (bv IS NULL OR bv IN ('Consultancy','Projects','Software','Holdings'));
 
 -- 9. IC Tarieven — uurtarieven per medewerker (voor missing hours berekening)
 CREATE TABLE IF NOT EXISTS tariff_entries (
@@ -274,6 +279,20 @@ CREATE TRIGGER trg_delete_auth_user_on_profile_delete
   AFTER DELETE ON public.user_profiles
   FOR EACH ROW
   EXECUTE FUNCTION delete_auth_user_on_profile_delete();
+
+-- ============================================================================
+-- Maandafsluiting finalisatie — registreert per maand wanneer de Maandafsluiting
+-- definitief is afgesloten. ALLEEN als een maand hier staat, behandelen de
+-- LE-trendlijnen in de Executive Overview die maand als 'actual'. Anders blijft
+-- het LE-forecast (zelfs als de kalender al gepasseerd is).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS closing_finalized (
+  month text PRIMARY KEY,                -- bv. 'Mar-26'
+  finalized_at timestamptz DEFAULT now(),
+  finalized_by text DEFAULT '',
+  checklist jsonb DEFAULT '{}'::jsonb,    -- snapshot van afgevinkte items
+  created_at timestamptz DEFAULT now()
+);
 
 -- ============================================================================
 -- Bootstrap: zorg dat de TPG Finance hoofd-admin altijd aanwezig is.

@@ -13,13 +13,14 @@ const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
 // Labels voor de bestemmingen per slot
 const SLOT_DESTINATION: Record<string, string> = {
-  uren_lijst: 'OHW Overzicht → Projects → "U-Projecten (SAP-overzicht) met tarief"',
+  uren_lijst: 'OHW Overzicht → "U-Projecten (SAP-overzicht) met tarief" per BV (NTF — Nog Te Factureren waarde)',
+  uren_facturering_totaal: 'Uren Dashboard → "Waarde Declarabel" voor Consultancy per maand (TOTALE facturatiewaarde) — alleen Consultancy, NIET toegepast op maandafsluiting-regels',
   d_lijst: 'OHW Overzicht → Consultancy → "D facturatie"',
   ohw: 'OHW Overzicht → Projects → "Onderhanden projecten (OHW Excel)"',
   missing_hours: 'OHW Overzicht → Consultancy → "Missing hours (nog niet geboekte of goed gekeurde uren)"',
   factuurvolume: 'Maandafsluiting → Factuurvolume per BV',
   conceptfacturen: 'Maandafsluiting → Factuurvolume per BV',
-  geschreven_uren: 'Uren Dashboard + Latest Estimate forecast (declarable, intern & verlof per BV × maand) — NIET toegepast op maandafsluiting-regels',
+  geschreven_uren: 'Uren Dashboard YTD + Latest Estimate forecast (declarable, intern & verlof per BV × maand) — NIET toegepast op maandafsluiting-regels',
 }
 
 /** Slots die uren-data verwerken i.p.v. financiële bedragen. Weergave schakelt
@@ -124,6 +125,7 @@ export function ImportApprovalModal({ record, hoursEntries, onApprove, onReject,
           <span style={{ fontSize: 20 }}>
             {record.slotId === 'factuurvolume' ? '🧾' :
              record.slotId === 'geschreven_uren' || record.slotId === 'uren_lijst' ? '⏱' :
+             record.slotId === 'uren_facturering_totaal' ? '💶' :
              record.slotId === 'd_lijst' ? '📊' :
              record.slotId === 'ohw' ? '🏗' : '📄'}
           </span>

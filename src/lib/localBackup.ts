@@ -93,6 +93,35 @@ export function deleteBackup(backupKey: string): void {
   try { localStorage.removeItem(backupKey) } catch { /* ignore */ }
 }
 
+/** Selectief restore: zoek de nieuwste backup waarin alle gevraagde keys
+ *  voorkomen en zet die specifieke keys terug in localStorage. Voor het geval
+ *  je alleen 'tpg-import-records' + 'tpg-raw-data' wil herstellen zonder de
+ *  rest van je app-state te raken. Maakt eerst een pre-restore snapshot. */
+export function restoreKeysFromBackups(
+  keys: string[],
+): { ok: boolean; restored: string[]; fromBackup?: string } {
+  try {
+    const all = listBackups()
+    if (all.length === 0) return { ok: false, restored: [] }
+    snapshotLocalStorage('pre-restore-keys')
+    for (const b of all) {
+      try {
+        const raw = localStorage.getItem(b.key)
+        if (!raw) continue
+        const snap = JSON.parse(raw) as Snapshot
+        const present = keys.filter(k => snap.keys[k] != null && snap.keys[k] !== '')
+        if (present.length === 0) continue
+        for (const k of present) localStorage.setItem(k, snap.keys[k])
+        return { ok: true, restored: present, fromBackup: b.key }
+      } catch { /* probeer volgende backup */ }
+    }
+    return { ok: false, restored: [] }
+  } catch (e) {
+    console.warn('[localBackup] restoreKeysFromBackups failed:', e)
+    return { ok: false, restored: [] }
+  }
+}
+
 function pruneOldBackups(): void {
   const all = listBackups()
   const toDelete = all.slice(KEEP_BACKUPS)

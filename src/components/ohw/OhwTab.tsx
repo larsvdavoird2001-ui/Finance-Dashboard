@@ -3,6 +3,7 @@ import type { OhwYearData, OhwEntityData } from '../../data/types'
 import { fmt, gv } from '../../lib/format'
 import { OhwEntityBlock } from './OhwEntityBlock'
 import { useNavStore } from '../../store/useNavStore'
+import { useLockedBv } from '../../lib/permissions'
 
 interface Props {
   data2025: OhwYearData
@@ -20,7 +21,13 @@ const BV_COLORS: Record<string, string> = {
 export function OhwTab({ data2025, data2026, onEntityChange, showToast }: Props) {
   const [year, setYear] = useState<'2025' | '2026'>('2026')
   const yearData = year === '2025' ? data2025 : data2026
-  const { displayMonths, entities } = yearData
+  const { displayMonths } = yearData
+  const lockedBv = useLockedBv()
+  // Voor BV-locked users: alleen de eigen entiteit tonen. Holdings heeft geen
+  // OHW-flow, dus voor een Holdings-locked user blijft de lijst leeg.
+  const entities = lockedBv
+    ? yearData.entities.filter(e => e.entity === lockedBv)
+    : yearData.entities
 
   // Deep-link navigatie vanuit Maandafsluiting (of andere tabs). Als er een
   // pending nav-target is voor tab='ohw', consumeer hem: switch jaar indien
@@ -41,7 +48,7 @@ export function OhwTab({ data2025, data2026, onEntityChange, showToast }: Props)
     void showToast  // unused in nav effect — silence lint
   }, [navPending, year, navConsume, showToast])
 
-  const summaryRows = ['Consultancy', 'Projects', 'Software']
+  const summaryRows = lockedBv ? [lockedBv] : ['Consultancy', 'Projects', 'Software']
 
   // Netto omzet totals for summary
   const lastM = displayMonths[displayMonths.length - 1]

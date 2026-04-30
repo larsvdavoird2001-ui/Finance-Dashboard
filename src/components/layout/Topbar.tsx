@@ -1,5 +1,6 @@
 import type { GlobalFilter, ClosingBv, TabId } from '../../data/types'
 import { useSaveStatus } from '../../lib/saveStatus'
+import { useLockedBv } from '../../lib/permissions'
 
 const TITLES: Record<TabId, string> = {
   dashboard:  'Executive Overview',
@@ -98,6 +99,7 @@ function SyncIndicator() {
 
 export function Topbar({ tab, filter, onFilterChange }: Props) {
   const showFilters = FILTER_TABS.includes(tab)
+  const lockedBv = useLockedBv()
 
   return (
     <div className="topbar" style={{ flexWrap: 'wrap', height: 'auto', minHeight: 52, gap: 0, padding: '0 18px' }}>
@@ -133,70 +135,99 @@ export function Topbar({ tab, filter, onFilterChange }: Props) {
 
             <div style={{ width: 1, height: 18, background: 'var(--bd2)', margin: '0 6px' }} />
 
-            {/* BV selector — tabs met kleurcodering */}
+            {/* BV selector — tabs met kleurcodering. Voor BV-locked users tonen we
+                alleen een read-only badge i.p.v. de switcher. */}
             <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', marginRight: 2 }}>BV:</span>
-            {BV_OPTIONS.map(o => {
-              const isActive = filter.bv === o.id
-              const color = o.id !== 'all' ? BV_COLORS[o.id as ClosingBv] : undefined
-              return (
-                <button
-                  key={o.id}
-                  onClick={() => onFilterChange({ bv: o.id })}
-                  style={{
-                    padding: '3px 10px',
-                    borderRadius: 5,
-                    fontSize: 11,
-                    fontWeight: isActive ? 600 : 500,
-                    cursor: 'pointer',
-                    border: '1px solid',
-                    fontFamily: 'var(--font)',
-                    transition: 'all .12s',
-                    borderColor: isActive ? (color ?? 'rgba(255,255,255,0.25)') : 'var(--bd2)',
-                    background: isActive
-                      ? color ? color + '22' : 'var(--bg4)'
-                      : 'transparent',
-                    color: isActive ? (color ?? 'var(--t1)') : 'var(--t3)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5,
-                  }}
-                >
-                  {color && (
-                    <span style={{
-                      width: 6, height: 6, borderRadius: '50%',
-                      background: isActive ? color : 'var(--t3)',
-                      display: 'inline-block',
-                      flexShrink: 0,
-                    }} />
-                  )}
-                  {o.label}
-                  {o.sub && (
-                    <span style={{ fontSize: 9, color: isActive ? color : 'var(--t3)', opacity: 0.75, marginLeft: 2 }}>
-                      ({o.sub})
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-
-            {(filter.bv !== 'all' || filter.year !== '2026') && (
-              <button
+            {lockedBv ? (
+              <span
+                title={`Je account is gekoppeld aan ${lockedBv} — je ziet alleen data van deze BV.`}
                 style={{
-                  padding: '3px 7px',
+                  padding: '3px 10px',
                   borderRadius: 5,
-                  fontSize: 10,
-                  cursor: 'pointer',
-                  border: '1px solid var(--bd2)',
-                  background: 'transparent',
-                  color: 'var(--t3)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  border: `1px solid ${BV_COLORS[lockedBv]}`,
+                  background: BV_COLORS[lockedBv] + '22',
+                  color: BV_COLORS[lockedBv],
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
                   fontFamily: 'var(--font)',
-                  marginLeft: 2,
                 }}
-                onClick={() => onFilterChange({ bv: 'all', year: '2026' })}
-                title="Reset filters"
               >
-                ✕ Reset
-              </button>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: BV_COLORS[lockedBv], display: 'inline-block', flexShrink: 0,
+                }} />
+                {lockedBv}
+                <span style={{ fontSize: 9, marginLeft: 2, opacity: 0.7 }}>🔒</span>
+              </span>
+            ) : (
+              <>
+                {BV_OPTIONS.map(o => {
+                  const isActive = filter.bv === o.id
+                  const color = o.id !== 'all' ? BV_COLORS[o.id as ClosingBv] : undefined
+                  return (
+                    <button
+                      key={o.id}
+                      onClick={() => onFilterChange({ bv: o.id })}
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: 5,
+                        fontSize: 11,
+                        fontWeight: isActive ? 600 : 500,
+                        cursor: 'pointer',
+                        border: '1px solid',
+                        fontFamily: 'var(--font)',
+                        transition: 'all .12s',
+                        borderColor: isActive ? (color ?? 'rgba(255,255,255,0.25)') : 'var(--bd2)',
+                        background: isActive
+                          ? color ? color + '22' : 'var(--bg4)'
+                          : 'transparent',
+                        color: isActive ? (color ?? 'var(--t1)') : 'var(--t3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                      }}
+                    >
+                      {color && (
+                        <span style={{
+                          width: 6, height: 6, borderRadius: '50%',
+                          background: isActive ? color : 'var(--t3)',
+                          display: 'inline-block',
+                          flexShrink: 0,
+                        }} />
+                      )}
+                      {o.label}
+                      {o.sub && (
+                        <span style={{ fontSize: 9, color: isActive ? color : 'var(--t3)', opacity: 0.75, marginLeft: 2 }}>
+                          ({o.sub})
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+
+                {(filter.bv !== 'all' || filter.year !== '2026') && (
+                  <button
+                    style={{
+                      padding: '3px 7px',
+                      borderRadius: 5,
+                      fontSize: 10,
+                      cursor: 'pointer',
+                      border: '1px solid var(--bd2)',
+                      background: 'transparent',
+                      color: 'var(--t3)',
+                      fontFamily: 'var(--font)',
+                      marginLeft: 2,
+                    }}
+                    onClick={() => onFilterChange({ bv: 'all', year: '2026' })}
+                    title="Reset filters"
+                  >
+                    ✕ Reset
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}

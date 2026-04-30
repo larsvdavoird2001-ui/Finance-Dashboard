@@ -328,7 +328,51 @@ export async function deleteEvidence(id: string): Promise<void> {
   if (error) console.error('deleteEvidence:', error)
 }
 
+// ── Maandafsluiting finalisatie ─────────────────────────────────────────────
+export interface FinalizedMonth {
+  month: string                                 // 'Mar-26'
+  finalizedAt: string
+  finalizedBy: string
+  checklist: Record<string, boolean>            // snapshot van afgevinkte items
+}
+
+export async function fetchFinalizedMonths(): Promise<FinalizedMonth[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('closing_finalized').select('*')
+  if (error) { console.error('fetchFinalizedMonths:', error); return [] }
+  return (data ?? []).map(row => ({
+    month:       String(row.month),
+    finalizedAt: String(row.finalized_at ?? ''),
+    finalizedBy: String(row.finalized_by ?? ''),
+    checklist:   (row.checklist ?? {}) as Record<string, boolean>,
+  }))
+}
+
+export async function upsertFinalizedMonth(m: FinalizedMonth): Promise<{ error: string | null }> {
+  if (!supabaseEnabled) return { error: null }  // local-only fallback
+  const row = {
+    month: m.month,
+    finalized_at: m.finalizedAt,
+    finalized_by: m.finalizedBy,
+    checklist: m.checklist,
+  }
+  const { error } = await supabase
+    .from('closing_finalized')
+    .upsert(row, { onConflict: 'month' })
+  if (error) { console.error('upsertFinalizedMonth:', error); return { error: error.message } }
+  return { error: null }
+}
+
+export async function deleteFinalizedMonth(month: string): Promise<{ error: string | null }> {
+  if (!supabaseEnabled) return { error: null }
+  const { error } = await supabase.from('closing_finalized').delete().eq('month', month)
+  if (error) { console.error('deleteFinalizedMonth:', error); return { error: error.message } }
+  return { error: null }
+}
+
 // ── User Profiles (multi-user beheer) ───────────────────────────────────────
+import type { ClosingBv } from '../data/types'
+
 export interface UserProfile {
   email: string
   role: 'admin' | 'user'
@@ -337,6 +381,15 @@ export interface UserProfile {
   invitedBy: string
   invitedAt: string
   lastSignIn?: string | null
+  /** Toegewezen BV — beperkt de gebruiker tot data van die BV. null = geen
+   *  restrictie (admin / algemeen account). */
+  bv?: ClosingBv | null
+}
+
+function parseBv(v: unknown): ClosingBv | null {
+  if (typeof v !== 'string') return null
+  const allowed: ClosingBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
+  return (allowed as string[]).includes(v) ? (v as ClosingBv) : null
 }
 
 export async function fetchUserProfiles(): Promise<UserProfile[]> {
@@ -354,6 +407,7 @@ export async function fetchUserProfiles(): Promise<UserProfile[]> {
     invitedBy:     String(row.invited_by ?? ''),
     invitedAt:     String(row.invited_at ?? ''),
     lastSignIn:    row.last_sign_in ?? null,
+    bv:            parseBv(row.bv),
   }))
 }
 
@@ -363,6 +417,8 @@ export async function upsertUserProfile(p: {
   active?: boolean
   needsPassword?: boolean
   invitedBy?: string
+  /** null = wist de BV-restrictie. */
+  bv?: ClosingBv | null
 }): Promise<{ error: string | null }> {
   if (!supabaseEnabled) return { error: 'Supabase niet geconfigureerd' }
   const payload: Record<string, unknown> = {
@@ -372,6 +428,7 @@ export async function upsertUserProfile(p: {
   if (p.active !== undefined)        payload.active = p.active
   if (p.needsPassword !== undefined) payload.needs_password = p.needsPassword
   if (p.invitedBy !== undefined)     payload.invited_by = p.invitedBy
+  if (p.bv !== undefined)            payload.bv = p.bv
   const { error } = await supabase
     .from('user_profiles')
     .upsert(payload, { onConflict: 'email' })

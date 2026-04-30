@@ -1,14 +1,24 @@
 import { useState } from 'react'
 import type { UserProfile } from '../../lib/db'
+import type { ClosingBv } from '../../data/types'
 import { ADMIN_EMAIL } from '../../lib/auth'
+
+const BV_OPTIONS: ClosingBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
+const BV_COLORS: Record<ClosingBv, string> = {
+  Consultancy: '#00a9e0',
+  Projects:    '#26c997',
+  Software:    '#8b5cf6',
+  Holdings:    '#8fa3c0',
+}
 
 interface Props {
   currentEmail: string | null
   profiles: UserProfile[]
   isAdmin: boolean
-  inviteUser: (email: string, role: 'admin' | 'user') => Promise<{ error: string | null }>
+  inviteUser: (email: string, role: 'admin' | 'user', bv?: ClosingBv | null) => Promise<{ error: string | null }>
   setUserActive: (email: string, active: boolean) => Promise<{ error: string | null }>
   setUserRole: (email: string, role: 'admin' | 'user') => Promise<{ error: string | null }>
+  setUserBv: (email: string, bv: ClosingBv | null) => Promise<{ error: string | null }>
   removeUser: (email: string) => Promise<{ error: string | null }>
   refreshProfiles: () => Promise<void>
 }
@@ -31,11 +41,13 @@ export function UsersTab({
   inviteUser,
   setUserActive,
   setUserRole,
+  setUserBv,
   removeUser,
   refreshProfiles,
 }: Props) {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<'admin' | 'user'>('user')
+  const [bv, setBv] = useState<ClosingBv | ''>('')
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -61,12 +73,15 @@ export function UsersTab({
     if (!email.trim()) { setError('Vul een e-mailadres in'); return }
     setSubmitting(true)
     try {
-      const { error } = await inviteUser(email, role)
+      const bvArg: ClosingBv | null = role === 'admin' ? null : (bv === '' ? null : bv)
+      const { error } = await inviteUser(email, role, bvArg)
       if (error) setError(error)
       else {
-        setInfo(`✉ Uitnodiging verzonden naar ${email}. De gebruiker ontvangt een magic-link en kan daarna een wachtwoord instellen.`)
+        const bvLabel = bvArg ? ` (alleen ${bvArg})` : ''
+        setInfo(`✉ Uitnodiging verzonden naar ${email}${bvLabel}. De gebruiker ontvangt een magic-link en kan daarna een wachtwoord instellen.`)
         setEmail('')
         setRole('user')
+        setBv('')
       }
     } finally {
       setSubmitting(false)
@@ -82,6 +97,12 @@ export function UsersTab({
   const onChangeRole = async (p: UserProfile, newRole: 'admin' | 'user') => {
     setError(null); setInfo(null)
     const { error } = await setUserRole(p.email, newRole)
+    if (error) setError(error)
+  }
+
+  const onChangeBv = async (p: UserProfile, newBv: ClosingBv | '') => {
+    setError(null); setInfo(null)
+    const { error } = await setUserBv(p.email, newBv === '' ? null : newBv)
     if (error) setError(error)
   }
 
@@ -153,7 +174,11 @@ export function UsersTab({
               </label>
               <select
                 value={role}
-                onChange={e => setRole(e.target.value as 'admin' | 'user')}
+                onChange={e => {
+                  const r = e.target.value as 'admin' | 'user'
+                  setRole(r)
+                  if (r === 'admin') setBv('')  // admins zien altijd alles
+                }}
                 style={{
                   background: 'var(--bg3)', border: '1px solid var(--bd2)',
                   borderRadius: 7, color: 'var(--t1)', fontSize: 13,
@@ -165,6 +190,27 @@ export function UsersTab({
                 <option value="admin">Admin</option>
               </select>
             </div>
+            <div>
+              <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
+                BV-toegang
+              </label>
+              <select
+                value={bv}
+                onChange={e => setBv(e.target.value as ClosingBv | '')}
+                disabled={role === 'admin'}
+                title={role === 'admin' ? 'Admins zien alle BVs' : 'Beperk deze gebruiker tot één BV (laat leeg voor alle BVs)'}
+                style={{
+                  background: 'var(--bg3)', border: '1px solid var(--bd2)',
+                  borderRadius: 7, color: role === 'admin' ? 'var(--t3)' : 'var(--t1)', fontSize: 13,
+                  padding: '9px 12px', fontFamily: 'var(--font)', outline: 'none',
+                  marginTop: 6, height: 36,
+                  opacity: role === 'admin' ? 0.5 : 1,
+                }}
+              >
+                <option value="">Alle BVs</option>
+                {BV_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
             <button type="submit" className="btn primary" disabled={submitting} style={{ height: 36 }}>
               {submitting ? '⏳ Bezig...' : '✉ Uitnodigen'}
             </button>
@@ -172,6 +218,7 @@ export function UsersTab({
 
           <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 10, lineHeight: 1.55 }}>
             De ontvanger krijgt een e-mail met een eenmalige login-link. Bij eerste login kan de gebruiker zelf een wachtwoord kiezen.
+            Selecteer een BV om deze gebruiker te beperken tot data van die business unit.
           </div>
 
           {error && (
@@ -200,6 +247,7 @@ export function UsersTab({
               <tr>
                 <th style={{ minWidth: 220 }}>E-mail</th>
                 <th>Rol</th>
+                <th>BV-toegang</th>
                 <th>Status</th>
                 <th>Uitgenodigd door</th>
                 <th>Uitgenodigd op</th>
@@ -210,7 +258,7 @@ export function UsersTab({
             <tbody>
               {sortedProfiles.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', color: 'var(--t3)', padding: 18 }}>
+                  <td colSpan={8} style={{ textAlign: 'center', color: 'var(--t3)', padding: 18 }}>
                     Geen gebruikers gevonden. Nodig je eerste teamlid uit hierboven.
                   </td>
                 </tr>
@@ -236,6 +284,25 @@ export function UsersTab({
                         >
                           <option value="user">Gebruiker</option>
                           <option value="admin">Admin</option>
+                        </select>
+                      )}
+                    </td>
+                    <td>
+                      {isMain || p.role === 'admin' ? (
+                        <span style={{ fontSize: 11, color: 'var(--t3)' }} title="Admins zien altijd alle BVs">Alle BVs</span>
+                      ) : (
+                        <select
+                          value={p.bv ?? ''}
+                          onChange={e => onChangeBv(p, e.target.value as ClosingBv | '')}
+                          style={{
+                            background: 'var(--bg3)', border: '1px solid var(--bd2)', borderRadius: 5,
+                            color: p.bv ? BV_COLORS[p.bv] : 'var(--t1)',
+                            fontSize: 11, padding: '3px 6px', fontFamily: 'var(--font)',
+                            fontWeight: p.bv ? 600 : 400,
+                          }}
+                        >
+                          <option value="">Alle BVs</option>
+                          {BV_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                         </select>
                       )}
                     </td>

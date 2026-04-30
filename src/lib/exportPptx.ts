@@ -671,7 +671,7 @@ function slideFacturatiePipeline(
   const pipelineSlots = [
     { id: 'conceptfacturen', label: 'Conceptfacturen',   desc: 'SAP conceptfacturen wachtend op afhandeling', color: BRAND.primary },
     { id: 'd_lijst',         label: 'D-lijst (Consult.)', desc: 'Declarabele uren Consultancy (open voor facturatie)', color: BRAND.primary },
-    { id: 'uren_lijst',      label: 'Uren-lijst (Proj.)', desc: 'U-Projecten met tarief (wachtend op facturatie)', color: BRAND.green },
+    { id: 'uren_lijst',      label: 'NTF Uren',           desc: 'Nog Te Factureren uren-waarde per BV (wachtend op facturatie)', color: BRAND.green },
     { id: 'missing_hours',   label: 'Missing hours',      desc: 'Uren niet geboekt/goedgekeurd — potentiële facturatie', color: BRAND.amber },
   ]
 
@@ -1128,7 +1128,9 @@ export interface GeneratePptxInput {
   importRecords: ImportRecord[]  // voor facturatie-pipeline slide
 }
 
-export async function generateMonthPptx(input: GeneratePptxInput): Promise<void> {
+/** Bouwt de PptxGenJS deck-instantie zonder te schrijven. Gedeeld door
+ *  generateMonthPptx (download) en buildMonthPptxBlob (in-memory voor ZIP). */
+async function buildMonthPptxDeck(input: GeneratePptxInput): Promise<PptxGenJS> {
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
   pptx.author = 'TPG Finance'
@@ -1166,8 +1168,26 @@ export async function generateMonthPptx(input: GeneratePptxInput): Promise<void>
   // 6. Bijlage
   slideBijlage(pptx, input.monthLabel, input.closingEntries, num++)
 
+  return pptx
+}
+
+export async function generateMonthPptx(input: GeneratePptxInput): Promise<void> {
+  const pptx = await buildMonthPptxDeck(input)
   const filename = `TPG_Maandrapportage_${input.month.replace(/\s+/g, '_')}.pptx`
   await pptx.writeFile({ fileName: filename })
+}
+
+/** Genereer dezelfde PowerPoint maar als Blob (voor bundling in een ZIP).
+ *  Gebruikt door buildFullMonthReportZip — de gebruiker selecteert dan in de
+ *  export-modal welke onderdelen mee moeten en de PPTX is er één van. */
+export async function buildMonthPptxBlob(input: GeneratePptxInput): Promise<Blob> {
+  const pptx = await buildMonthPptxDeck(input)
+  const out = await pptx.write({ outputType: 'blob' })
+  if (out instanceof Blob) return out
+  // Fallback voor non-browser omgevingen (zou in deze app niet moeten gebeuren).
+  return new Blob([out as unknown as ArrayBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  })
 }
 
 /** Converteer "Mar-26" → "maart 2026" */

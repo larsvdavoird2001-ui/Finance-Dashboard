@@ -13,6 +13,7 @@ import { useFteStore } from '../../store/useFteStore'
 import { useNavStore } from '../../store/useNavStore'
 import { useBudgetStore } from '../../store/useBudgetStore'
 import { derivePL, READONLY_KEYS as PL_DERIVED_KEYS } from '../../lib/plDerive'
+import { useLockedBv } from '../../lib/permissions'
 
 type ColType = 'actual' | 'budget' | 'delta'
 
@@ -59,6 +60,9 @@ interface Props {
 export function BudgetTab({ filter, onFilterChange }: Props) {
   const periods: Period[] = filter.year === '2025' ? PERIODS_2025 : PERIODS_2026
   const defaultPeriod = filter.year === '2025' ? 'ytd25' : 'ytd26'
+  // BV-locked gebruikers: BV-switcher wordt verborgen — App.tsx forceert al
+  // filter.bv naar de eigen BV.
+  const lockedBv = useLockedBv()
 
   const [period,    setPeriod]    = useState<string>(defaultPeriod)
   const [colTypes,  setColTypes]  = useState<Set<ColType>>(new Set(['actual', 'budget', 'delta']))
@@ -644,25 +648,28 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
             </div>
           </div>
 
-          {/* BV (gesynchroniseerd met globale topbar-filter) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'var(--t3)' }}>BV</span>
-            <div style={{ display: 'flex', gap: 3, background: 'var(--bg3)', padding: 2, borderRadius: 5 }}>
-              {(['all', 'Consultancy', 'Projects', 'Software'] as const).map(b => (
-                <button
-                  key={b}
-                  onClick={() => onFilterChange?.({ bv: b })}
-                  style={{
-                    padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: filter.bv === b ? 700 : 500,
-                    background: filter.bv === b ? 'var(--bg1)' : 'transparent',
-                    color: filter.bv === b ? 'var(--t1)' : 'var(--t3)',
-                    border: '1px solid', borderColor: filter.bv === b ? 'var(--bd2)' : 'transparent',
-                    cursor: 'pointer',
-                  }}
-                >{b === 'all' ? 'Alle BVs' : b}</button>
-              ))}
+          {/* BV (gesynchroniseerd met globale topbar-filter).
+              Verborgen voor BV-locked gebruikers — die zien alleen hun eigen BV. */}
+          {!lockedBv && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 10, color: 'var(--t3)' }}>BV</span>
+              <div style={{ display: 'flex', gap: 3, background: 'var(--bg3)', padding: 2, borderRadius: 5 }}>
+                {(['all', 'Consultancy', 'Projects', 'Software'] as const).map(b => (
+                  <button
+                    key={b}
+                    onClick={() => onFilterChange?.({ bv: b })}
+                    style={{
+                      padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: filter.bv === b ? 700 : 500,
+                      background: filter.bv === b ? 'var(--bg1)' : 'transparent',
+                      color: filter.bv === b ? 'var(--t1)' : 'var(--t3)',
+                      border: '1px solid', borderColor: filter.bv === b ? 'var(--bd2)' : 'transparent',
+                      cursor: 'pointer',
+                    }}
+                  >{b === 'all' ? 'Alle BVs' : b}</button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Periode */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

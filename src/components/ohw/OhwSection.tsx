@@ -37,7 +37,9 @@ function rowHasAnyValue(row: OhwRow): boolean {
 
 // Source slot labels for locked rows
 const SOURCE_LABELS: Record<string, string> = {
-  uren_lijst: 'Uren lijst',
+  uren_lijst: 'NTF Uren',
+  uren_facturering_totaal: 'Uren Facturering Totaal (Consultancy)',
+  geschreven_uren: 'Geschreven uren YTD',
   d_lijst: 'D Lijst',
   ohw: 'OHW Excel',
   missing_hours: 'Missing Hours',
@@ -53,11 +55,17 @@ function DescCell({
   onSave,
   width,
   leftOffset,
+  hasAnyApprovedImport,
 }: {
   row: OhwRow
   onSave: (desc: string) => void
   width: number
   leftOffset: number
+  /** Heeft deze rij voor MINSTENS één maand een goedgekeurd import-bestand?
+   *  Zo ja → tonen we het 🔒-icoon + de "← NTF Uren"-bron-badge zoals
+   *  voorheen. Zo nee → de rij is technisch "locked" maar er hangt nog geen
+   *  bestand achter, dus geen 🔒-emoji en geen badge. */
+  hasAnyApprovedImport: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   // Effectieve input-breedte: houd wat marge tov de cell
@@ -76,7 +84,9 @@ function DescCell({
         width, minWidth: width, maxWidth: width,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: inputWidth }}>
-          <span style={{ fontSize: 10, color: 'var(--t3)', flexShrink: 0 }} title="Vast veld — wordt gevuld vanuit import">🔒</span>
+          {hasAnyApprovedImport && (
+            <span style={{ fontSize: 10, color: 'var(--t3)', flexShrink: 0 }} title="Vast veld — wordt gevuld vanuit import">🔒</span>
+          )}
           <span style={{
             fontSize: 12, color: 'var(--t1)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -84,7 +94,7 @@ function DescCell({
           }} title={row.description}>
             {row.description}
           </span>
-          {row.sourceSlot && (
+          {row.sourceSlot && hasAnyApprovedImport && (
             <span style={{
               fontSize: 9, color: 'var(--blue)', background: 'var(--bd-blue)',
               padding: '1px 5px', borderRadius: 3, flexShrink: 0, fontWeight: 600,
@@ -169,6 +179,20 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
     if (MULTI_BV_SOURCE_SLOTS.has(sourceSlot)) return Math.round(latest.perBv[entity] ?? 0)
     if (SINGLE_BV_SOURCE_SLOTS.has(sourceSlot)) return Math.round(latest.totalAmount)
     return null
+  }
+
+  /** Bestaat er voor (slot, maand) een goedgekeurde import? Bepaalt of een
+   *  cel blauw+klikbaar wordt + of we ↻-sync-knop tonen. Een handmatig
+   *  ingevulde waarde zonder bron-bestand telt NIET als import. */
+  const hasApprovedImport = (sourceSlot: string | undefined, month: string): boolean => {
+    if (!sourceSlot) return false
+    return importRecords.some(r => r.slotId === sourceSlot && r.month === month && r.status === 'approved')
+  }
+  /** Heeft deze rij voor MINSTENS één maand een goedgekeurde import? Bepaalt
+   *  of we 🔒-icoon en bron-badge in de row-label tonen. */
+  const rowHasAnyApprovedImport = (sourceSlot: string | undefined): boolean => {
+    if (!sourceSlot) return false
+    return importRecords.some(r => r.slotId === sourceSlot && r.status === 'approved')
   }
 
   const startOverride = (row: OhwRow, month: string) => {
@@ -308,13 +332,24 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
                 />
               </td>
               {/* Kolom 2: Omschrijving */}
-              <DescCell row={row} onSave={desc => updateDescription(row.id, desc)} width={descColWidth} leftOffset={contactColWidth} />
+              <DescCell
+                row={row}
+                onSave={desc => updateDescription(row.id, desc)}
+                width={descColWidth}
+                leftOffset={contactColWidth}
+                hasAnyApprovedImport={rowHasAnyApprovedImport(row.sourceSlot)}
+              />
               {months.map(m => {
                 const v = gv(row.values, m)
                 const cellRemark = row.remarks?.[m]
                 // Locked rows: read-only maar met optionele handmatige override
                 if (row.locked) {
-                  const clickable = !!row.sourceSlot && v !== 0
+                  // Blauw + klikbaar alleen als er voor DEZE specifieke
+                  // (slot, maand) ook echt een goedgekeurd bestand staat. Een
+                  // handmatig ingevulde override op een verder leeg slot
+                  // blijft een gewoon getal — anders zou de gebruiker
+                  // doorklikken naar een leeg import-overzicht.
+                  const clickable = !!row.sourceSlot && v !== 0 && hasApprovedImport(row.sourceSlot, m)
                   // Sync-check: wijkt huidige waarde af van het laatste import-bestand?
                   const expected = getExpectedValue(row.sourceSlot, m)
                   const outOfSync = expected !== null && Math.abs(v - expected) > 1

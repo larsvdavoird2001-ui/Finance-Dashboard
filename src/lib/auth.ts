@@ -7,6 +7,7 @@ import {
   touchUserSignIn,
   type UserProfile,
 } from './db'
+import type { ClosingBv } from '../data/types'
 import type { Session, User } from '@supabase/supabase-js'
 
 /** Hard-coded hoofd-admin: dit account heeft altijd admin-rechten en wordt
@@ -63,12 +64,17 @@ export function useAuth(): AuthState & {
   sendPasswordReset: (email: string) => Promise<{ error: string | null }>
   /** Wachtwoord instellen voor de huidige (al ingelogde) gebruiker. */
   setPassword: (newPassword: string) => Promise<{ error: string | null }>
-  /** Admin: gebruiker uitnodigen via magic-link + record in user_profiles. */
-  inviteUser: (email: string, role: 'admin' | 'user') => Promise<{ error: string | null }>
+  /** Admin: gebruiker uitnodigen via magic-link + record in user_profiles.
+   *  bv: optioneel, beperkt deze user tot data van die BV. null/undefined =
+   *  geen restrictie (alle BVs). */
+  inviteUser: (email: string, role: 'admin' | 'user', bv?: ClosingBv | null) => Promise<{ error: string | null }>
   /** Admin: deactiveer/reactiveer een user_profiles entry. */
   setUserActive: (email: string, active: boolean) => Promise<{ error: string | null }>
   /** Admin: verander rol. */
   setUserRole: (email: string, role: 'admin' | 'user') => Promise<{ error: string | null }>
+  /** Admin: verander/verwijder de BV-toewijzing van een gebruiker. null = wist
+   *  de restrictie zodat de user alle BVs kan zien. */
+  setUserBv: (email: string, bv: ClosingBv | null) => Promise<{ error: string | null }>
   /** Admin: verwijder user_profiles entry (de auth.users row blijft staan). */
   removeUser: (email: string) => Promise<{ error: string | null }>
   /** Refresh user_profiles uit DB. */
@@ -226,7 +232,7 @@ export function useAuth(): AuthState & {
     return { error: null }
   }
 
-  const inviteUser = async (email: string, role: 'admin' | 'user') => {
+  const inviteUser = async (email: string, role: 'admin' | 'user', bv?: ClosingBv | null) => {
     if (!supabaseEnabled) return { error: 'Supabase niet geconfigureerd' }
     const norm = email.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(norm)) {
@@ -241,6 +247,10 @@ export function useAuth(): AuthState & {
       active: true,
       needsPassword: true,
       invitedBy: inviter,
+      // Admins hebben nooit een BV-restrictie. Voor 'user' alleen zetten als
+      // expliciet meegegeven; undefined laat de bestaande waarde staan
+      // (bij hersturen van de uitnodiging).
+      bv: role === 'admin' ? null : bv,
     })
     if (up.error) return { error: up.error }
     // 2. Magic-link verzenden zodat de user zichzelf kan inloggen +
@@ -267,7 +277,19 @@ export function useAuth(): AuthState & {
   }
 
   const setUserRole = async (email: string, role: 'admin' | 'user') => {
-    const r = await upsertUserProfile({ email, role })
+    // Promotie naar admin → BV-restrictie wegzetten (admins zien alles).
+    const patch = role === 'admin' ? { email, role, bv: null as ClosingBv | null } : { email, role }
+    const r = await upsertUserProfile(patch)
+    if (r.error) return { error: r.error }
+    await refreshProfiles()
+    return { error: null }
+  }
+
+  const setUserBv = async (email: string, bv: ClosingBv | null) => {
+    if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+      return { error: 'De hoofd-admin kan geen BV-restrictie hebben' }
+    }
+    const r = await upsertUserProfile({ email, bv })
     if (r.error) return { error: r.error }
     await refreshProfiles()
     return { error: null }
@@ -300,6 +322,7 @@ export function useAuth(): AuthState & {
     inviteUser,
     setUserActive,
     setUserRole,
+    setUserBv,
     removeUser,
     refreshProfiles,
     isAdmin,

@@ -46,6 +46,7 @@ export function useRealtimeSync(enabled: boolean) {
     const ch = supabase
       .channel('tpg-finance-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'closing_entries'  }, () => debouncedRefetch('fin', loadFin))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'closing_finalized' }, () => debouncedRefetch('fin', loadFin))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'fte_entries'      }, () => debouncedRefetch('fte', loadFte))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'import_records'   }, () => debouncedRefetch('imp', loadImport))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'import_raw_data'  }, () => debouncedRefetch('raw', loadRaw))
