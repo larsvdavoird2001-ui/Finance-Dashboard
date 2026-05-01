@@ -1,15 +1,16 @@
 import { create } from 'zustand'
 
 /** Algemene nav-target voor cross-tab deep-linking.
- *  - `tab: 'maand'`  → springen naar Maandafsluiting (sub-section via `section`)
- *  - `tab: 'ohw'`    → springen naar OHW Overzicht met optionele entity + rowId
- *                      zodat een specifieke rij in view komt en knippert.
- *  - `tab: 'budget'` → springen naar Budget vs Actuals (na een
- *                      Maandafsluiting-finalisatie, om de LE-leerlus voor die
- *                      maand te tonen).
+ *  - `tab: 'maand'`     → springen naar Maandafsluiting (sub-section via `section`)
+ *  - `tab: 'ohw'`       → springen naar OHW Overzicht met optionele entity + rowId
+ *                          zodat een specifieke rij in view komt en knippert.
+ *  - `tab: 'budget'`    → springen naar Budget vs Actuals; met `reviewMonth`
+ *                          opent direct de Maandreflectie-pane voor die maand.
+ *  - `tab: 'dashboard'` → springen naar Executive Overview; met `reviewMonth`
+ *                          opent direct de Maandafsluiting-review-pane.
  */
 export interface NavTarget {
-  tab: 'maand' | 'ohw' | 'budget'
+  tab: 'maand' | 'ohw' | 'budget' | 'dashboard'
   /** Voor tab='maand' */
   section?: 'import' | 'afsluiting' | 'tarieven' | 'fte' | 'export'
   /** Voor tab='maand' met section='import' (slot-highlight in importoverzicht) */
@@ -19,6 +20,10 @@ export interface NavTarget {
   year?: '2025' | '2026'
   entity?: 'Consultancy' | 'Projects' | 'Software'
   rowId?: string
+  /** Voor tab='budget' / tab='dashboard' — open direct de review-pane van een
+   *  zojuist afgesloten maand (LE-leerlus / actuals + LE-prognose voor de
+   *  maand erna). Gebruikt o.a. door MaandChecklist na finalize. */
+  reviewMonth?: string
 }
 
 interface NavStore {

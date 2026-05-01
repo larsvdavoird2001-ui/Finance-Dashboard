@@ -14,8 +14,15 @@ import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useFinStore } from '../../store/useFinStore'
 import { useFteStore } from '../../store/useFteStore'
 import { useHoursStore } from '../../store/useHoursStore'
+import { useNavStore } from '../../store/useNavStore'
 import { derivePL } from '../../lib/plDerive'
 import { useLockedBv } from '../../lib/permissions'
+
+const MONTH_ORDER = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const monthSortKey = (m: string): number => {
+  const [mmm, yy] = m.split('-')
+  return Number(yy) * 12 + MONTH_ORDER.indexOf(mmm)
+}
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
@@ -175,7 +182,19 @@ type ViewMode = 'monthly' | 'ytd'
 
 export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const is2025 = filter.year === '2025'
-  const ACTUAL_PERIODS = is2025 ? MONTHS_2025_LABELS : ACTUAL_PERIODS_2026
+  // Subscribe op finalized — bepaalt (a) of een maand op de solid actual-lijn
+  // staat (vs gestreepte LE-lijn) in de Omzet-trend en Brutomarge-charts en
+  // (b) welke maanden dynamisch in de periode-filter erbij komen.
+  const finalizedMonths = useFinStore(s => s.finalized)
+  // Periode-knoppen voor 2026: hardgecodeerde Q1 + alle finalized maanden die
+  // er nog niet in zitten — chronologisch gesorteerd. Apr-26 verschijnt dus
+  // automatisch zodra de Maandafsluiting is afgerond.
+  const ACTUAL_PERIODS_2026_DYNAMIC = useMemo(() => {
+    const set = new Set<string>(ACTUAL_PERIODS_2026)
+    for (const f of finalizedMonths) set.add(f.month)
+    return [...set].sort((a, b) => monthSortKey(a) - monthSortKey(b))
+  }, [finalizedMonths])
+  const ACTUAL_PERIODS = is2025 ? MONTHS_2025_LABELS : ACTUAL_PERIODS_2026_DYNAMIC
   // BV-locked gebruikers krijgen geen BV-switcher te zien — App.tsx forceert
   // filter.bv al naar de eigen BV; verbergen voorkomt dode klikken.
   const lockedBv = useLockedBv()
@@ -186,6 +205,18 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   useEffect(() => {
     setPeriod(is2025 ? 'Dec-25' : 'Mar-26')
   }, [is2025])
+
+  // Pending nav vanuit finalize-flow: als er een reviewMonth/month meekomt,
+  // selecteer die maand in de periode-filter zodat de gebruiker direct de
+  // afgesloten maand bekijkt in de Executive Overview.
+  const navConsume = useNavStore(s => s.consume)
+  useEffect(() => {
+    const t = navConsume()
+    if (t?.tab === 'dashboard' && (t.reviewMonth ?? t.month)) {
+      setPeriod(t.reviewMonth ?? t.month!)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 'all' = de drie productie-BV's (klassieke geconsolideerde view).
   // Holdings selecteer je apart om te focussen op de overhead-kosten.
@@ -201,11 +232,6 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const getBudgetMonth = useBudgetStore(s => s.getMonth)
   useBudgetStore(s => s.overrides)
   useBudgetStore(s => s.leOverrides)
-  // Subscribe op finalized — bepaalt of een maand op de solid actual-lijn
-  // staat (vs gestreepte LE-lijn) in de Omzet-trend en Brutomarge-charts.
-  // Zonder deze subscription + deps-entry blijven de useMemo-charts hangen
-  // op de cached versie van vóór de finaliseer-actie.
-  const finalizedMonths = useFinStore(s => s.finalized)
   const budget2026 = (bv: ClosingBv, month: string, key: string): number => {
     const raw = getBudgetMonth(bv as EntityName, month)
     return derivePL(k => raw[k] ?? 0, key)
@@ -213,18 +239,14 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
 
   // OHW
   const ohwData2026 = useOhwStore(s => s.data2026)
-  const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  const nowDate = new Date()
-  const nowMonthIdx = nowDate.getMonth()
-  const nowYear     = nowDate.getFullYear()
-  const isClosedOhwMonth = (m: string): boolean => {
-    const [mmm, yy] = m.split('-')
-    const y = 2000 + Number(yy)
-    const mi = MONTH_CODES.indexOf(mmm)
-    if (y < nowYear) return true
-    if (y > nowYear) return false
-    return mi < nowMonthIdx
-  }
+  // STRIKT: een OHW-maand telt alleen als 'closed' wanneer de Maandafsluiting
+  // voor die maand definitief is gemaakt. Imports of handmatig ingevulde WIP
+  // promoveren een maand niet naar actual — dat gebeurt pas bij Definitief
+  // afsluiten. Zo blijft de OHW-balk van April leeg/forecast-only tot de
+  // gebruiker April afsluit, en verschijnt op de 1e van de maand geen
+  // misleidende 0-balk voor de net-afgelopen maand.
+  const finalizedSet = useMemo(() => new Set(finalizedMonths.map(f => f.month)), [finalizedMonths])
+  const isClosedOhwMonth = (m: string): boolean => finalizedSet.has(m)
   const closedOhwMonths = ohwData2026.allMonths.filter(isClosedOhwMonth)
   const wipByMonth: Record<string, number> = {}
   const ohwEntitiesFiltered = filter.bv === 'all'
@@ -326,14 +348,11 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
         })),
       }
     }
-    // 2026: actuals (solid) Jan→laatste-calendar-past + LE (dashed) forward.
-    // We gebruiken expliciet le.isClosed (calendar-only) zodat de actuals-lijn
-    // altijd doorloopt tot en met de laatste afgesloten kalendermaand —
-    // ongeacht of de Maandafsluiting nog niet is ingevuld of de checklist
-    // nog niet definitief is gemarkeerd. Een lege maand toont gewoon zijn
-    // (eventueel nog 0) actual-waarde; zo ziet de gebruiker direct dat hij
-    // data moet aanvullen i.p.v. dat de maand op de gestreepte LE-lijn
-    // verdwijnt.
+    // 2026: actuals (solid) → t/m laatste finalized maand, daarna LE (dashed).
+    // le.isClosed leest in het strikte model uitsluitend de finalized-set; een
+    // niet-finalized maand (zelfs met imports) toont hier dus de gestreepte
+    // LE-lijn. Q1-historie (Jan/Feb) is via useFinStore eenmalig auto-geseed
+    // als finalized zodat de actuals-lijn niet plotseling alleen forecast toont.
     const lastCalIdx = (() => {
       let idx = -1
       for (let i = 0; i < BUDGET_MONTHS_2026.length; i++) {

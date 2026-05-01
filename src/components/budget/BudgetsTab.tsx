@@ -9,6 +9,7 @@ import { monthlyActuals2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useFteStore } from '../../store/useFteStore'
 import { useHoursStore } from '../../store/useHoursStore'
+import { useFinStore } from '../../store/useFinStore'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
@@ -143,6 +144,12 @@ export function BudgetsTab({ filter: _filter }: Props) {
   const hoursEntries = useHoursStore(s => s.entries)
   const getHoursEntry = (bv: BvId, m: string) =>
     hoursEntries.find(e => e.bv === bv && e.month === m)
+  // Maandafsluiting-status: een maand telt pas als 'closed' zodra hij
+  // óf definitief is afgesloten in de Maandafsluiting-tab, óf er voor
+  // minstens één BV meaningful data voor staat. Voorkomt dat op de 1e
+  // van een nieuwe maand de vorige maand als lege actual wordt gerenderd
+  // (waardoor de LE-lijnen onterecht zouden verdwijnen).
+  const finalizedMonths = useFinStore(s => s.finalized)
 
   const [chartMetric,  setChartMetric]  = useState<string>('netto_omzet')
   const [expandedBvs,  setExpandedBvs]  = useState<Set<EntityName | 'Totaal'>>(new Set(['Consultancy']))
@@ -163,16 +170,16 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return idx >= 0 ? MONTHS_2025_LABELS[idx] : m
   }
 
-  // ── Agenda-gebaseerde detectie: welke maanden zijn fully-closed? ──
-  const now = new Date()
-  const currentYearNum   = now.getFullYear()
-  const currentMonthIdx0 = now.getMonth()
-  const closedMonthsCount =
-    currentYearNum > 2026 ? 12 :
-    currentYearNum < 2026 ? 0  :
-    currentMonthIdx0
-  const closedMonths = months.slice(0, closedMonthsCount)
-  const isClosedMonth = (m: string) => closedMonths.includes(m)
+  // ── Closed-detectie: STRIKT alleen wanneer Maandafsluiting definitief is ──
+  // Imports/handmatige actuals voor April promoveren de maand NIET naar
+  // closed-status; dat gebeurt pas zodra de gebruiker in de Maandafsluiting-
+  // tab op "Definitief afsluiten" klikt. Zo blijven de LE-trendlijnen zichtbaar
+  // (gestreept) en wordt de Budget vs Actuals-tabel pas op actuals teruggevuld
+  // ná die finalize-stap. Q1-historie (Jan/Feb) is via useFinStore eenmalig
+  // auto-geseed als finalized zodat die actuals niet als forecast renderen.
+  const finalizedSet = useMemo(() => new Set(finalizedMonths.map(f => f.month)), [finalizedMonths])
+  const isClosedMonth = (m: string): boolean => finalizedSet.has(m)
+  const closedMonths = months.filter(isClosedMonth)
   const lastClosedMonth: string | null = closedMonths.length > 0
     ? closedMonths[closedMonths.length - 1]
     : null

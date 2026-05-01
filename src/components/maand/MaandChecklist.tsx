@@ -7,7 +7,12 @@ import { useCostBreakdownStore } from '../../store/useCostBreakdownStore'
 import { useNavStore } from '../../store/useNavStore'
 import { notifyMaandFinalized } from '../../store/useNotificationStore'
 import { useCanApprove } from '../../lib/permissions'
+import { useLatestEstimate } from '../../hooks/useLatestEstimate'
+import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
+import { MaandFinalizeReport } from './MaandFinalizeReport'
 import type { ClosingBv } from '../../data/types'
+import type { LeSnapshotByBv } from '../../lib/db'
+import type { EntityName } from '../../data/plData'
 
 interface ChecklistItem {
   key: string
@@ -76,6 +81,14 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
   // de financiële administratie (editor) vult de checklist wél in maar het
   // groene "Definitief"-vinkje moet door de controller / CFO gezet worden.
   const canApprove     = useCanApprove()
+  // Voor het LE-snapshot bij finaliseren én het LE-vs-Actuals rapport.
+  const { getPreCloseLE } = useLatestEstimate()
+  const { getMonthly }    = useAdjustedActuals()
+  // Pop-up state. reportShowSuccess=true wordt direct na finalize gezet (toont
+  // de groene succes-banner én triggert post-close navigatie naar Budget vs
+  // Actuals); bij later her-openen via "📊 LE-rapport" blijft hij false.
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportShowSuccess, setReportShowSuccess] = useState(false)
 
   const finalized = isMonthFinalized(month)
   const finalRecord = getFinalized(month)
@@ -294,6 +307,37 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
     setManual(prev => ({ ...prev, [key]: next }))
   }
 
+  /** LE-snapshot bouwen: per BV de pre-close forecast voor netto omzet,
+   *  brutomarge en EBITDA. Wordt vastgelegd op het moment van finaliseren
+   *  zodat we achteraf in de popup, history-lijst én AI LE-leerlus kunnen
+   *  tonen hoe goed de app de maand voorspeld had — vóórdat de eigen
+   *  actuals waren meegerekend. */
+  const buildLeSnapshot = (): Record<string, LeSnapshotByBv> => {
+    const out: Record<string, LeSnapshotByBv> = {}
+    for (const bv of BVS) {
+      out[bv] = {
+        netto_omzet: getPreCloseLE(bv as EntityName, month, 'netto_omzet'),
+        brutomarge:  getPreCloseLE(bv as EntityName, month, 'brutomarge'),
+        ebitda:      getPreCloseLE(bv as EntityName, month, 'ebitda'),
+      }
+    }
+    return out
+  }
+
+  /** Actuals per BV op de drie KPIs voor (re-)open van het rapport. */
+  const getActualsForReport = (): Record<string, LeSnapshotByBv> => {
+    const out: Record<string, LeSnapshotByBv> = {}
+    for (const bv of BVS) {
+      const m = getMonthly(bv, month)
+      out[bv] = {
+        netto_omzet: m['netto_omzet'] ?? 0,
+        brutomarge:  m['brutomarge'] ?? 0,
+        ebitda:      m['ebitda'] ?? 0,
+      }
+    }
+    return out
+  }
+
   const handleFinalize = async () => {
     if (!allRequiredOk) {
       showToast('Niet alle verplichte items zijn afgevinkt — controleer de checklist', 'r')
@@ -331,18 +375,35 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
     try {
       const snapshot: Record<string, boolean> = {}
       for (const it of items) snapshot[it.key] = effectiveDone(it)
-      await finalizeMonth(month, currentUserEmail ?? 'unknown', snapshot)
-      showToast(`✓ ${month} definitief afgesloten — ga naar Budget vs Actuals voor de LE-leerlus`, 'g')
+      // LE-snapshot vóór finalize vastleggen — daarna behandelt de hook deze
+      // maand als 'actual' en zou de forecast-formule de werkelijke cijfers
+      // teruggeven i.p.v. de oorspronkelijke pre-close prognose.
+      const leSnap = buildLeSnapshot()
+      await finalizeMonth(month, currentUserEmail ?? 'unknown', snapshot, leSnap)
+      showToast(`✓ ${month} definitief afgesloten — Executive Overview gebruikt nu actuals`, 'g')
       // Inbox-melding voor editors + approvers (LE-leerlus klaar om te
       // beoordelen). Notification dedupe-key voorkomt dubbele berichten als
       // dezelfde maand opnieuw definitief gemaakt zou worden.
       notifyMaandFinalized(month, currentUserEmail ?? 'controller')
-      // Stuur de gebruiker direct door naar de Budget vs Actuals tab waar de
-      // LE-leerlus voor deze maand opent: variantie-overzicht + AI-vragen
-      // zodat de afwijkingen kunnen worden geduid voor toekomstige forecasts.
-      navigateTo({ tab: 'budget', month })
+      // Open de LE-vs-Actuals popup zodat de gebruiker direct ziet hoe dichtbij
+      // de Latest Estimate zat. De doorlink naar Budget vs Actuals (LE-leerlus)
+      // gebeurt na het sluiten van de popup — zie handleReportClose.
+      setReportShowSuccess(true)
+      setReportOpen(true)
     } catch (e) {
       showToast(`Afsluiten mislukt: ${e instanceof Error ? e.message : String(e)}`, 'r')
+    }
+  }
+
+  /** Sluit de popup. Alleen na een net-afgesloten maand (showSuccess=true)
+   *  navigeren we door naar de Budget vs Actuals tab — met reviewMonth=month
+   *  zodat de zojuist toegevoegde reflectie-sub-tab automatisch openklapt.
+   *  Bij re-open van een eerdere maand (history) blijven we op de Maand-tab. */
+  const handleReportClose = () => {
+    setReportOpen(false)
+    if (reportShowSuccess) {
+      setReportShowSuccess(false)
+      navigateTo({ tab: 'budget', month, reviewMonth: month })
     }
   }
 
@@ -646,6 +707,21 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
             )
           })}
         </div>
+      )}
+
+      {/* LE-vs-Actuals popup — direct na finalize toont showSuccessBanner=true,
+          bij re-open via history-rij showSuccessBanner=false. Sluiten triggert
+          eenmalig de doorlink naar Budget vs Actuals (LE-leerlus). */}
+      {reportOpen && (
+        <MaandFinalizeReport
+          month={month}
+          leSnapshot={finalRecord?.leSnapshot}
+          actuals={getActualsForReport()}
+          showSuccessBanner={reportShowSuccess}
+          finalizedAt={finalRecord?.finalizedAt}
+          finalizedBy={finalRecord?.finalizedBy}
+          onClose={handleReportClose}
+        />
       )}
     </div>
   )

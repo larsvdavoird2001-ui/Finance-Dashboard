@@ -329,11 +329,24 @@ export async function deleteEvidence(id: string): Promise<void> {
 }
 
 // ── Maandafsluiting finalisatie ─────────────────────────────────────────────
+/** LE-forecast per BV op het moment dat een maand definitief werd afgesloten,
+ *  zoals die was vóór de eigen actuals werden meegerekend. Drie KPIs zodat het
+ *  rapport toont waar de prognose van afweek: netto omzet, brutomarge, EBITDA. */
+export interface LeSnapshotByBv {
+  netto_omzet?: number
+  brutomarge?: number
+  ebitda?: number
+}
+
 export interface FinalizedMonth {
   month: string                                 // 'Mar-26'
   finalizedAt: string
   finalizedBy: string
   checklist: Record<string, boolean>            // snapshot van afgevinkte items
+  /** LE-snapshot per BV — optional zodat records van vóór deze feature blijven
+   *  laden. Ontbrekend = popup toont "geen snapshot" en leReflection valt terug
+   *  op live forecast-simulatie. */
+  leSnapshot?: Record<string, LeSnapshotByBv>
 }
 
 export async function fetchFinalizedMonths(): Promise<FinalizedMonth[]> {
@@ -350,6 +363,7 @@ export async function fetchFinalizedMonths(): Promise<FinalizedMonth[]> {
     finalizedAt: String(row.finalized_at ?? ''),
     finalizedBy: String(row.finalized_by ?? ''),
     checklist:   (row.checklist ?? {}) as Record<string, boolean>,
+    leSnapshot:  (row.le_snapshot ?? undefined) as Record<string, LeSnapshotByBv> | undefined,
   }))
 }
 
@@ -360,6 +374,7 @@ export async function upsertFinalizedMonth(m: FinalizedMonth): Promise<{ error: 
     finalized_at: m.finalizedAt,
     finalized_by: m.finalizedBy,
     checklist: m.checklist,
+    le_snapshot: m.leSnapshot ?? null,
   }
   const { error } = await supabase
     .from('closing_finalized')

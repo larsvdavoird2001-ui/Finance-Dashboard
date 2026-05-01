@@ -32,6 +32,7 @@ import { notifyImportPending, clearImportPendingFor } from '../../store/useNotif
 import { useLockedBv } from '../../lib/permissions'
 import { ExportOptionsModal } from './ExportOptionsModal'
 import { MaandChecklist } from './MaandChecklist'
+import { MaandLeHistory } from './MaandLeHistory'
 import { restoreKeysFromBackups, listBackups } from '../../lib/localBackup'
 import { supabase, supabaseEnabled } from '../../lib/supabase'
 
@@ -1661,6 +1662,11 @@ export function MaandTab({ filter: _filter }: Props) {
               currentUserEmail={currentUserEmail}
               showToast={showToast}
             />
+
+            {/* LE-vs-Actuals historie — per eerder afgesloten maand zie je hoe
+                dichtbij de Latest Estimate van de app zat t.o.v. de werkelijke
+                actuals. Klik op een rij voor het volledige rapport per BV. */}
+            <MaandLeHistory />
 
             {/* Onderbouwing status */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

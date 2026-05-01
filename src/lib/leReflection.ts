@@ -16,6 +16,7 @@ import { monthlyActuals2025, MONTHS_2025_LABELS } from '../data/plData2025'
 import { BUDGET_MONTHS_2026 } from '../store/useBudgetStore'
 import type { FteEntry } from '../data/types'
 import type { HoursEntry } from '../store/useHoursStore'
+import type { LeSnapshotByBv } from './db'
 
 const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -196,8 +197,15 @@ export function buildReflectionContext(args: {
   getBudget: (bv: EntityName, m: string, key: string) => number
   fteEntries: FteEntry[]
   hoursEntries: HoursEntry[]
+  /** Optionele LE-snapshot uit de Maandafsluiting van targetMonth — als
+   *  aanwezig wordt deze waarde gebruikt voor preCloseLe i.p.v. de live
+   *  forecast-simulatie. Zo komen de getallen in dit panel exact overeen
+   *  met de popup die de gebruiker bij het finaliseren zag. Per BV; alleen
+   *  netto_omzet / brutomarge / ebitda zitten in de snapshot — andere keys
+   *  vallen terug op de live simulatie. */
+  preCloseLeOverride?: LeSnapshotByBv
 }): ReflectionContext {
-  const { bv, targetMonth, closedMonthsIncl, getMonthly, getBudget, fteEntries, hoursEntries } = args
+  const { bv, targetMonth, closedMonthsIncl, getMonthly, getBudget, fteEntries, hoursEntries, preCloseLeOverride } = args
   const priorClosed = closedMonthsIncl.filter(m => monthIdx(m) < monthIdx(targetMonth))
   const prevMonth = priorClosed.length > 0 ? priorClosed[priorClosed.length - 1] : null
 
@@ -217,13 +225,26 @@ export function buildReflectionContext(args: {
     { key: 'ebitda',                      label: 'EBITDA',                      costlike: false },
   ]
 
+  /** Lookup van de pre-close LE voor (key) — eerst de opgeslagen snapshot uit
+   *  de Maandafsluiting (matcht 1-op-1 met wat in de popup stond), anders een
+   *  live re-simulatie. Snapshot dekt alleen netto_omzet / brutomarge / ebitda;
+   *  andere keys vallen altijd door naar simulatie. */
+  const preCloseLookup = (key: string): number => {
+    if (preCloseLeOverride) {
+      if (key === 'netto_omzet' && preCloseLeOverride.netto_omzet != null) return preCloseLeOverride.netto_omzet
+      if (key === 'brutomarge'  && preCloseLeOverride.brutomarge  != null) return preCloseLeOverride.brutomarge
+      if (key === 'ebitda'      && preCloseLeOverride.ebitda      != null) return preCloseLeOverride.ebitda
+    }
+    return forecastForKey({
+      bv, month: targetMonth, key,
+      priorClosed, getMonthly, getFte, getHours,
+    })
+  }
+
   const variances: VarianceMetric[] = KEYS.map(k => {
     const actual = getMonthly(bv, targetMonth)[k.key] ?? 0
     const budget = getBudget(bv, targetMonth, k.key)
-    const preCloseLe = forecastForKey({
-      bv, month: targetMonth, key: k.key,
-      priorClosed, getMonthly, getFte, getHours,
-    })
+    const preCloseLe = preCloseLookup(k.key)
     const vsBudget = actual - budget
     const vsLe = actual - preCloseLe
     const denomB = budget !== 0 ? Math.abs(budget) : 0

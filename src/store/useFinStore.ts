@@ -145,6 +145,10 @@ interface FinStore {
    *  forecast. Bewaart óók de checklist-snapshot zodat een unfinalize→
    *  refinalize de eerder afgevinkte items niet kwijtraakt. */
   finalized: FinalizedMonth[]
+  /** Sentinel: éénmalige migratie heeft Jan-26/Feb-26 als auto-finalized
+   *  toegevoegd op basis van de hardgecodeerde initial actuals. Voorkomt
+   *  re-seeding nadat de gebruiker een gesloten maand bewust unfinalized. */
+  seededInitialFinalized: boolean
   loaded: boolean
   loadFromDb: () => Promise<void>
   updateEntry: (id: string, patch: Partial<Omit<ClosingEntry, 'id'>>) => void
@@ -160,8 +164,16 @@ interface FinStore {
   /** Geef het record terug (incl. checklist-snapshot) of undefined. */
   getFinalized: (month: string) => FinalizedMonth | undefined
   /** Markeer een maand als definitief afgesloten. checklist = snapshot van
-   *  afgevinkte items op het moment van finaliseren. */
-  finalizeMonth: (month: string, by: string, checklist: Record<string, boolean>) => Promise<void>
+   *  afgevinkte items op het moment van finaliseren. leSnapshot = LE-forecast
+   *  per BV (netto omzet, brutomarge, EBITDA) zoals die was vóór de eigen
+   *  actuals meetelden — voor het LE-vs-Actuals accuraatheidsrapport en de
+   *  AI LE-leerlus. Optional zodat oudere call-sites blijven werken. */
+  finalizeMonth: (
+    month: string,
+    by: string,
+    checklist: Record<string, boolean>,
+    leSnapshot?: Record<string, import('../lib/db').LeSnapshotByBv>,
+  ) => Promise<void>
   /** Onderwijs een maand opnieuw als open. */
   unfinalizeMonth: (month: string) => Promise<void>
 }
@@ -181,6 +193,7 @@ export const useFinStore = create<FinStore>()(
     (set, get) => ({
       entries: INITIAL_ENTRIES,
       finalized: [],
+      seededInitialFinalized: false,
       loaded: false,
 
       loadFromDb: async () => {
@@ -305,12 +318,13 @@ export const useFinStore = create<FinStore>()(
       getFinalized: (month) =>
         get().finalized.find(f => f.month === month),
 
-      finalizeMonth: async (month, by, checklist) => {
+      finalizeMonth: async (month, by, checklist, leSnapshot) => {
         const record: FinalizedMonth = {
           month,
           finalizedAt: new Date().toISOString(),
           finalizedBy: by,
           checklist: { ...checklist },
+          leSnapshot: leSnapshot ? { ...leSnapshot } : undefined,
         }
         // Optimistic update — wordt door persist-middleware lokaal bewaard,
         // dus blijft staan over page-reloads heen ook als de DB-sync faalt.
@@ -342,14 +356,46 @@ export const useFinStore = create<FinStore>()(
     }),
     {
       name: 'tpg-closing-entries',
-      // Entries en finalized lokaal persisten; `loaded` blijft false bij reload
-      partialize: (state) => ({ entries: state.entries, finalized: state.finalized }) as unknown as FinStore,
-      // Bij rehydratie: merge ontbrekende default-entries. Zonder deze stap
-      // missen users met oudere localStorage de Holdings-entries, waardoor
-      // updateKosten voor Holdings silently failt (entry niet gevonden → bail).
+      // Entries, finalized én seed-flag lokaal persisten; `loaded` blijft false bij reload
+      partialize: (state) => ({
+        entries: state.entries,
+        finalized: state.finalized,
+        seededInitialFinalized: state.seededInitialFinalized,
+      }) as unknown as FinStore,
+      // Bij rehydratie:
+      //   1. Merge ontbrekende default-entries (Holdings-migratie etc.).
+      //   2. Eénmalige seed: Jan-26 / Feb-26 als auto-finalized markeren als
+      //      ze hardgecodeerde actuals hebben en nog niet in finalized staan.
+      //      Reden: in het strikte model telt alleen finalized als 'actual';
+      //      zonder seed zouden Q1-actuals opeens als forecast renderen voor
+      //      bestaande gebruikers. Sentinel voorkomt re-seed na unfinalize.
       onRehydrateStorage: () => (state) => {
-        if (state && Array.isArray(state.entries)) {
+        if (!state) return
+        if (Array.isArray(state.entries)) {
           state.entries = mergeWithInitialEntries(state.entries)
+        }
+        if (!state.seededInitialFinalized) {
+          const seedTargets = ['Jan-26', 'Feb-26']
+          const finalizedMonths = new Set((state.finalized ?? []).map(f => f.month))
+          const toSeed: FinalizedMonth[] = []
+          for (const m of seedTargets) {
+            if (finalizedMonths.has(m)) continue
+            const hasActuals = (state.entries ?? []).some(e =>
+              e.month === m && (e.factuurvolume ?? 0) > 0
+            )
+            if (hasActuals) {
+              toSeed.push({
+                month: m,
+                finalizedAt: new Date().toISOString(),
+                finalizedBy: 'auto-seed (initial Q1 actuals)',
+                checklist: {},
+              })
+            }
+          }
+          if (toSeed.length > 0) {
+            state.finalized = [...(state.finalized ?? []), ...toSeed]
+          }
+          state.seededInitialFinalized = true
         }
       },
     },

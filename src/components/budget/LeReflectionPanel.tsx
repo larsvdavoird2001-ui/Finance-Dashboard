@@ -21,6 +21,7 @@ import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useFteStore } from '../../store/useFteStore'
 import { useHoursStore } from '../../store/useHoursStore'
 import { useBudgetStore } from '../../store/useBudgetStore'
+import { useFinStore } from '../../store/useFinStore'
 import { useReflectionStore, type ReflectionAnswer } from '../../store/useReflectionStore'
 import { useNavStore } from '../../store/useNavStore'
 import { useCanApprove } from '../../lib/permissions'
@@ -238,6 +239,14 @@ export function LeReflectionPanel({ filter, targetMonth, currentUserEmail }: Pro
   const { getMonthly } = useAdjustedActuals()
   const fteEntries = useFteStore(s => s.entries)
   const hoursEntries = useHoursStore(s => s.entries)
+  // Voor de pre-close LE: als targetMonth een opgeslagen LE-snapshot heeft
+  // (vastgelegd op het moment van Definitief afsluiten), gebruiken we die
+  // exacte waardes — zo komen de getallen 1-op-1 overeen met de popup die
+  // de gebruiker bij finalize zag. Voor maanden afgesloten vóór deze feature
+  // óf nog niet afgesloten maanden valt de engine terug op live forecast-
+  // simulatie.
+  const finalizedRecord = useFinStore(s => s.getFinalized(targetMonth))
+  const targetSnapshot = finalizedRecord?.leSnapshot
   const getBudgetMonth = useBudgetStore(s => s.getMonth)
   useBudgetStore(s => s.overrides)
   const getBudget = (bv: EntityName, m: string, key: string): number => {
@@ -294,10 +303,13 @@ export function LeReflectionPanel({ filter, targetMonth, currentUserEmail }: Pro
         getBudget,
         fteEntries,
         hoursEntries,
+        // Snapshot per BV uit de Maandafsluiting — undefined → fallback op
+        // live forecast-simulatie binnen buildReflectionContext.
+        preCloseLeOverride: targetSnapshot?.[bv],
       }),
     }))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetMonth, JSON.stringify(activeBvs), fteEntries, hoursEntries, closedMonthsIncl.join('|')])
+  }, [targetMonth, JSON.stringify(activeBvs), fteEntries, hoursEntries, closedMonthsIncl.join('|'), targetSnapshot])
 
   // Tel onbeantwoorde vragen panel-breed.
   const reflectionRecords = useReflectionStore(s => s.records)

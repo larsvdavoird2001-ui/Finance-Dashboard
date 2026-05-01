@@ -305,8 +305,13 @@ CREATE TABLE IF NOT EXISTS closing_finalized (
   finalized_at timestamptz DEFAULT now(),
   finalized_by text DEFAULT '',
   checklist jsonb DEFAULT '{}'::jsonb,    -- snapshot van afgevinkte items
+  le_snapshot jsonb,                      -- LE-forecast per BV op finalize-moment
+                                          -- ({Consultancy:{netto_omzet,brutomarge,ebitda},...})
+                                          -- voor LE-vs-Actuals accuraatheids-rapport
   created_at timestamptz DEFAULT now()
 );
+-- Idempotente migratie voor bestaande installaties zonder le_snapshot kolom.
+ALTER TABLE closing_finalized ADD COLUMN IF NOT EXISTS le_snapshot jsonb;
 
 -- RLS: zelfde "open"-policy als de andere tabellen (intern dashboard, geen
 -- multi-tenant). Zonder policy zou een Supabase-project met RLS aan-by-default

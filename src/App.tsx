@@ -93,6 +93,7 @@ export default function App() {
     if (navPending?.tab === 'maand') setTab('maand')
     else if (navPending?.tab === 'ohw') setTab('ohw')
     else if (navPending?.tab === 'budget') setTab('budget')
+    else if (navPending?.tab === 'dashboard') setTab('dashboard')
   }, [navPending])
 
   // Non-admin op admin-only tabs → terug naar dashboard

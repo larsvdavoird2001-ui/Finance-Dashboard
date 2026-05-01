@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import * as XLSX from 'xlsx-js-style'
 import {
   PL_STRUCTURE,
@@ -12,9 +12,17 @@ import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useFteStore } from '../../store/useFteStore'
 import { useNavStore } from '../../store/useNavStore'
 import { useBudgetStore } from '../../store/useBudgetStore'
+import { useFinStore } from '../../store/useFinStore'
 import { derivePL, READONLY_KEYS as PL_DERIVED_KEYS } from '../../lib/plDerive'
 import { useLockedBv } from '../../lib/permissions'
 import { LeReflectionPanel } from './LeReflectionPanel'
+
+const MONTH_ORDER = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const monthSortKey = (m: string): number => {
+  const [mmm, yy] = m.split('-')
+  return Number(yy) * 12 + MONTH_ORDER.indexOf(mmm)
+}
+const monthIdToCode = (m: string) => m.toLowerCase().replace('-', '')
 
 type ColType = 'actual' | 'budget' | 'delta'
 
@@ -59,14 +67,56 @@ interface Props {
 }
 
 export function BudgetTab({ filter, onFilterChange }: Props) {
-  const periods: Period[] = filter.year === '2025' ? PERIODS_2025 : PERIODS_2026
-  const defaultPeriod = filter.year === '2025' ? 'ytd25' : 'ytd26'
   // BV-locked gebruikers: BV-switcher wordt verborgen — App.tsx forceert al
   // filter.bv naar de eigen BV.
   const lockedBv = useLockedBv()
 
+  // Finalized maanden worden dynamisch aan de periode-filter toegevoegd —
+  // zodra een Maandafsluiting is afgerond verschijnt de maand als knop
+  // tussen de bestaande periodes (gesorteerd op kalender). Selecteren toont
+  // gewoon de standaard Budget vs Actuals voor die maand mét daarboven de
+  // AI-reflectie-vragen (LeReflectionPanel triggert op de gekozen maand).
+  const finalizedMonths = useFinStore(s => s.finalized)
+  const periods: Period[] = useMemo(() => {
+    const base = filter.year === '2025' ? PERIODS_2025 : PERIODS_2026
+    if (filter.year === '2025') return base
+    const baseMonths = new Set(
+      base.filter(p => !!p.month).map(p => p.month as string),
+    )
+    const extra: Period[] = finalizedMonths
+      .filter(f => !baseMonths.has(f.month))
+      .map(f => ({
+        id: monthIdToCode(f.month),
+        label: f.month,
+        year: '2026' as const,
+        month: f.month,
+      }))
+    // Sorteer alle single-month periodes op kalender en zet aggregaten
+    // (bv. YTD) achteraan zodat de chronologie klopt: Jan, Feb, Mar, Apr, ..., YTD.
+    const single = [...base.filter(p => !!p.month), ...extra]
+      .sort((a, b) => monthSortKey(a.month as string) - monthSortKey(b.month as string))
+    const aggregates = base.filter(p => !p.month)
+    return [...single, ...aggregates]
+  }, [filter.year, finalizedMonths])
+  const defaultPeriod = filter.year === '2025' ? 'ytd25' : 'ytd26'
+
   const [period,    setPeriod]    = useState<string>(defaultPeriod)
   const [colTypes,  setColTypes]  = useState<Set<ColType>>(new Set(['actual', 'budget', 'delta']))
+
+  // Pending nav vanuit MaandChecklist na finalize → selecteer de zojuist
+  // afgesloten maand in de periode-filter zodat de gebruiker direct op de
+  // juiste maand landt (mét de LE-reflectie-vragen daarboven).
+  const navConsume = useNavStore(s => s.consume)
+  useEffect(() => {
+    const t = navConsume()
+    if (t?.tab === 'budget' && (t.reviewMonth || t.month)) {
+      const want = t.reviewMonth ?? t.month
+      const match = periods.find(p => p.month === want)
+      if (match) setPeriod(match.id)
+    }
+    // periods is stabiel binnen één render — alleen bij mount nav consumeren.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const { getMonthly, getYtd } = useAdjustedActuals()
   // Subscribe naar budget-overrides zodat edits in Budgetten-tab live

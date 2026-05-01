@@ -2,6 +2,7 @@ import { useAdjustedActuals } from './useAdjustedActuals'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../store/useBudgetStore'
 import { useFteStore } from '../store/useFteStore'
 import { useHoursStore } from '../store/useHoursStore'
+import { useFinStore } from '../store/useFinStore'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../data/plData2025'
 import type { EntityName } from '../data/plData'
 import {
@@ -11,6 +12,7 @@ import {
 import type { BvId } from '../data/types'
 
 const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const ALL_BVS: EntityName[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 
 /**
  * Latest Estimate per BV per maand voor de Executive Overview.
@@ -19,21 +21,27 @@ const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'
  * maanden) op identieke cijfers uit in beide tabs. Hiërarchie per (bv, maand,
  * key):
  *   1. Handmatige LE-override (uit useBudgetStore.leOverrides) → die waarde.
- *   2. Calendar-past maand → werkelijke actual via useAdjustedActuals.getMonthly
+ *   2. Closed-with-data maand → werkelijke actual via useAdjustedActuals.getMonthly
  *      (incl. IC-verrekening, accruals, handmatige correctie, mutatie
  *      vooruitgefactureerd, kosten-overrides, breakdowns).
- *   3. Toekomstige maand → forecast = blend(seizoens-2025 × YTD-perfMult,
+ *   3. Anders → forecast = blend(seizoens-2025 × YTD-perfMult,
  *      run-rate van laatste closed-month) × FTE-adj × leave-adj.
  *
+ * "Closed" wordt sinds deze versie STRIKT bepaald door {finalized in
+ * Maandafsluiting}, niet meer door kalender of door has-data. Reden: ook als
+ * er voor April al imports zijn binnengekomen, blijft de maand op LE-forecast
+ * totdat de gebruiker in de Maandafsluiting-tab op "Definitief afsluiten"
+ * heeft geklikt. Pas dan worden de werkelijke actuals — incl. de imports —
+ * gepubliceerd in de Executive Overview, charts en AI-prognose. Voor maanden
+ * met initial-load actuals (Jan-26, Feb-26) auto-seedt useFinStore eenmalig
+ * een finalized-record, zodat de Q1-historie niet plotseling als forecast
+ * wordt gerenderd.
+ *
  * Voor aggregaat-keys (netto_omzet, directe_kosten, …):
- *   - calendar-past: rechtstreeks getMonthly[key] (zo tellen non-SUBS-velden
- *     zoals IC-verrekening en accruals mee in de actual-aggregaat).
+ *   - closed: rechtstreeks getMonthly[key] (zo tellen non-SUBS-velden zoals
+ *     IC-verrekening en accruals mee in de actual-aggregaat).
  *   - toekomstig: som van sub-key forecasts (zelfde als BudgetsTab).
  * Voor derived keys (brutomarge, ebitda, ebit): formule recursief.
- *
- * De MaandChecklist-finalize is een puur UI-signaal (audit-trail "deze maand
- * is gereviewd") — het beïnvloedt deze LE-berekening NIET. Een calendar-past
- * maand is altijd 'actual', met of zonder finalize.
  */
 
 /** Ramp-up factor voor nieuwe FTE — match BudgetsTab.rampFactor één-op-één. */
@@ -54,20 +62,16 @@ export function useLatestEstimate(currentDate?: Date) {
   useBudgetStore(s => s.leOverrides)
   const fteEntries  = useFteStore(s => s.entries)
   const hoursEntries = useHoursStore(s => s.entries)
+  const finalizedMonths = useFinStore(s => s.finalized)
 
   const now = currentDate ?? new Date()
   const nowMonthIdx = now.getMonth()
   const nowYear     = now.getFullYear()
 
-  // Calendar-based closedMonths — exact zelfde formule als BudgetsTab. Geen
-  // "with-data" of "finalized" check: een maand telt als afgesloten zodra hij
-  // kalender-historisch is. Half-gevulde maanden tellen óók als actual; de
-  // user is dan zelf verantwoordelijk voor het invullen via de Maandafsluiting.
-  const closedMonthsCount =
-    nowYear > 2026 ? 12 :
-    nowYear < 2026 ? 0  :
-    nowMonthIdx
-  const closedMonths = BUDGET_MONTHS_2026.slice(0, closedMonthsCount)
+  /** Pure kalender-check; behouden voor de zeldzame UI-callers die echt op de
+   *  kalender willen filteren (bv. "deze maand is in het verleden") los van
+   *  de actual/finalize-status. Het centrale closed-begrip in deze hook is
+   *  echter isAnyActual hieronder. */
   const isCalendarPast = (month: string): boolean => {
     const [mmm, yy] = month.split('-')
     const y = 2000 + Number(yy)
@@ -76,22 +80,26 @@ export function useLatestEstimate(currentDate?: Date) {
     if (y > nowYear) return false
     return mi < nowMonthIdx
   }
+
+  const finalizedSet = new Set(finalizedMonths.map(f => f.month))
+  const isFinalized = (month: string): boolean => finalizedSet.has(month)
+
+  /** Globaal closed: STRIKT alleen finalized maanden. Imports voor April
+   *  veranderen April nog niet in 'actual' — pas wanneer de Maandafsluiting
+   *  voor die maand is afgerond. Dit garandeert dat LE-trends en AI-prognose
+   *  zichtbaar blijven tot de gebruiker bewust afsluit. */
+  const isAnyActual = (month: string): boolean => isFinalized(month)
+  const closedMonths = BUDGET_MONTHS_2026.filter(isAnyActual)
   const lastClosedMonth: string | null = closedMonths.length > 0
     ? closedMonths[closedMonths.length - 1]
     : null
 
-  /** "Calendar-past mét zinvolle data". Gebruikt voor de chart-actuals-lijn
-   *  (anders zou een nog-niet-ingevulde Mar 0 op de actuals-lijn tekenen)
-   *  en voor het terugschakelen naar forecast in zo'n lege maand. Een
-   *  maand zonder data telt voor het chart-doel als "nog niet actual" — de
-   *  LE-forecast pakt 'm dan op. */
-  const isClosedWithData = (bv: EntityName, month: string): boolean => {
-    if (!isCalendarPast(month)) return false
-    const m = getMonthly(bv as BvId, month)
-    if (!m) return false
-    return (m['netto_omzet'] ?? 0) !== 0 || (m['gefactureerde_omzet'] ?? 0) !== 0 ||
-           (m['directe_kosten'] ?? 0) !== 0 || (m['operationele_kosten'] ?? 0) !== 0
-  }
+  /** Per-BV closed: ook hier strikt finalized — zelfde rede als isAnyActual.
+   *  De imports voor April staan wel in getMonthly maar worden pas zichtbaar
+   *  in de chart-actual-lijn nadat April definitief is afgesloten. */
+  const isClosedWithData = (_bv: EntityName, month: string): boolean =>
+    isFinalized(month)
+  void ALL_BVS  // bewust aangehouden voor toekomstige per-BV-detectie
 
   const toPY = (m: string): string => {
     const idx = BUDGET_MONTHS_2026.indexOf(m)
@@ -200,16 +208,102 @@ export function useLatestEstimate(currentDate?: Date) {
     return Math.round(0.6 * seasonalForecast + 0.4 * runRateForecast)
   }
 
+  /** Forecast-only variant van forecastSub: gebruikt UITSLUITEND de maanden
+   *  STRIKT VÓÓR `targetMonth` als YTD-basis. Bedoeld voor de "pre-close LE
+   *  snapshot" die we vastleggen bij het definitief maken van een maand —
+   *  zodat we achteraf kunnen zien hoe goed de app de maand voorspeld had,
+   *  vóórdat de eigen actuals erin zaten. Houdt FTE-ramp en vakantie-
+   *  correctie identiek aan forecastSub. */
+  const forecastSubExcluding = (bv: EntityName, month: string, key: string): number => {
+    const tIdx = BUDGET_MONTHS_2026.indexOf(month)
+    const priorClosed = closedMonths.filter(cm => BUDGET_MONTHS_2026.indexOf(cm) < tIdx)
+    const lastPrior = priorClosed.length > 0 ? priorClosed[priorClosed.length - 1] : null
+
+    const sameMonth2025 = rawActual2025(bv, toPY(month), key)
+    let ytd2026 = 0, ytd2025 = 0
+    for (const cm of priorClosed) {
+      ytd2026 += rawActual2026(bv, cm, key)
+      ytd2025 += rawActual2025(bv, toPY(cm), key)
+    }
+    const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
+    const lastActual = lastPrior ? rawActual2026(bv, lastPrior, key) : 0
+
+    let fteAdj = 1
+    if (bv !== 'Holdings' && lastPrior) {
+      const planned = getPlannedFteInfo(bv, month, lastPrior)
+      if (planned.fteLast > 0) {
+        const fteDelta = planned.fte - planned.fteLast
+        if (fteDelta <= 0) {
+          fteAdj = planned.fte / planned.fteLast
+        } else {
+          const monthsSinceHire = planned.firstIdx >= 0 ? tIdx - planned.firstIdx : 0
+          const ramp = rampFactor(monthsSinceHire)
+          const effectiveFte = planned.fteLast + fteDelta * ramp
+          fteAdj = effectiveFte / planned.fteLast
+        }
+      }
+    }
+
+    let leaveAdj = 1
+    const isRevenueKey = key === 'netto_omzet' || key === 'gefactureerde_omzet'
+    if (bv !== 'Holdings' && priorClosed.length > 0 && isRevenueKey) {
+      const plannedVakantie = getPlannedVakantie(bv as BvId, month)
+      if (plannedVakantie > 0) {
+        let baselineWork = 0, baselineCount = 0
+        for (const cm of priorClosed) {
+          const he = hoursEntries.find(e => e.bv === bv && e.month === cm)
+          if (he) {
+            baselineWork += he.declarable + he.internal
+            baselineCount++
+          }
+        }
+        const avgWork = baselineCount > 0 ? baselineWork / baselineCount : 0
+        if (avgWork > 0) {
+          const leaveRatio = Math.min(plannedVakantie / avgWork, 0.5)
+          leaveAdj = 1 - leaveRatio
+        }
+      }
+    }
+
+    const combinedAdj = fteAdj * leaveAdj
+    const seasonalForecast = sameMonth2025 * perfMult * combinedAdj
+    const runRateForecast  = lastActual * combinedAdj
+
+    if (seasonalForecast === 0 && runRateForecast === 0) return 0
+    if (seasonalForecast === 0) return Math.round(runRateForecast)
+    if (runRateForecast === 0)  return Math.round(seasonalForecast)
+    return Math.round(0.6 * seasonalForecast + 0.4 * runRateForecast)
+  }
+
   /** Sub-key LE — exact zelfde paden als BudgetsTab.rawLeVal:
-   *    leOverride → calendar-past actual (mét data) → forecast.
-   *  Half-gevulde calendar-past maand zónder data valt terug op de
-   *  forecast — zodat een nog niet ingevulde Mar geen 0 op de chart
-   *  toont maar een zinnige LE. */
+   *    leOverride → closed-with-data actual → forecast.
+   *  Een closed-maand zónder data valt terug op de forecast — zo toont een
+   *  nog niet ingevulde maand geen 0 op de chart maar een zinnige LE. */
   const rawLE = (bv: EntityName, month: string, key: string): number => {
     const ov = getLeOverride(bv, month, key)
     if (ov != null) return ov
     if (isClosedWithData(bv, month)) return rawActual2026(bv, month, key)
     return forecastSub(bv, month, key)
+  }
+
+  /** Pre-close LE-waarde voor (bv, maand, key) — wat de app voor deze maand
+   *  zou voorspellen op basis van uitsluitend ervoor afgesloten maanden,
+   *  ZONDER dat de eigen actuals al meetellen. Manuele LE-overrides krijgen
+   *  voorrang (override is een bewuste bijstelling). Aggregaten en derived
+   *  keys lossen recursief op via SUBS_OF / DERIVED_FORMULA. */
+  const rawPreCloseLE = (bv: EntityName, month: string, key: string): number => {
+    const ov = getLeOverride(bv, month, key)
+    if (ov != null) return ov
+    return forecastSubExcluding(bv, month, key)
+  }
+  const getPreCloseLE = (bv: EntityName, month: string, key: string): number => {
+    if (AGGREGATE_KEYS.has(key)) {
+      return SUBS_OF[key].reduce((s, sk) => s + rawPreCloseLE(bv, month, sk), 0)
+    }
+    if (DERIVED_KEYS.has(key)) {
+      return DERIVED_FORMULA[key](sk => getPreCloseLE(bv, month, sk))
+    }
+    return rawPreCloseLE(bv, month, key)
   }
 
   /** Centrale LE-getter — gebruikt isClosedWithData voor de "actual"-tak
@@ -249,11 +343,20 @@ export function useLatestEstimate(currentDate?: Date) {
   // Voor charts: hasLE blijft true (LE is altijd beschikbaar via forecast).
   const hasLE: (bv: EntityName, month: string, key: string) => boolean = () => true
 
-  // Backwards-compat: oudere callers gebruiken nog isClosed (calendar-only).
-  const isClosed = isCalendarPast
-  // isActualMonth: calendar-past mét data — zelfde als getLeSource→'actual'.
+  // isClosed: globaal closed-of-niet (finalized OR data) — gebruikt door de
+  // dashboard chart-color-logic om te bepalen tot waar de actuals-lijn loopt.
+  // Niet-finalized maanden zonder data tellen niet als closed; daar pakt de
+  // LE-forecast over.
+  const isClosed = (month: string): boolean => isAnyActual(month)
+  // isActualMonth: per-BV closed met data of finalized — zelfde als
+  // getLeSource→'actual'.
   const isActualMonth: (bv: EntityName, month: string) => boolean = (bv, month) =>
     isClosedWithData(bv, month)
 
-  return { getLE, sumLE, fyLE, isClosed, getLeSource, hasLE, isActualMonth }
+  return {
+    getLE, sumLE, fyLE,
+    isClosed, isCalendarPast,
+    getLeSource, hasLE, isActualMonth,
+    getPreCloseLE,
+  }
 }
