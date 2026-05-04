@@ -4,7 +4,7 @@ import '../../lib/chartSetup'
 import { ytdActuals2025 } from '../../data/plData'
 import { monthlyActuals2025, monthlyBudget2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import type { EntityName } from '../../data/plData'
-import { hoursData2026, hoursData2025, MONTHS_2025, ACTUAL_MONTHS } from '../../data/hoursData'
+import { hoursData2026, hoursData2025, MONTHS_2025 } from '../../data/hoursData'
 import { fmt } from '../../lib/format'
 import type { BvId, ClosingBv, GlobalFilter } from '../../data/types'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
@@ -262,7 +262,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       if (viewMode === 'ytd') return ytdActuals2025[bv as EntityName]?.[key] ?? 0
       return monthlyActuals2025[bv as EntityName]?.[period]?.[key] ?? 0
     }
-    if (viewMode === 'ytd') return getYtd(bv, ACTUAL_MONTHS)[key] ?? 0
+    if (viewMode === 'ytd') return getYtd(bv, ACTUAL_PERIODS_2026_DYNAMIC)[key] ?? 0
     return getMonthly(bv, period)[key] ?? 0
   }
   const getBudget = (bv: ClosingBv, key: string): number => {
@@ -271,14 +271,14 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       return monthlyBudget2025[bv as EntityName]?.[period]?.[key] ?? 0
     }
     if (viewMode === 'ytd') {
-      return ACTUAL_MONTHS.reduce((s, m) => s + budget2026(bv, m, key), 0)
+      return ACTUAL_PERIODS_2026_DYNAMIC.reduce((s, m) => s + budget2026(bv, m, key), 0)
     }
     return budget2026(bv, period, key)
   }
   const getPY = (bv: ClosingBv, key: string): number => {
     if (is2025) return 0
     if (viewMode === 'ytd') {
-      const py25 = ACTUAL_PERIODS_2026.map(m => m.replace('-26', '-25'))
+      const py25 = ACTUAL_PERIODS_2026_DYNAMIC.map(m => m.replace('-26', '-25'))
       return py25.reduce((s, m) => s + (monthlyActuals2025[bv as EntityName]?.[m]?.[key] ?? 0), 0)
     }
     const py = period.replace('-26', '-25')
@@ -321,7 +321,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const hoursData = is2025 ? hoursData2025 : hoursData2026
   const hRecords = hoursData.filter(r =>
     (filter.bv === 'all' || r.bv === filter.bv) &&
-    (viewMode === 'ytd' ? r.type === 'actual' : r.month === period)
+    (viewMode === 'ytd' ? ACTUAL_PERIODS.includes(r.month) : r.month === period)
   )
   const totalWritten = hRecords.reduce((a, r) => a + r.written, 0)
   const totalDecl    = hRecords.reduce((a, r) => a + r.declarable, 0)
@@ -639,12 +639,12 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       const ytdEbitda: Record<string, number> = {}
       const ytdBudEbitda: Record<string, number> = {}
       for (const bv of bvsToScan) {
-        const a = getYtd(bv, ACTUAL_MONTHS)
+        const a = getYtd(bv, ACTUAL_PERIODS_2026_DYNAMIC)
         ytdActual[bv]    = a['netto_omzet'] ?? 0
         ytdMargin[bv]    = a['brutomarge'] ?? 0
         ytdEbitda[bv]    = a['ebitda'] ?? 0
-        ytdBudget[bv]    = ACTUAL_MONTHS.reduce((s, m) => s + budget2026(bv, m, 'netto_omzet'), 0)
-        ytdBudEbitda[bv] = ACTUAL_MONTHS.reduce((s, m) => s + budget2026(bv, m, 'ebitda'), 0)
+        ytdBudget[bv]    = ACTUAL_PERIODS_2026_DYNAMIC.reduce((s, m) => s + budget2026(bv, m, 'netto_omzet'), 0)
+        ytdBudEbitda[bv] = ACTUAL_PERIODS_2026_DYNAMIC.reduce((s, m) => s + budget2026(bv, m, 'ebitda'), 0)
       }
       const ytdActualTotal = bvsToScan.reduce((s, bv) => s + ytdActual[bv], 0)
       const ytdBudgetTotal = bvsToScan.reduce((s, bv) => s + ytdBudget[bv], 0)
@@ -682,7 +682,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
           const g = ytdMargin[bv]
           const m = r > 0 ? g / r * 100 : 0
           const budR = ytdBudget[bv]
-          const budG = ACTUAL_MONTHS.reduce((s, mn) => s + budget2026(bv, mn, 'brutomarge'), 0)
+          const budG = ACTUAL_PERIODS_2026_DYNAMIC.reduce((s, mn) => s + budget2026(bv, mn, 'brutomarge'), 0)
           const budM = budR > 0 ? budG / budR * 100 : 0
           const delta = m - budM
           if (Math.abs(delta) > 2 && r > 0) {
@@ -709,8 +709,8 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
 
       // Holdings: directe kostenafwijking signaleren
       if (isHoldings) {
-        const ytdOpex = activeBvs.reduce((s, bv) => s + (getYtd(bv, ACTUAL_MONTHS)['operationele_kosten'] ?? 0), 0)
-        const budOpex = activeBvs.reduce((s, bv) => s + ACTUAL_MONTHS.reduce((ss, m) => ss + budget2026(bv, m, 'operationele_kosten'), 0), 0)
+        const ytdOpex = activeBvs.reduce((s, bv) => s + (getYtd(bv, ACTUAL_PERIODS_2026_DYNAMIC)['operationele_kosten'] ?? 0), 0)
+        const budOpex = activeBvs.reduce((s, bv) => s + ACTUAL_PERIODS_2026_DYNAMIC.reduce((ss, m) => ss + budget2026(bv, m, 'operationele_kosten'), 0), 0)
         const opexDelta = ytdOpex - budOpex
         if (Math.abs(opexDelta) > 30000) {
           out.push({
@@ -739,8 +739,8 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
     } else {
       // ── Monthly findings — voor de geselecteerde maand ──
       const curM  = period
-      const idx   = ACTUAL_MONTHS.indexOf(curM)
-      const prevM = idx > 0 ? ACTUAL_MONTHS[idx - 1] : null
+      const idx   = ACTUAL_PERIODS_2026_DYNAMIC.indexOf(curM)
+      const prevM = idx > 0 ? ACTUAL_PERIODS_2026_DYNAMIC[idx - 1] : null
 
       const curRev  = bvsToScan.reduce((s, bv) => s + (getMonthly(bv, curM)['netto_omzet'] ?? 0), 0)
       const curBud  = bvsToScan.reduce((s, bv) => s + budget2026(bv, curM, 'netto_omzet'), 0)
@@ -858,7 +858,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
 
     return out
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is2025, period, findingsView, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), JSON.stringify(activeBvs), isHoldings, fyLeRev, fyBudgetRev, fyLeEbitda, fyBudEbitda, leBudgetGap, leBudgetGapPct, ebitdaGap])
+  }, [is2025, period, findingsView, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), JSON.stringify(activeBvs), isHoldings, fyLeRev, fyBudgetRev, fyLeEbitda, fyBudEbitda, leBudgetGap, leBudgetGapPct, ebitdaGap, ACTUAL_PERIODS_2026_DYNAMIC])
 
   // ── AI-gedreven LE-prognose narrative ───────────────────────────────────
   // Per BV: een set bullets met de drijvers (FTE, declarabiliteit, omzet/FTE,
@@ -870,7 +870,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const hoursEntries = useHoursStore(s => s.entries)
   const leNarratives = useMemo(() => {
     if (is2025) return [] as LeNarrative[]
-    const closedMonths = ACTUAL_PERIODS_2026
+    const closedMonths = ACTUAL_PERIODS_2026_DYNAMIC
     const lastClosed = closedMonths[closedMonths.length - 1] ?? null
     const lastClosedIdx = lastClosed ? BUDGET_MONTHS_2026.indexOf(lastClosed) : -1
     const nextMonth = lastClosedIdx >= 0 && lastClosedIdx + 1 < BUDGET_MONTHS_2026.length
@@ -1079,7 +1079,8 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [is2025, JSON.stringify(activeBvs), period, fteEntries, hoursEntries, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), useFinStore(s => s.entries), finalizedMonths])
 
-  const periodLabel = viewMode === 'ytd' ? `YTD ${ACTUAL_MONTHS[ACTUAL_MONTHS.length-1]}` : period
+  const lastClosedMonth = ACTUAL_PERIODS_2026_DYNAMIC[ACTUAL_PERIODS_2026_DYNAMIC.length - 1] ?? null
+  const periodLabel = viewMode === 'ytd' ? `YTD ${lastClosedMonth ?? '—'}` : period
 
   return (
     <div className="page">
@@ -1141,7 +1142,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
           </span>
         )}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)' }}>
-          {viewMode === 'ytd' ? `YTD t/m ${ACTUAL_MONTHS[ACTUAL_MONTHS.length-1]}` : period}
+          {viewMode === 'ytd' ? `YTD t/m ${lastClosedMonth ?? '—'}` : period}
         </span>
       </div>
 
@@ -1225,7 +1226,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
             <KpiCard
               label="Te realiseren Q2-Q4"
               value={fmt(fyLeRev - totalRevenue)}
-              sub={`${BUDGET_MONTHS_2026.length - ACTUAL_MONTHS.length} maanden te gaan`}
+              sub={`${BUDGET_MONTHS_2026.length - ACTUAL_PERIODS_2026_DYNAMIC.length} maanden te gaan`}
             />
           </div>
         </>
