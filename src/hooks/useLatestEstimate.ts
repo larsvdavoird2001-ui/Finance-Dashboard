@@ -10,6 +10,7 @@ import {
   SUBS_OF, DERIVED_FORMULA,
 } from '../lib/plDerive'
 import type { BvId } from '../data/types'
+import { getFteLe } from '../lib/fteLe'
 
 const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const ALL_BVS: EntityName[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
@@ -116,19 +117,27 @@ export function useLatestEstimate(currentDate?: Date) {
   const getFteFor = (bv: BvId, month: string): number =>
     fteEntries.find(e => e.bv === bv && e.month === month)?.fte ?? 0
 
-  /** Geplande FTE voor toekomstige maand: meest recente ingevulde FTE binnen
-   *  het venster (laatst-actueel, target]. Zelfde model als BudgetsTab. */
+  /** Geplande FTE voor toekomstige maand. Gebruikt de gedeelde FTE-LE-logica
+   *  (`getFteLe`): manuele .fte > (fteBudget + last-known shift) > forward-fill.
+   *  Hierdoor schuift het FTE-tekort vs budget door naar de omzet-/kosten-LE,
+   *  niet alleen naar de FTE-rij in HoursTab.
+   *
+   *  firstChangeIdx wordt gezet op de eerste maand waarin de FTE-LE afwijkt
+   *  van fteLast — dat is het ankerpunt voor de hire-ramp (70/90/100%). */
   const getPlannedFteInfo = (bv: EntityName, target: string, lastActual: string | null) => {
     const tIdx = BUDGET_MONTHS_2026.indexOf(target)
     const cIdx = lastActual ? BUDGET_MONTHS_2026.indexOf(lastActual) : -1
     const fteLast = lastActual && bv !== 'Holdings' ? getFteFor(bv as BvId, lastActual) : 0
     let firstChangeIdx = -1
     let plannedFte = fteLast
-    for (let i = cIdx + 1; i <= tIdx && i >= 0; i++) {
-      const f = bv !== 'Holdings' ? getFteFor(bv as BvId, BUDGET_MONTHS_2026[i]) : 0
-      if (f > 0) {
-        plannedFte = f
-        if (firstChangeIdx < 0 && f !== fteLast) firstChangeIdx = i
+    if (bv !== 'Holdings') {
+      for (let i = cIdx + 1; i <= tIdx && i >= 0; i++) {
+        const mm = BUDGET_MONTHS_2026[i]
+        const f = getFteLe({ entries: fteEntries, bv: bv as BvId, month: mm, isFinalized })
+        if (f != null && f > 0) {
+          plannedFte = f
+          if (firstChangeIdx < 0 && f !== fteLast) firstChangeIdx = i
+        }
       }
     }
     return { fte: plannedFte, firstIdx: firstChangeIdx, fteLast }

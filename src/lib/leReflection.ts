@@ -14,9 +14,10 @@
 import type { EntityName } from '../data/plData'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../data/plData2025'
 import { BUDGET_MONTHS_2026 } from '../store/useBudgetStore'
-import type { FteEntry } from '../data/types'
+import type { FteEntry, BvId } from '../data/types'
 import type { HoursEntry } from '../store/useHoursStore'
 import type { LeSnapshotByBv } from './db'
+import { getFteLe } from './fteLe'
 
 const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -125,8 +126,10 @@ function forecastForKey(args: {
   getMonthly: (bv: EntityName, m: string) => Record<string, number>
   getFte: (bv: EntityName, m: string) => number
   getHours: (bv: EntityName, m: string) => HoursEntry | undefined
+  fteEntries: FteEntry[]
+  isFinalized: (m: string) => boolean
 }): number {
-  const { bv, month, key, priorClosed, getMonthly, getFte, getHours } = args
+  const { bv, month, key, priorClosed, getMonthly, getFte, getHours, fteEntries, isFinalized } = args
 
   const sameMonth2025 = monthlyActuals2025[bv]?.[toPY(month)]?.[key] ?? 0
   let ytd2026 = 0, ytd2025 = 0
@@ -138,18 +141,19 @@ function forecastForKey(args: {
   const lastClosed = priorClosed.length > 0 ? priorClosed[priorClosed.length - 1] : null
   const lastActual = lastClosed ? (getMonthly(bv, lastClosed)[key] ?? 0) : 0
 
-  // FTE-adj.
+  // FTE-adj — gebruikt de gedeelde FTE-LE-logica zodat het FTE-tekort vs budget
+  // ook in de pre-close LE-simulatie meeschuift naar omzet/kosten.
   let fteAdj = 1
   if (bv !== 'Holdings' && lastClosed) {
     const fteLast = getFte(bv, lastClosed)
     if (fteLast > 0) {
-      // Plan-FTE: zoek meest recente ingevulde FTE binnen (lastClosed, target].
       const tIdx = BUDGET_MONTHS_2026.indexOf(month)
       const cIdx = BUDGET_MONTHS_2026.indexOf(lastClosed)
       let plannedFte = fteLast, firstChangeIdx = -1
       for (let i = cIdx + 1; i <= tIdx && i >= 0; i++) {
-        const f = getFte(bv, BUDGET_MONTHS_2026[i])
-        if (f > 0) {
+        const mm = BUDGET_MONTHS_2026[i]
+        const f = getFteLe({ entries: fteEntries, bv: bv as BvId, month: mm, isFinalized })
+        if (f != null && f > 0) {
           plannedFte = f
           if (firstChangeIdx < 0 && f !== fteLast) firstChangeIdx = i
         }
@@ -242,6 +246,8 @@ export function buildReflectionContext(args: {
    *  de Maandafsluiting (matcht 1-op-1 met wat in de popup stond), anders een
    *  live re-simulatie. Snapshot dekt alleen netto_omzet / brutomarge / ebitda;
    *  andere keys vallen altijd door naar simulatie. */
+  const priorClosedSet = new Set(priorClosed)
+  const isFinalizedAtSnapshot = (m: string): boolean => priorClosedSet.has(m)
   const preCloseLookup = (key: string): number => {
     if (preCloseLeOverride) {
       if (key === 'netto_omzet' && preCloseLeOverride.netto_omzet != null) return preCloseLeOverride.netto_omzet
@@ -251,6 +257,7 @@ export function buildReflectionContext(args: {
     return forecastForKey({
       bv, month: targetMonth, key,
       priorClosed, getMonthly, getFte, getHours,
+      fteEntries, isFinalized: isFinalizedAtSnapshot,
     })
   }
 

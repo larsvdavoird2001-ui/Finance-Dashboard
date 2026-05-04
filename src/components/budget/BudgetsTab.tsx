@@ -14,6 +14,7 @@ import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
 import { SUBS_OF, DERIVED_FORMULA, AGGREGATE_KEYS, DERIVED_KEYS, READONLY_KEYS } from '../../lib/plDerive'
+import { getFteLe } from '../../lib/fteLe'
 
 /**
  * Altijd-aan input cell voor Budget-invoer. Eén klik focus je, getallen
@@ -162,6 +163,13 @@ const CHART_METRICS = [
   { key: 'ebit',                       label: 'EBIT' },
 ]
 
+// Kost-metrics worden in de tabellen met minteken getoond (P&L-conventie),
+// maar in de grafiek geflipt naar positief — een hogere lijn betekent dan
+// hogere kosten, wat intuïtiever leest dan "hoe lager hoe duurder".
+const CHART_COST_METRICS = new Set(['directe_kosten', 'operationele_kosten', 'amortisatie_afschrijvingen'])
+const chartSign = (key: string, v: number): number =>
+  CHART_COST_METRICS.has(key) ? Math.abs(v) : v
+
 // ── FTE / Capaciteit-budget keys ────────────────────────────────────────────
 // Capaciteit-% (productief/verlof/improductief/ziek) wordt per BV per maand
 // opgeslagen in useBudgetStore.overrides via deze pseudo-keys. Hiermee delen
@@ -219,8 +227,8 @@ export function BudgetsTab({ filter: _filter }: Props) {
   const store = useBudgetStore()
   const fteGetEntry = useFteStore(s => s.getEntry)
   const fteUpsert   = useFteStore(s => s.upsertEntry)
-  // Trigger re-render bij FTE wijzigingen
-  useFteStore(s => s.entries)
+  // Re-render bij FTE wijzigingen + bron voor de gedeelde getFteLe-helper.
+  const fteEntriesArr = useFteStore(s => s.entries)
   const { getMonthly } = useAdjustedActuals()
   // Hours-store voor geplande vakantie/ziekte in toekomstige maanden.
   const hoursEntries = useHoursStore(s => s.entries)
@@ -290,23 +298,25 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return getMonthly(e as BvId, m)
   }
 
-  // ── FTE forward-fill: voor een toekomstige maand de recentste ingevulde
-  // FTE (binnen 2026), of fallback naar laatste gesloten maand. Hiermee
-  // werkt een FTE-invulling in bv. Apr door naar Mei/Jun/... tot er een
-  // nieuwe waarde staat.
+  // ── Geplande FTE voor toekomstige maand ──
+  // Gebruikt de gedeelde FTE-LE-logica (`getFteLe`): manuele .fte > (fteBudget +
+  // last-known shift) > forward-fill van laatste actual. Hierdoor schuift het
+  // FTE-tekort vs budget door naar de omzet-/kosten-LE: als je structureel
+  // onderbezet bent, blijft die delta in de prognose zitten ook al klimt het
+  // FTE-budget over het jaar — en omgekeerd bij overbezetting.
   const getPlannedFte = (e: BvId, target: string): { fte: number; firstIdx: number; lastClosedIdx: number } => {
     const tIdx = BUDGET_MONTHS_2026.indexOf(target)
     const cIdx = lastClosedMonth ? BUDGET_MONTHS_2026.indexOf(lastClosedMonth) : -1
     const fteLast = lastClosedMonth ? (fteGetEntry(e, lastClosedMonth)?.fte ?? 0) : 0
-    // Zoek binnen (closed-idx, target-idx] naar meest recente ingevulde FTE.
-    // De eerste maand waarop de FTE van fteLast afwijkt is onze "hire-datum"
-    // voor de ramp-up.
+    // Zoek binnen (closed-idx, target-idx] naar de FTE-LE per maand.
+    // De eerste maand waarop de FTE-LE van fteLast afwijkt is onze "hire-datum"
+    // (of "krimp-datum") voor de ramp-up.
     let firstChangeIdx = -1
     let plannedFte = fteLast
     for (let i = cIdx + 1; i <= tIdx && i >= 0; i++) {
       const mm = BUDGET_MONTHS_2026[i]
-      const f = fteGetEntry(e, mm)?.fte
-      if (f != null) {
+      const f = getFteLe({ entries: fteEntriesArr, bv: e, month: mm, isFinalized: isClosedMonth })
+      if (f != null && f > 0) {
         plannedFte = f
         if (firstChangeIdx < 0 && f !== fteLast) firstChangeIdx = i
       }
@@ -537,7 +547,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
       for (const e of bvs) {
         datasets.push({
           label: `${e} — Budget`,
-          data: months.map(m => getBudgetVal(e, m, chartMetric)),
+          data: months.map(m => chartSign(chartMetric, getBudgetVal(e, m, chartMetric))),
           borderColor: BV_COLORS[e],
           backgroundColor: BV_COLORS[e] + '22',
           borderWidth: 2,
@@ -551,7 +561,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
       for (const e of bvs) {
         datasets.push({
           label: `${e} — LE`,
-          data: months.map(m => getLeVal(e, m, chartMetric)),
+          data: months.map(m => chartSign(chartMetric, getLeVal(e, m, chartMetric))),
           borderColor: BV_COLORS[e],
           backgroundColor: 'transparent',
           borderWidth: 2,
@@ -567,7 +577,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
       if (showBudget) {
         datasets.push({
           label: 'Totaal — Budget',
-          data: months.map(m => bvs.reduce((s, e) => s + getBudgetVal(e, m, chartMetric), 0)),
+          data: months.map(m => chartSign(chartMetric, bvs.reduce((s, e) => s + getBudgetVal(e, m, chartMetric), 0))),
           borderColor: '#fbbf24',
           backgroundColor: '#fbbf2422',
           borderWidth: 3,
@@ -580,7 +590,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
       if (showLe) {
         datasets.push({
           label: 'Totaal — LE',
-          data: months.map(m => bvs.reduce((s, e) => s + getLeVal(e, m, chartMetric), 0)),
+          data: months.map(m => chartSign(chartMetric, bvs.reduce((s, e) => s + getLeVal(e, m, chartMetric), 0))),
           borderColor: '#fbbf24',
           backgroundColor: 'transparent',
           borderWidth: 3,

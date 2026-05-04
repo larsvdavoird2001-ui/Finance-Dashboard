@@ -11,6 +11,7 @@ import { useFteStore } from '../../store/useFteStore'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useFinStore } from '../../store/useFinStore'
 import { fmt } from '../../lib/format'
+import { getFteLe as sharedGetFteLe } from '../../lib/fteLe'
 
 // ── Capaciteit-budget keys ─ gespiegeld met BudgetsTab ─────────────────────
 // Productief / Verlof / Improductief / Ziek per BV per maand worden in
@@ -471,29 +472,15 @@ export function HoursTab({ filter }: Props) {
     fteEntries.find(e => e.bv === bv && e.month === m)?.fte
 
   // ── LE-shifts: bouw één keer per BV de YTD over/under-run vs budget ──
-  // Voor maanden waarvan we zowel actual als budget kennen pakken we de
-  // afwijking; de gemiddelde / laatste afwijking schuift de toekomstige
-  // budget-waarde op richting de werkelijke trend.
-  //
-  // FTE: laatste-bekende actual minus diens budget = "shift". De toekomstige
-  // budget-rij + shift = LE. Hierdoor pakt de LE een hire-vertraging of
-  // overbezetting natuurlijk mee zonder dat je het budget hoeft aan te
-  // passen.
+  // FTE: gedeelde helper (`sharedGetFteLe`) — actual als finalized, anders
+  // (fteBudget + last-known actual−budget shift) capped op ≥ 0, anders
+  // forward-fill. Diezelfde helper wordt ook gebruikt door BudgetsTab,
+  // useLatestEstimate en leReflection zodat de FTE-shift consistent
+  // doorschuift naar omzet-/kosten-LE.
   //
   // Capaciteit-%: gemiddelde afwijking over alle gesloten maanden waar
   // beide bekend zijn. % wijkt minder explosief af van maand tot maand,
   // dus stabieler om te middelen dan de laatste maand.
-  const getFteShift = (bv: BvId): number => {
-    let lastDelta = 0
-    for (const m of MONTHS_2026) {
-      const a = getFteActual(bv, m)
-      const b = getFteBudget(bv, m)
-      if (a != null && a > 0 && b != null && b > 0) {
-        lastDelta = a - b   // overschrijven → laatste bekende delta wint
-      }
-    }
-    return lastDelta
-  }
   const getCapShift = (bv: BvId, key: string): number => {
     let sum = 0, n = 0
     for (const m of MONTHS_2026) {
@@ -507,26 +494,8 @@ export function HoursTab({ filter }: Props) {
     return n > 0 ? sum / n : 0
   }
 
-  // FTE LE: closed/finalized → actual; future → (budget + last-known shift),
-  // capped op ≥ 0. Zonder budget valt het terug op de laatst bekende actual.
-  const getFteLe = (bv: BvId, m: string): number | undefined => {
-    if (isFinalized(m)) {
-      const a = getFteActual(bv, m)
-      if (a != null) return a
-    }
-    const b = getFteBudget(bv, m)
-    const shift = getFteShift(bv)
-    if (b != null) {
-      return Math.max(0, b + shift)
-    }
-    // Fallback: laatst bekende actual als run-rate forecast
-    const idxM = MONTHS_2026.indexOf(m)
-    for (let i = idxM - 1; i >= 0; i--) {
-      const a = getFteActual(bv, MONTHS_2026[i])
-      if (a != null) return a
-    }
-    return undefined
-  }
+  const getFteLe = (bv: BvId, m: string): number | undefined =>
+    sharedGetFteLe({ entries: fteEntries, bv, month: m, isFinalized })
 
   const getCapBudgetPct = (bv: BvId, m: string, key: string): number | undefined => {
     const v = budgetOverrides[bv]?.[m]?.[key]
