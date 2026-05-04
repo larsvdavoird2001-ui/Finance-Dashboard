@@ -248,10 +248,16 @@ export function LeReflectionPanel({ filter, targetMonth, currentUserEmail }: Pro
   const finalizedRecord = useFinStore(s => s.getFinalized(targetMonth))
   const targetSnapshot = finalizedRecord?.leSnapshot
   const getBudgetMonth = useBudgetStore(s => s.getMonth)
-  useBudgetStore(s => s.overrides)
+  const budgetOverrides = useBudgetStore(s => s.overrides)
   const getBudget = (bv: EntityName, m: string, key: string): number => {
     const raw = getBudgetMonth(bv, m)
     return derivePL(k => raw[k] ?? 0, key)
+  }
+  // Capaciteit-budget % uit Budgetten-tab (per BV per maand). Geeft 0 terug
+  // wanneer leeg — buildReflectionContext interpreteert 0 als 'niet ingegeven'
+  // (Software heeft geen capaciteit-budget → vragen verschijnen niet).
+  const getCapacityBudgetPct = (bv: EntityName, m: string, k: string): number | undefined => {
+    return budgetOverrides[bv]?.[m]?.[k]
   }
 
   // Calendar-past + heeft data → maanden waarmee de pre-close LE gevoed wordt.
@@ -301,6 +307,7 @@ export function LeReflectionPanel({ filter, targetMonth, currentUserEmail }: Pro
         closedMonthsIncl,
         getMonthly: (e, m) => getMonthly(e, m),
         getBudget,
+        getCapacityBudgetPct,
         fteEntries,
         hoursEntries,
         // Snapshot per BV uit de Maandafsluiting — undefined → fallback op
@@ -309,7 +316,7 @@ export function LeReflectionPanel({ filter, targetMonth, currentUserEmail }: Pro
       }),
     }))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetMonth, JSON.stringify(activeBvs), fteEntries, hoursEntries, closedMonthsIncl.join('|'), targetSnapshot])
+  }, [targetMonth, JSON.stringify(activeBvs), fteEntries, hoursEntries, closedMonthsIncl.join('|'), targetSnapshot, budgetOverrides])
 
   // Tel onbeantwoorde vragen panel-breed.
   const reflectionRecords = useReflectionStore(s => s.records)

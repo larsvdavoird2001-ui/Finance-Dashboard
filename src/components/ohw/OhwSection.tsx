@@ -39,7 +39,7 @@ function rowHasAnyValue(row: OhwRow): boolean {
 const SOURCE_LABELS: Record<string, string> = {
   uren_lijst: 'NTF Uren',
   uren_facturering_totaal: 'Uren Facturering Totaal (Consultancy)',
-  geschreven_uren: 'Geschreven uren YTD',
+  geschreven_uren: 'Werknemertijden YTD',
   d_lijst: 'D Lijst',
   ohw: 'OHW Excel',
   missing_hours: 'Missing Hours',

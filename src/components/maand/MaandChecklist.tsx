@@ -221,7 +221,7 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
     { key: 'fte_headcount',     group: 'fte', label: `FTE & Headcount ingevuld (${fteFilledCount}/${fteRequired})`, icon: '👥', description: 'Consultancy, Projects en Software — alle drie BVs in de FTE & Headcount-tab. Wordt gebruikt voor LE-forecast (FTE-ramp).', auto: fteFilledCount >= fteRequired, required: true },
 
     // ── Optioneel: extra inzicht (niet vereist voor Maandafsluiting) ────
-    { key: 'imp_geschreven',    group: 'extra', label: 'Geschreven uren YTD',                 icon: '⏱',  description: 'SAP urenregistratie YTD — declarabel/intern/verlof per BV. Geen onderdeel van de Maandafsluiting maar geeft wel inzicht in het Uren Dashboard.', auto: slotApproved('geschreven_uren'), required: false },
+    { key: 'imp_geschreven',    group: 'extra', label: 'Werknemertijden YTD',                 icon: '⏱',  description: 'SAP werknemertijden YTD per week — declarabel/intern/verlof + open missing-hours per BV. Geen onderdeel van de Maandafsluiting maar geeft wel inzicht in het Uren Dashboard.', auto: slotApproved('geschreven_uren'), required: false },
     { key: 'imp_uren_fact',     group: 'extra', label: 'Uren Facturering Totaal (Consultancy)', icon: '💶', description: 'Alleen Consultancy — TOTALE facturatiewaarde per maand → "Waarde Declarabel" in Uren Analyse. Geen onderdeel van de Maandafsluiting maar geeft wel extra detail in het Uren Dashboard.', auto: slotApproved('uren_facturering_totaal'), required: false },
   ]
 
@@ -254,7 +254,7 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
       case 'imp_missing':
         return hasMissingHours ? null : 'Geen goedgekeurde Missing Hours-import (Consultancy) voor deze maand gevonden.'
       case 'imp_geschreven':
-        return slotApproved('geschreven_uren') ? null : 'Geen Geschreven uren YTD-import voor deze maand gevonden — optioneel, alleen voor Uren Dashboard inzicht.'
+        return slotApproved('geschreven_uren') ? null : 'Geen Werknemertijden YTD-import voor deze maand gevonden — optioneel, alleen voor Uren Dashboard inzicht.'
       case 'imp_uren_fact':
         return slotApproved('uren_facturering_totaal') ? null : 'Geen Uren Facturering Totaal-import (Consultancy) voor deze maand gevonden — optioneel.'
       case 'fte_headcount':

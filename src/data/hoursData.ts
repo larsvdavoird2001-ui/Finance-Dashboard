@@ -10,9 +10,35 @@ import type { HoursRecord } from './types'
 // type = 'current'  → lopende maand met gedeeltelijke data (Apr)
 // type = 'forecast' → toekomstige maanden op basis van capaciteitsplan (May–Dec)
 
-export const ACTUAL_MONTHS   = ['Jan-26', 'Feb-26', 'Mar-26']
-export const CURRENT_MONTH   = 'Apr-26'
-export const FORECAST_MONTHS = ['May-26', 'Jun-26', 'Jul-26', 'Aug-26', 'Sep-26', 'Oct-26', 'Nov-26', 'Dec-26']
+// ACTUAL_MONTHS, CURRENT_MONTH en FORECAST_MONTHS worden afgeleid uit de
+// kalenderdatum bij module-load. Hierdoor schuift de "lopende maand"
+// automatisch mee — geen handmatige update meer nodig zoals voorheen toen
+// dit hardcoded op Apr-26 stond. Voor jaren ≠ 2026 valt het terug op
+// een veilige default (alle/geen maanden) zodat we de Hours-tab niet
+// breken bij over de jaargrens werken.
+const _MM = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+function _deriveActualAndCurrent(): { actual: string[]; current: string; forecast: string[] } {
+  const all2026 = _MM.map(m => `${m}-26`)
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth() // 0-11
+  if (y < 2026) {
+    return { actual: [], current: all2026[0], forecast: all2026.slice(1) }
+  }
+  if (y > 2026) {
+    return { actual: all2026, current: all2026[11], forecast: [] }
+  }
+  // Jaar = 2026: alles vóór huidige maand is actual; huidige maand is current.
+  return {
+    actual:   all2026.slice(0, m),
+    current:  all2026[m],
+    forecast: all2026.slice(m + 1),
+  }
+}
+const _derived = _deriveActualAndCurrent()
+export const ACTUAL_MONTHS   = _derived.actual
+export const CURRENT_MONTH   = _derived.current
+export const FORECAST_MONTHS = _derived.forecast
 
 export const hoursData2026: HoursRecord[] = [
   // ── CONSULTANCY ──────────────────────────────────────────────────────────

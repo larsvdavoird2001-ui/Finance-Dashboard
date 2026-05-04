@@ -77,8 +77,12 @@ import { TariffTable } from './TariffTable'
 import { FteTab } from './FteTab'
 import { useCostBreakdownStore } from '../../store/useCostBreakdownStore'
 import { useHoursStore } from '../../store/useHoursStore'
-import { isSapTimesheetHeaders, aggregateSapTimesheet } from '../../lib/parseImport'
-import type { ParsedHoursEntry } from '../../lib/parseImport'
+import { useHoursWeekStore } from '../../store/useHoursWeekStore'
+import {
+  isSapTimesheetHeaders, aggregateSapTimesheet,
+  detectSapTimesheetPeriodUnit, aggregateSapTimesheetWeekly,
+} from '../../lib/parseImport'
+import type { ParsedHoursEntry, ParsedHoursWeekEntry } from '../../lib/parseImport'
 
 // OHW-gerelateerde flows blijven op de 3 "productie" BVs (OHW heeft geen
 // Holdings-entity). Maar de maandafsluiting en derived P&L-flow nemen
@@ -111,7 +115,7 @@ interface UploadSlot {
 
 const UPLOAD_SLOTS: UploadSlot[] = [
   // ── Uren Analyse (Uren Dashboard) ──────────────────────────────────────
-  { id: 'geschreven_uren',          label: 'Geschreven uren YTD',      icon: '⏱', description: 'SAP urenregistratie YTD — declarabele/interne/verlof uren per BV → Uren Dashboard', appliesTo: [] },
+  { id: 'geschreven_uren',          label: 'Werknemertijden YTD',      icon: '⏱', description: 'SAP werknemertijden YTD per week — declarabele/interne/verlof uren + open missing-hours per BV → Uren Dashboard', appliesTo: [] },
   { id: 'uren_facturering_totaal',  label: 'Uren Facturering Totaal',  icon: '💶', description: 'Alleen Consultancy — TOTALE facturatiewaarde per maand → "Waarde Declarabel" in Uren Analyse', appliesTo: [], targetBv: 'Consultancy' },
   // ── Maandafsluiting ────────────────────────────────────────────────────
   { id: 'factuurvolume',   label: 'Factuurvolume',    icon: '🧾', description: 'SAP facturenlijst — gefactureerde omzet per BV (alle BVs)', appliesTo: ['factuurvolume'] },
@@ -294,9 +298,11 @@ export function MaandTab({ filter: _filter }: Props) {
   const { entries, updateEntry } = useFinStore()
   const ensureEntry = useFinStore(s => s.ensureEntry)
   const upsertHoursBulk = useHoursStore(s => s.upsertBulk)
+  const upsertHoursWeekBulk = useHoursWeekStore(s => s.upsertBulk)
   // Pending geschreven-uren-batches per record-id. Worden gepusht naar de
   // hours-store zodra de user ze goedkeurt in de ImportApprovalModal.
   const [pendingHoursByRecord, setPendingHoursByRecord] = useState<Record<string, ParsedHoursEntry[]>>({})
+  const [pendingWeeksByRecord, setPendingWeeksByRecord] = useState<Record<string, ParsedHoursWeekEntry[]>>({})
   const { records: importRecords, addRecord, approveRecord, rejectRecord, removeRecord, updateRecordValues, exportPeriod } = useImportStore()
   const reloadImports = useImportStore(s => s.loadFromDb)
   const reloadRaw = useRawDataStoreFull(s => s.loadFromDb)
@@ -562,6 +568,10 @@ export function MaandTab({ filter: _filter }: Props) {
       if (slotId === 'geschreven_uren' && result.hoursEntries && result.hoursEntries.length > 0) {
         setPendingHoursByRecord(prev => ({ ...prev, [record.id]: result.hoursEntries! }))
       }
+      // Stash week-niveau data bij nieuw per-week SAP-formaat
+      if (slotId === 'geschreven_uren' && result.hoursWeekEntries && result.hoursWeekEntries.length > 0) {
+        setPendingWeeksByRecord(prev => ({ ...prev, [record.id]: result.hoursWeekEntries! }))
+      }
       addRawEntry({
         recordId: record.id,
         slotId,
@@ -718,6 +728,18 @@ export function MaandTab({ filter: _filter }: Props) {
         showToast(`${record.slotLabel}: ${pending.length} BV×maand regels verwerkt in Uren Dashboard`, 'g')
       }
     } catch (err) { console.error('upsertHoursBulk faalde:', err) }
+    try {
+      const pendingW = pendingWeeksByRecord[record.id]
+      if (pendingW && pendingW.length > 0) {
+        upsertHoursWeekBulk(pendingW)
+        setPendingWeeksByRecord(prev => {
+          const next = { ...prev }
+          delete next[record.id]
+          return next
+        })
+        showToast(`${record.slotLabel}: ${pendingW.length} BV×week regels verwerkt`, 'g')
+      }
+    } catch (err) { console.error('upsertHoursWeekBulk faalde:', err) }
     try {
       applyImportToEntries(record)
       showToast(`${record.slotLabel} goedgekeurd en toegepast`, 'g')
@@ -899,14 +921,28 @@ export function MaandTab({ filter: _filter }: Props) {
     let recPerBv = result.perBv
     let recTotal = result.totalAmount
     let pendingHours: ParsedHoursEntry[] | null = null
+    let pendingWeeks: ParsedHoursWeekEntry[] | null = null
     if (wizState.slotId === 'geschreven_uren' && isSapTimesheetHeaders(result.headers)) {
-      const agg = aggregateSapTimesheet(result.rawRows, result.headers)
-      if (agg.entries.length > 0) {
-        const byBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
-        for (const e of agg.entries) byBv[e.bv] += e.declarable + e.internal
-        recPerBv = byBv
-        recTotal = byBv.Consultancy + byBv.Projects + byBv.Software
-        pendingHours = agg.entries
+      const unit = detectSapTimesheetPeriodUnit(result.headers)
+      if (unit === 'week') {
+        const agg = aggregateSapTimesheetWeekly(result.rawRows, result.headers)
+        if (agg.monthEntries.length > 0) {
+          const byBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
+          for (const e of agg.monthEntries) byBv[e.bv] += e.declarable + e.internal
+          recPerBv = byBv
+          recTotal = byBv.Consultancy + byBv.Projects + byBv.Software
+          pendingHours = agg.monthEntries
+          pendingWeeks = agg.weekEntries
+        }
+      } else {
+        const agg = aggregateSapTimesheet(result.rawRows, result.headers)
+        if (agg.entries.length > 0) {
+          const byBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
+          for (const e of agg.entries) byBv[e.bv] += e.declarable + e.internal
+          recPerBv = byBv
+          recTotal = byBv.Consultancy + byBv.Projects + byBv.Software
+          pendingHours = agg.entries
+        }
       }
     }
 
@@ -951,6 +987,9 @@ export function MaandTab({ filter: _filter }: Props) {
     // push-naar-hours-store bij approve.
     if (pendingHours && pendingHours.length > 0) {
       setPendingHoursByRecord(prev => ({ ...prev, [record.id]: pendingHours! }))
+    }
+    if (pendingWeeks && pendingWeeks.length > 0) {
+      setPendingWeeksByRecord(prev => ({ ...prev, [record.id]: pendingWeeks! }))
     }
 
     setPendingFile(wizState.file)

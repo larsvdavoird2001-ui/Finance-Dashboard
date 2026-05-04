@@ -5,8 +5,22 @@ import { CHART_COLORS } from '../../lib/chartSetup'
 import { hoursData2026, hoursData2025, MONTHS_2026, MONTHS_2025, ACTUAL_MONTHS, CURRENT_MONTH } from '../../data/hoursData'
 import type { BvId, GlobalFilter, HoursRecord } from '../../data/types'
 import { useHoursStore, totalLeave } from '../../store/useHoursStore'
+import { useHoursWeekStore } from '../../store/useHoursWeekStore'
 import { useImportStore } from '../../store/useImportStore'
+import { useFteStore } from '../../store/useFteStore'
+import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
+import { useFinStore } from '../../store/useFinStore'
 import { fmt } from '../../lib/format'
+
+// ── Capaciteit-budget keys ─ gespiegeld met BudgetsTab ─────────────────────
+// Productief / Verlof / Improductief / Ziek per BV per maand worden in
+// useBudgetStore.overrides opgeslagen onder deze pseudo-keys.
+const CAPACITY_KEYS = [
+  { key: 'capacity_productive_pct',     label: 'Productief',   color: 'var(--green)' },
+  { key: 'capacity_leave_pct',          label: 'Verlof',       color: '#8b5cf6'      },
+  { key: 'capacity_nonproductive_pct',  label: 'Improductief', color: 'var(--amber)' },
+  { key: 'capacity_sick_pct',           label: 'Ziek',         color: 'var(--red)'   },
+] as const
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
 
@@ -46,6 +60,21 @@ function getIsoWeek(d: Date): number {
   const firstThursday = new Date(Date.UTC(dt.getUTCFullYear(), 0, 4))
   const diff = (dt.getTime() - firstThursday.getTime()) / 86400000
   return 1 + Math.round((diff - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7)
+}
+
+/** Begin- en einddatum (YYYY-MM-DD) van een ISO-week, zodat we ook voor
+ *  niet-geüploade weken een datum-range kunnen tonen + de "future"-check
+ *  kunnen doen. ISO 8601: dag 4 januari valt altijd in week 1. */
+function isoWeekRangeLocal(year: number, week: number): { start: string; end: string } {
+  const jan4 = new Date(Date.UTC(year, 0, 4))
+  const jan4Day = (jan4.getUTCDay() + 6) % 7
+  const monday = new Date(jan4)
+  monday.setUTCDate(jan4.getUTCDate() - jan4Day + (week - 1) * 7)
+  const sunday = new Date(monday)
+  sunday.setUTCDate(monday.getUTCDate() + 6)
+  const fmt = (d: Date) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+  return { start: fmt(monday), end: fmt(sunday) }
 }
 
 const BV_COLORS: Record<BvId, string> = {
@@ -100,10 +129,21 @@ export function HoursTab({ filter }: Props) {
   // Kalenderweek-kolom bevat. Toont een 'geschat'-badge in de tabel.
   const [period, setPeriod] = useState<'month' | 'week'>('month')
 
+  // Capaciteit-card: welke BVs uitgeklapt
+  const [capExpanded, setCapExpanded] = useState<Set<BvId>>(new Set(['Consultancy']))
+
   const is2025 = filter.year === '2025'
+  // Stores voor de FTE/capaciteit-budget vs actuals card
+  const fteEntries = useFteStore(s => s.entries)
+  const budgetOverrides = useBudgetStore(s => s.overrides)
+  const finalizedMonths = useFinStore(s => s.finalized)
   // Hours-store: geuploade SAP-timesheet data. Override hoursData2026
   // per (bv, maand) waar we een geuploade entry hebben met werkuren > 0.
   const hoursStoreEntries = useHoursStore(s => s.entries)
+  // Week-store: nieuwere per-week data uit het v14+ SAP-format. Gebruikt
+  // door de detail-tabel in week-mode voor exacte getallen + open
+  // missing-hours per week (i.p.v. een geschatte verdeling van maand-data).
+  const hoursWeekEntries = useHoursWeekStore(s => s.entries)
   const storeMap = useMemo(() => {
     const m = new Map<string, (typeof hoursStoreEntries)[number]>()
     for (const e of hoursStoreEntries) m.set(e.id, e)
@@ -138,8 +178,6 @@ export function HoursTab({ filter }: Props) {
     if (bv !== 'Consultancy') return 0
     return valueLookup.fact.get(month)?.[bv] ?? 0
   }
-  const waardeMissingHours = (bv: BvId, month: string): number =>
-    valueLookup.miss.get(month)?.[bv] ?? 0
 
   // ── Kalender-status per maand ──────────────────────────────────────────
   // 'closed'  = maand is volledig verstreken (t/m de afgelopen maand)
@@ -331,13 +369,11 @@ export function HoursTab({ filter }: Props) {
   const ytdVakPct    = ytdAlle > 0 ? (ytdVakantie / ytdAlle) * 100 : 0
   const ytdZiekPct   = ytdAlle > 0 ? (ytdZiekte    / ytdAlle) * 100 : 0
 
-  // ── Waarde Declarabel + Missing-hours waarde YTD ───────────────────────
-  let ytdWaardeDecl = 0, ytdWaardeMiss = 0
+  // ── Waarde Declarabel YTD (alleen voor de KPI-tegel) ──────────────────
+  let ytdWaardeDecl = 0
   for (const r of actualRecords) {
     ytdWaardeDecl += waardeDeclarabel(r.bv, r.month)
-    ytdWaardeMiss += waardeMissingHours(r.bv, r.month)
   }
-  const ytdOmzetTotaal = ytdWaardeDecl + ytdWaardeMiss
 
   // ── Current month (partial, 2026 only) ────────────────────────────────
   const curWritten = currentRecords.reduce((a, r) => a + r.written, 0)
@@ -421,6 +457,142 @@ export function HoursTab({ filter }: Props) {
 
   const trendData = { labels: displayMonths, datasets: trendDatasets }
 
+  // ── FTE / Capaciteit-budget helpers (alleen 2026) ─────────────────────
+  // Spiegelt logica uit BudgetsTab (FTE-store + budget_overrides voor
+  // capaciteits-%). Actuals komen uit useHoursStore (productive/verlof/
+  // improductief/ziek-percentages worden afgeleid uit declarable / vakantie /
+  // overigVerlof / internal+missing / ziekte).
+  const finalizedSet = useMemo(() => new Set(finalizedMonths.map(f => f.month)), [finalizedMonths])
+  const isFinalized = (m: string) => finalizedSet.has(m)
+
+  const getFteBudget = (bv: BvId, m: string): number | undefined =>
+    fteEntries.find(e => e.bv === bv && e.month === m)?.fteBudget
+  const getFteActual = (bv: BvId, m: string): number | undefined =>
+    fteEntries.find(e => e.bv === bv && e.month === m)?.fte
+
+  // ── LE-shifts: bouw één keer per BV de YTD over/under-run vs budget ──
+  // Voor maanden waarvan we zowel actual als budget kennen pakken we de
+  // afwijking; de gemiddelde / laatste afwijking schuift de toekomstige
+  // budget-waarde op richting de werkelijke trend.
+  //
+  // FTE: laatste-bekende actual minus diens budget = "shift". De toekomstige
+  // budget-rij + shift = LE. Hierdoor pakt de LE een hire-vertraging of
+  // overbezetting natuurlijk mee zonder dat je het budget hoeft aan te
+  // passen.
+  //
+  // Capaciteit-%: gemiddelde afwijking over alle gesloten maanden waar
+  // beide bekend zijn. % wijkt minder explosief af van maand tot maand,
+  // dus stabieler om te middelen dan de laatste maand.
+  const getFteShift = (bv: BvId): number => {
+    let lastDelta = 0
+    for (const m of MONTHS_2026) {
+      const a = getFteActual(bv, m)
+      const b = getFteBudget(bv, m)
+      if (a != null && a > 0 && b != null && b > 0) {
+        lastDelta = a - b   // overschrijven → laatste bekende delta wint
+      }
+    }
+    return lastDelta
+  }
+  const getCapShift = (bv: BvId, key: string): number => {
+    let sum = 0, n = 0
+    for (const m of MONTHS_2026) {
+      const a = getCapActualPct(bv, m, key)
+      const b = getCapBudgetPct(bv, m, key)
+      if (a != null && b != null) {
+        sum += (a - b)
+        n++
+      }
+    }
+    return n > 0 ? sum / n : 0
+  }
+
+  // FTE LE: closed/finalized → actual; future → (budget + last-known shift),
+  // capped op ≥ 0. Zonder budget valt het terug op de laatst bekende actual.
+  const getFteLe = (bv: BvId, m: string): number | undefined => {
+    if (isFinalized(m)) {
+      const a = getFteActual(bv, m)
+      if (a != null) return a
+    }
+    const b = getFteBudget(bv, m)
+    const shift = getFteShift(bv)
+    if (b != null) {
+      return Math.max(0, b + shift)
+    }
+    // Fallback: laatst bekende actual als run-rate forecast
+    const idxM = MONTHS_2026.indexOf(m)
+    for (let i = idxM - 1; i >= 0; i--) {
+      const a = getFteActual(bv, MONTHS_2026[i])
+      if (a != null) return a
+    }
+    return undefined
+  }
+
+  const getCapBudgetPct = (bv: BvId, m: string, key: string): number | undefined => {
+    const v = budgetOverrides[bv]?.[m]?.[key]
+    return v == null || v === 0 ? undefined : v
+  }
+
+  // Actuele capaciteit-% afgeleid uit useHoursStore (SAP). Categorieën:
+  //   productive    = declarable
+  //   leave         = vakantie + overigVerlof
+  //   nonproductive = internal + (missing capacity)
+  //   sick          = ziekte
+  // Noemer = totaal aantal uren (incl. afwezigheid + missing). Dit komt
+  // overeen met de berekening in de detailtabel hierboven (zelfde 'totaal').
+  const getCapActualPct = (bv: BvId, m: string, key: string): number | undefined => {
+    const e = hoursStoreEntries.find(x => x.bv === bv && x.month === m)
+    if (!e) return undefined
+    const work = e.declarable + e.internal
+    const verlof = e.vakantie + e.overigVerlof
+    const ziekte = e.ziekte
+    // Missing alleen voor Consultancy (zelfde regel als detailtabel)
+    const baseRec = hoursData2026.find(r => r.bv === bv && r.month === m)
+    const cap = baseRec ? Math.max(baseRec.capacity, work + verlof + ziekte) : work + verlof + ziekte
+    const sumKnown = work + verlof + ziekte
+    const missing = bv === 'Consultancy' ? Math.max(0, cap - sumKnown) : 0
+    const totaal = work + verlof + ziekte + missing
+    if (totaal <= 0) return undefined
+    let val = 0
+    if      (key === 'capacity_productive_pct')    val = e.declarable
+    else if (key === 'capacity_leave_pct')         val = verlof
+    else if (key === 'capacity_nonproductive_pct') val = e.internal + missing
+    else if (key === 'capacity_sick_pct')          val = ziekte
+    return (val / totaal) * 100
+  }
+
+  // Capaciteit-% LE: closed/finalized → actual; future → budget + gem.
+  // YTD-afwijking, geclamped op [0..100]. Hierdoor reflecteert de LE-rij
+  // geen 1-op-1 budget meer, maar de richting van de werkelijke realisatie.
+  // Voorbeeld: budget productief 85% maar actuals lopen op 82% (-3pp) →
+  // LE voor toekomstige maanden ≈ 82% (= 85 - 3).
+  const getCapLe = (bv: BvId, m: string, key: string): number | undefined => {
+    if (isFinalized(m)) {
+      const a = getCapActualPct(bv, m, key)
+      if (a != null) return a
+    }
+    const b = getCapBudgetPct(bv, m, key)
+    const shift = getCapShift(bv, key)
+    if (b != null) {
+      return Math.min(100, Math.max(0, b + shift))
+    }
+    // Geen budget — toon bij gebrek aan beter de actuele % uit hours-data
+    return getCapActualPct(bv, m, key)
+  }
+
+  const fmtFte = (v: number | undefined): string =>
+    v == null ? '—' : v.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  const fmtPct = (v: number | undefined): string =>
+    v == null ? '—' : v.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'
+
+  const toggleCap = (bv: BvId) => {
+    setCapExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(bv)) next.delete(bv); else next.add(bv)
+      return next
+    })
+  }
+
   // ── BV bar chart ────────────────────────────────────────────────────────
   const bvBar = {
     labels: activeBvs,
@@ -491,7 +663,6 @@ export function HoursTab({ filter }: Props) {
         {kpiCard('Ziekte', ytdZiekte.toLocaleString('nl-NL'), `${ytdZiekPct.toFixed(1)}% van totaal`, 'var(--red)', is2025 ? 'FY' : 'YTD')}
         {kpiCard('Bezettingsgraad', `${ytdCapUtil.toFixed(0)}%`, `${ytdWritten.toLocaleString('nl-NL')} / ${ytdCap.toLocaleString('nl-NL')} cap`, ytdCapUtil >= 90 ? 'var(--green)' : ytdCapUtil >= 75 ? 'var(--amber)' : 'var(--red)', is2025 ? 'FY' : 'YTD')}
         {!is2025 && ytdWaardeDecl > 0 && kpiCard('Waarde declarabel', fmt(ytdWaardeDecl), 'Uren Facturering Totaal · Consultancy', 'var(--green)', is2025 ? 'FY' : 'YTD')}
-        {!is2025 && ytdOmzetTotaal > 0 && kpiCard('Omzet totaal', fmt(ytdOmzetTotaal), `Consultancy · incl. ${fmt(ytdWaardeMiss)} missing-hours`, 'var(--blue)', is2025 ? 'FY' : 'YTD')}
         {!is2025 && kpiCard(CURRENT_MONTH + ' (lopend)', curWritten.toLocaleString('nl-NL'), `${curDeclPct.toFixed(1)}% declarabel · gedeeltelijk`, 'var(--amber)', 'Nu')}
         {!is2025 && kpiCard('FY2026 forecast', fyWritten.toLocaleString('nl-NL'), `${fyDecl.toLocaleString('nl-NL')} declarabel`, 'var(--t3)', 'FC')}
       </div>
@@ -537,18 +708,164 @@ export function HoursTab({ filter }: Props) {
         </div>
       </div>
 
-      {/* Detail table — Consultancy overview structuur:
+      {/* ── FTE & Capaciteit — Budget vs Actuals (& LE) ── alleen 2026 ── */}
+      {!is2025 && activeBvs.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', marginTop: 4 }}>
+            FTE &amp; Capaciteit-budget vs Actuals
+            <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, letterSpacing: 0 }}>
+              — budget komt uit de Budgetten-tab · actuals uit de Maandafsluiting (FTE) en SAP-uren · LE voor toekomst = budget + gemiddelde YTD afwijking (actual − budget) zodat de LE de werkelijke trend volgt i.p.v. 1-op-1 het budget
+            </span>
+          </div>
+          {activeBvs.map(bv => {
+            const isOpen = capExpanded.has(bv)
+            // FY-gemiddelden voor de header
+            const fyAvgFteB = (() => {
+              const xs = MONTHS_2026.map(m => getFteBudget(bv, m)).filter((v): v is number => v != null)
+              return xs.length === 0 ? null : xs.reduce((s, v) => s + v, 0) / xs.length
+            })()
+            const fyAvgFteA = (() => {
+              const xs = MONTHS_2026.map(m => getFteActual(bv, m)).filter((v): v is number => v != null)
+              return xs.length === 0 ? null : xs.reduce((s, v) => s + v, 0) / xs.length
+            })()
+            const fyAvgFteLe = (() => {
+              const xs = MONTHS_2026.map(m => getFteLe(bv, m)).filter((v): v is number => v != null)
+              return xs.length === 0 ? null : xs.reduce((s, v) => s + v, 0) / xs.length
+            })()
+
+            return (
+              <div key={bv} className="card" style={{ borderLeft: `3px solid ${BV_COLORS[bv]}` }}>
+                <div
+                  className="card-hdr"
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => toggleCap(bv)}
+                  title={isOpen ? 'Klik om in te klappen' : 'Klik om uit te klappen'}
+                >
+                  <span style={{ fontSize: 10, marginRight: 8, display: 'inline-block', transition: 'transform .2s', transform: isOpen ? 'rotate(90deg)' : 'none' }}>▶</span>
+                  <span className="card-title" style={{ color: BV_COLORS[bv] }}>{bv} — Capaciteit</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)', display: 'flex', gap: 14 }}>
+                    <span>FY ø FTE B: <strong style={{ color: BV_COLORS[bv] }}>{fmtFte(fyAvgFteB ?? undefined)}</strong></span>
+                    <span>A: <strong style={{ color: 'var(--brand)' }}>{fmtFte(fyAvgFteA ?? undefined)}</strong></span>
+                    <span>LE: <strong style={{ color: 'var(--amber)' }}>{fmtFte(fyAvgFteLe ?? undefined)}</strong></span>
+                  </span>
+                </div>
+                {isOpen && (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse', minWidth: 'max-content', fontSize: 11 }}>
+                      <colgroup>
+                        <col style={{ width: 200 }} />
+                        {BUDGET_MONTHS_2026.map(m => <col key={m} style={{ width: 80 }} />)}
+                        <col style={{ width: 90 }} />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2 }}>Regel</th>
+                          {BUDGET_MONTHS_2026.map(m => (
+                            <th key={m} className="r" style={{ padding: '4px 6px' }}>
+                              {m}
+                              {isFinalized(m) && <span style={{ marginLeft: 3, fontSize: 8, color: 'var(--brand)' }} title="Afgesloten maand — actuals">✓</span>}
+                            </th>
+                          ))}
+                          <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)' }}>FY ø</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {/* FTE-blok: Budget / Actual / LE */}
+                        {([
+                          { label: 'FTE — Budget',  get: (m: string) => getFteBudget(bv, m), color: BV_COLORS[bv], italic: false, bold: true,  bg: 'var(--bg3)' },
+                          { label: 'FTE — Actual',  get: (m: string) => getFteActual(bv, m), color: 'var(--brand)', italic: false, bold: true,  bg: 'rgba(0,169,224,.05)' },
+                          { label: 'FTE — LE',      get: (m: string) => getFteLe(bv, m),     color: 'var(--amber)', italic: true,  bold: false, bg: 'rgba(245,158,11,.04)' },
+                        ] as const).map(row => {
+                          const vals = BUDGET_MONTHS_2026.map(m => row.get(m))
+                          const filled = vals.filter((v): v is number => v != null)
+                          const fy = filled.length === 0 ? null : filled.reduce((s, v) => s + v, 0) / filled.length
+                          return (
+                            <tr key={row.label} style={{ background: row.bg }}>
+                              <td style={{
+                                position: 'sticky', left: 0, zIndex: 1, background: row.bg,
+                                padding: '4px 12px', fontSize: 11, fontWeight: row.bold ? 700 : 500,
+                                color: row.color, fontStyle: row.italic ? 'italic' : 'normal',
+                                whiteSpace: 'nowrap',
+                              }}>{row.label}</td>
+                              {vals.map((v, i) => (
+                                <td key={i} className="mono r" style={{
+                                  padding: '3px 6px', fontSize: 11,
+                                  color: v == null ? 'var(--t3)' : row.color,
+                                  fontStyle: row.italic ? 'italic' : 'normal',
+                                  fontWeight: row.bold ? 600 : 500,
+                                }}>{fmtFte(v)}</td>
+                              ))}
+                              <td className="mono r" style={{
+                                padding: '3px 6px', fontSize: 11, fontWeight: 700,
+                                borderLeft: '1px solid var(--bd2)',
+                                color: fy == null ? 'var(--t3)' : row.color,
+                              }}>{fmtFte(fy ?? undefined)}</td>
+                            </tr>
+                          )
+                        })}
+                        {/* Spacer */}
+                        <tr><td colSpan={14} style={{ borderTop: '1px solid var(--bd2)', padding: 0, height: 1 }} /></tr>
+                        {/* Capaciteit-% blokken: per categorie 3 rijen (B/A/LE) */}
+                        {CAPACITY_KEYS.flatMap(cap => ([
+                          { label: `${cap.label} % — Budget`, kind: 'B' as const, get: (m: string) => getCapBudgetPct(bv, m, cap.key), italic: false, bold: true,  color: cap.color, bg: 'transparent' },
+                          { label: `${cap.label} % — Actual`, kind: 'A' as const, get: (m: string) => getCapActualPct(bv, m, cap.key), italic: false, bold: true,  color: cap.color, bg: 'rgba(0,169,224,.04)' },
+                          { label: `${cap.label} % — LE`,     kind: 'LE' as const, get: (m: string) => getCapLe(bv, m, cap.key),       italic: true,  bold: false, color: cap.color, bg: 'rgba(245,158,11,.03)' },
+                        ])).map(row => {
+                          const vals = BUDGET_MONTHS_2026.map(m => row.get(m))
+                          const filled = vals.filter((v): v is number => v != null)
+                          const fy = filled.length === 0 ? null : filled.reduce((s, v) => s + v, 0) / filled.length
+                          return (
+                            <tr key={row.label} style={{ background: row.bg }}>
+                              <td style={{
+                                position: 'sticky', left: 0, zIndex: 1,
+                                background: row.bg === 'transparent' ? 'var(--bg2)' : row.bg,
+                                padding: '4px 12px', fontSize: 11, fontWeight: row.bold ? 700 : 500,
+                                color: row.color, fontStyle: row.italic ? 'italic' : 'normal',
+                                whiteSpace: 'nowrap',
+                              }}>{row.label}</td>
+                              {vals.map((v, i) => (
+                                <td key={i} className="mono r" style={{
+                                  padding: '3px 6px', fontSize: 11,
+                                  color: v == null ? 'var(--t3)' : row.color,
+                                  fontStyle: row.italic ? 'italic' : 'normal',
+                                  fontWeight: row.bold ? 600 : 500,
+                                  opacity: row.kind === 'LE' ? 0.85 : 1,
+                                }}>{fmtPct(v)}</td>
+                              ))}
+                              <td className="mono r" style={{
+                                padding: '3px 6px', fontSize: 11, fontWeight: 700,
+                                borderLeft: '1px solid var(--bd2)',
+                                color: fy == null ? 'var(--t3)' : row.color,
+                              }}>{fmtPct(fy ?? undefined)}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </>
+      )}
+
+      {/* Detail table — uren-overzicht per BV (en per week):
             BV · Maand · (Week) · SVW dagen · Decl uren/% · NietDecl uren/% ·
-            Verlof uren/% · Ziekte uren/% · Missend uren/% · Totaal uren ·
-            Waarde Declarabel · Waarde missing-hours · Omzet totaal */}
+            Verlof uren/% · Ziekte uren/% · Missend uren/% · Totaal uren */}
       <div className="card">
         <div className="card-hdr">
           <span className="card-title">
             Urenverdeling per BV & {period === 'week' ? 'Week' : 'Maand'}
           </span>
-          {period === 'week' && (
+          {period === 'week' && hoursWeekEntries.length === 0 && (
             <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--amber)' }}>
-              ⓘ Week-verdeling is geschat (SAP-export bevat meestal alleen maand-niveau)
+              ⓘ Week-verdeling is geschat — upload het nieuwe per-week SAP-export voor exacte week-cijfers
+            </span>
+          )}
+          {period === 'week' && hoursWeekEntries.length > 0 && (
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--green)' }}>
+              ✓ Week-data uit per-week SAP-export · open missing-hours per week zichtbaar
             </span>
           )}
         </div>
@@ -571,9 +888,6 @@ export function HoursTab({ filter }: Props) {
                 <th className="r">Missend</th>
                 <th className="r">Miss %</th>
                 <th className="r" style={{ fontWeight: 700 }}>Totaal</th>
-                <th className="r" title="Uit Uren Facturering Totaal — alleen voor Consultancy ingevuld">Waarde declarabel</th>
-                <th className="r" title="Uit Missing Hours — alleen voor Consultancy">Waarde missing-h</th>
-                <th className="r" style={{ fontWeight: 700 }} title="Som van Waarde declarabel + Missing-hours waarde — alleen Consultancy">Omzet totaal</th>
               </tr>
             </thead>
             <tbody>
@@ -586,9 +900,9 @@ export function HoursTab({ filter }: Props) {
 
                 // Subtotaal-accumulators per BV (alleen actuals).
                 let totDecl = 0, totND = 0, totVer = 0, totZk = 0, totMs = 0
-                let totWDecl = 0, totWMiss = 0
                 const rows: React.ReactNode[] = []
 
+                const today = new Date()
                 for (const r of displayR) {
                   const isForecast = r.type === 'forecast'
                   const isCurrent  = r.type === 'current'
@@ -601,21 +915,27 @@ export function HoursTab({ filter }: Props) {
                   const ziekte = e?.ziekte ?? 0
                   const decl   = r.declarable
                   const nond   = r.nonDeclarable
-                  // Missende uren: voor Consultancy berekenen we ze uit
-                  // capaciteit (= aantal werkdagen × 8 × headcount). Wij
-                  // hebben echter alleen hoursData.capacity dat is aangepast
-                  // op (werkuren + verlof) — niet op originele capaciteit.
-                  // Voor de Excel-referentie tonen we hier het verschil tussen
-                  // capacity en (decl + nond + verlof + ziekte). Voor andere
-                  // BVs is missing_hours niet van toepassing → 0.
-                  const sumKnown = decl + nond + verlof + ziekte
-                  const missing  = bv === 'Consultancy'
-                    ? Math.max(0, r.capacity - sumKnown)
-                    : 0
+                  // Missende uren: bij voorkeur uit de per-week SAP-data
+                  // (sommeer alleen PAST weeks — future weeks tellen niet
+                  // als missing-actuals; missing-hours convergeert per
+                  // definitie naar 0 aan eind jaar dus géén LE).
+                  // Fallback voor maanden zónder week-data:
+                  //   - alleen Consultancy & alleen actual maand: capaciteit-formule
+                  //   - forecast/future: 0
+                  const realWeeksForMonth = hoursWeekEntries.filter(w => w.bv === bv && w.month === r.month)
+                  let missing = 0
+                  if (realWeeksForMonth.length > 0) {
+                    for (const wRec of realWeeksForMonth) {
+                      const wEnd = new Date(wRec.weekEnd + 'T23:59:59Z')
+                      if (wEnd > today) continue   // skip future weeks
+                      missing += wRec.missingHoursOpen
+                    }
+                    missing = Math.round(missing * 100) / 100
+                  } else if (bv === 'Consultancy' && !isForecast) {
+                    const sumKnown = decl + nond + verlof + ziekte
+                    missing = Math.max(0, r.capacity - sumKnown)
+                  }
                   const totaal = decl + nond + verlof + ziekte + missing
-                  const wDecl  = waardeDeclarabel(bv, r.month)
-                  const wMiss  = waardeMissingHours(bv, r.month)
-                  const omzet  = wDecl + wMiss
 
                   // SVW dagen: 5 voor een normale werkweek (placeholder tot
                   // SAP-export werkdagen-kolom bevat).
@@ -626,10 +946,123 @@ export function HoursTab({ filter }: Props) {
 
                   if (!isForecast) {
                     totDecl += decl; totND += nond; totVer += verlof; totZk += ziekte; totMs += missing
-                    totWDecl += wDecl; totWMiss += wMiss
                   }
 
-                  // Per-week split: gelijkmatig over 4-5 ISO-weken van de maand.
+                  // Per-week split. Voorkeur: echte SAP-week data uit
+                  // useHoursWeekStore voor deze BV+maand. Fallback: schatting
+                  // (gelijkmatige verdeling over ISO-weken in de maand).
+                  if (period === 'week') {
+                    const realWeeks = hoursWeekEntries
+                      .filter(w => w.bv === bv && w.month === r.month)
+                      .sort((a, b) => a.week - b.week)
+                    // Tonen we week-rijen zodra er ÉRGENS in het jaar week-
+                    // data is; anders fallt door naar de geschatte split.
+                    if (hoursWeekEntries.length > 0) {
+                      const fmtH = (v: number): string => {
+                        if (v === 0) return '0'
+                        return v.toLocaleString('nl-NL', { maximumFractionDigits: 2 })
+                      }
+                      // Volledige set ISO-weken voor deze maand zodat er geen
+                      // gaten ontstaan: weken zonder upload krijgen LE-waardes
+                      // op basis van FTE × werkuren-per-week × capaciteit-%-LE
+                      // (productief/verlof/improductief/ziek). Hierdoor heeft
+                      // ELKE week een gevulde LE-rij, óók als het maand-
+                      // totaal nog leeg is (toekomstige maanden zonder data).
+                      const isoWeeks = splitMonthIntoWeeks(r.month)
+                      const yyyy = 2000 + Number(r.month.slice(-2))
+                      const numWeeks = Math.max(1, isoWeeks.length)
+                      // Synthese-input: weekcapaciteit + capaciteit-%-LE.
+                      // Eén FTE = 40 werkuren per week (NL standaard).
+                      const fteLeForMonth = getFteLe(bv, r.month) ?? 0
+                      const weeklyCap     = fteLeForMonth * 40
+                      const pctOf = (k: string): number => {
+                        const v = getCapLe(bv, r.month, k)
+                        return v == null ? 0 : v / 100
+                      }
+                      const synthDecl   = weeklyCap * pctOf('capacity_productive_pct')
+                      const synthNond   = weeklyCap * pctOf('capacity_nonproductive_pct')
+                      const synthVerlof = weeklyCap * pctOf('capacity_leave_pct')
+                      const synthZiekte = weeklyCap * pctOf('capacity_sick_pct')
+                      // Fallback: als FTE-LE 0 is en/of capaciteit-% leeg is,
+                      // val terug op het maand-totaal / numWeeks (legacy).
+                      const useSynth =
+                        synthDecl + synthNond + synthVerlof + synthZiekte > 0
+                      const fallbackDecl   = decl   / numWeeks
+                      const fallbackNond   = nond   / numWeeks
+                      const fallbackVerlof = verlof / numWeeks
+                      const fallbackZiekte = ziekte / numWeeks
+                      for (const wNum of isoWeeks) {
+                        const wRec = realWeeks.find(rw => rw.week === wNum)
+                        const range = wRec
+                          ? { start: wRec.weekStart, end: wRec.weekEnd }
+                          : isoWeekRangeLocal(yyyy, wNum)
+                        const wEndDate = new Date(range.end + 'T23:59:59Z')
+                        const isFutureWeek = wEndDate > today
+                        const isLE = !wRec
+                        // LE-waardes per categorie. Voor weken zónder upload:
+                        // gebruik FTE × cap-% als die ingevuld zijn, anders
+                        // de fallback maand/numWeeks.
+                        const wDecl   = wRec ? wRec.declarable                    : (useSynth ? synthDecl   : fallbackDecl)
+                        const wNond   = wRec ? wRec.internal                      : (useSynth ? synthNond   : fallbackNond)
+                        const wVerlof = wRec ? wRec.vakantie + wRec.overigVerlof  : (useSynth ? synthVerlof : fallbackVerlof)
+                        const wZiekte = wRec ? wRec.ziekte                        : (useSynth ? synthZiekte : fallbackZiekte)
+                        const wMissOpen = wRec ? wRec.missingHoursOpen : 0
+                        const wPlanned  = wRec ? wRec.plannedWork      : weeklyCap
+                        const wTotaal = wDecl + wNond + wVerlof + wZiekte + wMissOpen
+                        const wPct = (n: number) => wTotaal > 0 ? (n / wTotaal * 100).toFixed(1) : '—'
+                        const opacity = isFutureWeek ? 0.6 : isLE ? 0.8 : 1
+                        rows.push(
+                          <tr key={`${bv}-${r.month}-W${wNum}`} className="sub" style={{ opacity }}>
+                            <td style={{ color: BV_COLORS[bv], fontWeight: 600 }}>{bv}</td>
+                            <td style={{ fontWeight: 500 }}>{r.month}</td>
+                            <td style={{ fontWeight: 500, fontStyle: isLE ? 'italic' : 'normal' }} title={`${range.start} t/m ${range.end}${isLE ? ' · LE (geen upload voor deze week)' : ''}`}>
+                              W{wNum}
+                              {isFutureWeek && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--amber)' }}>plan</span>}
+                              {!isFutureWeek && isLE && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--amber)' }}>LE</span>}
+                            </td>
+                            <td className="mono r" style={{ color: 'var(--t3)' }}>5</td>
+                            <td className="mono r" style={{ color: 'var(--green)', fontStyle: isLE ? 'italic' : 'normal' }}>{fmtH(wDecl)}</td>
+                            <td className="mono r" style={{ color: 'var(--green)', fontStyle: isLE ? 'italic' : 'normal' }}>{wPct(wDecl)}%</td>
+                            <td className="mono r" style={{ color: 'var(--amber)', fontStyle: isLE ? 'italic' : 'normal' }}>{fmtH(wNond)}</td>
+                            <td className="mono r" style={{ color: 'var(--amber)', fontStyle: isLE ? 'italic' : 'normal' }}>{wPct(wNond)}%</td>
+                            <td className="mono r" style={{ color: '#8b5cf6', fontStyle: isLE ? 'italic' : 'normal' }}>{fmtH(wVerlof)}</td>
+                            <td className="mono r" style={{ color: '#8b5cf6', fontStyle: isLE ? 'italic' : 'normal' }}>{wPct(wVerlof)}%</td>
+                            <td className="mono r" style={{ color: 'var(--red)', fontStyle: isLE ? 'italic' : 'normal' }}>{fmtH(wZiekte)}</td>
+                            <td className="mono r" style={{ color: 'var(--red)', fontStyle: isLE ? 'italic' : 'normal' }}>{wPct(wZiekte)}%</td>
+                            {/* Missing-hours: alleen voor weken waar we echte
+                                upload-data hebben EN week is verlopen. LE-rijen
+                                en future weken tonen '—' (convergeert naar 0). */}
+                            <td className="mono r"
+                                style={{ color: !isFutureWeek && !isLE && wMissOpen > 0 ? 'var(--amber)' : 'var(--t3)' }}
+                                title={isFutureWeek
+                                  ? 'Toekomstige week — missing-hours wordt pas zichtbaar als de week is verlopen'
+                                  : isLE
+                                    ? 'Geen SAP-upload voor deze week — geen missing-hours-data beschikbaar'
+                                    : `Geplande werktijd: ${fmtH(wPlanned)} u · open missing-hours: ${fmtH(wMissOpen)} u`}>
+                              {isFutureWeek || isLE ? '—' : (wMissOpen > 0 ? fmtH(wMissOpen) : '—')}
+                            </td>
+                            <td className="mono r"
+                                style={{ color: !isFutureWeek && !isLE && wMissOpen > 0 ? 'var(--amber)' : 'var(--t3)' }}>
+                              {isFutureWeek || isLE ? '—' : (wMissOpen > 0 ? `${wPct(wMissOpen)}%` : '—')}
+                            </td>
+                            <td className="mono r" style={{ fontWeight: 600, fontStyle: isLE ? 'italic' : 'normal' }}
+                                title={wPlanned > 0
+                                  ? `Geplande werktijd voor deze week: ${fmtH(wPlanned)} u`
+                                  : isLE
+                                    ? (useSynth
+                                        ? `LE op basis van FTE-LE (${fteLeForMonth.toFixed(1)}) × 40u × capaciteit-% LE`
+                                        : 'LE op basis van maand-totaal / aantal weken')
+                                    : undefined}>
+                              {fmtH(wTotaal)}
+                            </td>
+                          </tr>
+                        )
+                      }
+                      continue
+                    }
+                  }
+
+                  // ── Geen week-mode of geen real-data → maand-/geschatte-rij ──
                   const weeks = period === 'week' ? splitMonthIntoWeeks(r.month) : [null]
                   for (let wi = 0; wi < weeks.length; wi++) {
                     const w = weeks[wi]
@@ -639,7 +1072,7 @@ export function HoursTab({ filter }: Props) {
                       <tr key={`${bv}-${r.month}-${w ?? 'm'}`} className="sub" style={{ opacity: isForecast ? 0.55 : 1 }}>
                         <td style={{ color: BV_COLORS[bv], fontWeight: 600 }}>{bv}</td>
                         <td style={{ fontWeight: 500 }}>{r.month}{isForecast && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--t3)' }}>FC</span>}{isCurrent && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--amber)' }}>lopend</span>}</td>
-                        {period === 'week' && <td style={{ fontWeight: 500 }}>W{w}{period === 'week' && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--amber)' }} title="Geschat — SAP-export bevat geen weekkolom">≈</span>}</td>}
+                        {period === 'week' && <td style={{ fontWeight: 500 }}>W{w}{period === 'week' && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--amber)' }} title="Geschat — geen per-week SAP-data voor deze maand">≈</span>}</td>}
                         <td className="mono r" style={{ color: 'var(--t3)' }}>{Math.round(sd * 10) / 10}</td>
                         <td className="mono r" style={{ color: 'var(--green)' }}>{Math.round(decl / div).toLocaleString('nl-NL')}</td>
                         <td className="mono r" style={{ color: 'var(--green)' }}>{pct(decl)}%</td>
@@ -649,12 +1082,15 @@ export function HoursTab({ filter }: Props) {
                         <td className="mono r" style={{ color: '#8b5cf6' }}>{pct(verlof)}%</td>
                         <td className="mono r" style={{ color: 'var(--red)' }}>{Math.round(ziekte / div).toLocaleString('nl-NL')}</td>
                         <td className="mono r" style={{ color: 'var(--red)' }}>{pct(ziekte)}%</td>
-                        <td className="mono r" style={{ color: missing > 0 ? 'var(--amber)' : 'var(--t3)' }}>{missing > 0 ? Math.round(missing / div).toLocaleString('nl-NL') : '—'}</td>
-                        <td className="mono r" style={{ color: missing > 0 ? 'var(--amber)' : 'var(--t3)' }}>{missing > 0 ? `${pct(missing)}%` : '—'}</td>
+                        {/* Missing-hours niet voor forecast/LE: convergeert naar 0
+                            aan eind jaar — alleen actuals tonen. */}
+                        <td className="mono r" style={{ color: !isForecast && missing > 0 ? 'var(--amber)' : 'var(--t3)' }}>
+                          {isForecast || missing <= 0 ? '—' : (missing % 1 === 0 ? Math.round(missing / div).toLocaleString('nl-NL') : (missing / div).toLocaleString('nl-NL', { maximumFractionDigits: 2 }))}
+                        </td>
+                        <td className="mono r" style={{ color: !isForecast && missing > 0 ? 'var(--amber)' : 'var(--t3)' }}>
+                          {isForecast || missing <= 0 ? '—' : `${pct(missing)}%`}
+                        </td>
                         <td className="mono r" style={{ fontWeight: 600 }}>{Math.round(totaal / div).toLocaleString('nl-NL')}</td>
-                        <td className="mono r" style={{ color: 'var(--green)' }}>{wDecl > 0 ? fmt(wDecl / div) : '—'}</td>
-                        <td className="mono r" style={{ color: 'var(--amber)' }}>{wMiss > 0 ? fmt(wMiss / div) : '—'}</td>
-                        <td className="mono r" style={{ fontWeight: 600, color: 'var(--blue)' }}>{omzet > 0 ? fmt(omzet / div) : '—'}</td>
                       </tr>
                     )
                   }
@@ -679,9 +1115,6 @@ export function HoursTab({ filter }: Props) {
                     <td className="mono r" style={{ color: totMs > 0 ? 'var(--amber)' : 'var(--t3)' }}>{totMs > 0 ? totMs.toLocaleString('nl-NL') : '—'}</td>
                     <td className="mono r" style={{ color: totMs > 0 ? 'var(--amber)' : 'var(--t3)' }}>{totMs > 0 ? `${tpct(totMs)}%` : '—'}</td>
                     <td className="mono r" style={{ fontWeight: 700 }}>{totAll.toLocaleString('nl-NL')}</td>
-                    <td className="mono r" style={{ color: 'var(--green)' }}>{totWDecl > 0 ? fmt(totWDecl) : '—'}</td>
-                    <td className="mono r" style={{ color: 'var(--amber)' }}>{totWMiss > 0 ? fmt(totWMiss) : '—'}</td>
-                    <td className="mono r" style={{ fontWeight: 700, color: 'var(--blue)' }}>{(totWDecl + totWMiss) > 0 ? fmt(totWDecl + totWMiss) : '—'}</td>
                   </tr>
                 )
                 return rows
@@ -691,9 +1124,17 @@ export function HoursTab({ filter }: Props) {
         </div>
         {period === 'week' && (
           <div style={{ padding: '8px 14px', fontSize: 10, color: 'var(--t3)', borderTop: '1px solid var(--bd2)' }}>
-            ⓘ De wekelijkse verdeling is een gelijkmatige split van de maand-totalen over de ISO-weken die binnen die maand vallen.
-            Voor exacte per-week cijfers moet de SAP-export een <code>Kalenderweek</code>-kolom bevatten — dan worden de echte
-            wekelijkse waardes gebruikt zodra de parser is uitgebreid.
+            {hoursWeekEntries.length > 0
+              ? <>
+                  ✓ Per-week getallen komen rechtstreeks uit de SAP-export (Kalenderjaar/-week + Missing Hours kolom).
+                  Open missing-hours per week = <code>geplande werktijd</code> minus geregistreerde uren in die week.
+                  Weken zonder upload-data tonen <em>cursief</em> met label <strong>LE</strong> — die zijn afgeleid uit het maand-totaal (gelijkmatig over de weken verdeeld).
+                  Toekomstige weken (label "plan") tonen de pre-registered vakantie/ziekte; missing-hours zijn alleen beschikbaar voor afgesloten weken met SAP-upload.
+                </>
+              : <>
+                  ⓘ Geen per-week SAP-export geüpload — de getoonde week-verdeling is een gelijkmatige split van de maand-totalen.
+                  Upload het nieuwe per-week formaat (Kalenderjaar/-week + Missing Hours kolom) voor exacte week-cijfers.
+                </>}
           </div>
         )}
       </div>

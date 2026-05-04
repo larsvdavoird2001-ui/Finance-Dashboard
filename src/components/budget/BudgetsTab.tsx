@@ -73,6 +73,75 @@ function BudgetInput({
   )
 }
 
+/**
+ * Generieke decimaal-input voor FTE- en %-cellen. Toont '—' bij null/undefined,
+ * accepteert NL-decimaal (komma) of dot. Commit op blur/Enter, Escape herstelt.
+ */
+function NumberInput({
+  value,
+  onCommit,
+  suffix,
+  highlight,
+  decimals = 1,
+  width = 75,
+}: {
+  value: number | undefined
+  onCommit: (v: number | undefined) => void
+  suffix?: string
+  highlight?: boolean
+  decimals?: number
+  width?: number
+}) {
+  const [raw, setRaw] = useState<string | null>(null)
+  const editing = raw !== null
+  const display = editing
+    ? raw
+    : (value == null
+        ? ''
+        : value.toLocaleString('nl-NL', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + (suffix ?? ''))
+  const commit = () => {
+    if (raw === null) return
+    const trimmed = raw.replace(suffix ?? '', '').replace(/\s/g, '').replace(',', '.').trim()
+    if (trimmed === '') {
+      if (value != null) onCommit(undefined)
+    } else {
+      const v = parseFloat(trimmed)
+      if (!isNaN(v) && v !== value) onCommit(v)
+    }
+    setRaw(null)
+  }
+  return (
+    <input
+      className="ohw-inp"
+      value={display}
+      placeholder="—"
+      style={{
+        width, fontSize: 11, padding: '2px 6px',
+        textAlign: 'right',
+        fontFamily: 'var(--mono)',
+        color: value == null ? 'var(--t3)' : highlight ? 'var(--green)' : 'var(--t1)',
+        background: highlight ? 'rgba(38,201,151,.05)' : 'var(--bg1)',
+        border: '1px solid transparent',
+        borderRadius: 3,
+      }}
+      onFocus={e => {
+        setRaw(value == null ? '' : String(value))
+        setTimeout(() => e.target.select(), 0)
+      }}
+      onChange={e => setRaw(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur()
+        } else if (e.key === 'Escape') {
+          setRaw(null)
+          e.currentTarget.blur()
+        }
+      }}
+    />
+  )
+}
+
 const ENTITIES: EntityName[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 
 const BV_COLORS: Record<string, string> = {
@@ -92,6 +161,18 @@ const CHART_METRICS = [
   { key: 'amortisatie_afschrijvingen', label: 'Amortisatie' },
   { key: 'ebit',                       label: 'EBIT' },
 ]
+
+// ── FTE / Capaciteit-budget keys ────────────────────────────────────────────
+// Capaciteit-% (productief/verlof/improductief/ziek) wordt per BV per maand
+// opgeslagen in useBudgetStore.overrides via deze pseudo-keys. Hiermee delen
+// we het bestaande budget_overrides DB-schema (key/value) zonder een migratie
+// nodig te hebben. FTE-budget zelf staat in useFteStore (eigen tabel).
+const CAPACITY_KEYS = [
+  { key: 'capacity_productive_pct',     label: 'Productief %',   color: 'var(--green)' },
+  { key: 'capacity_leave_pct',          label: 'Verlof %',       color: 'var(--blue)'  },
+  { key: 'capacity_nonproductive_pct',  label: 'Improductief %', color: 'var(--amber)' },
+  { key: 'capacity_sick_pct',           label: 'Ziek %',         color: 'var(--red)'   },
+] as const
 
 // SUBS_OF, DERIVED_FORMULA, AGGREGATE_KEYS, DERIVED_KEYS, READONLY_KEYS
 // komen uit ../../lib/plDerive — gedeeld met BudgetTab zodat beide tabs
@@ -137,6 +218,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
   const _lockedBv = useLockedBv()
   const store = useBudgetStore()
   const fteGetEntry = useFteStore(s => s.getEntry)
+  const fteUpsert   = useFteStore(s => s.upsertEntry)
   // Trigger re-render bij FTE wijzigingen
   useFteStore(s => s.entries)
   const { getMonthly } = useAdjustedActuals()
@@ -328,11 +410,18 @@ export function BudgetsTab({ filter: _filter }: Props) {
   }
 
   // ── LE-waarde ──
+  // Voor toekomstige maanden: forecast op basis van 2025-seizoen × performance.
+  // Als forecast = 0 (geen 2025-signaal en geen run-rate, bv. nieuwe sub-keys
+  // of BV/regel zonder historie), valt LE terug op het ingevulde budget.
+  // Anders zou LE leeg blijven in maanden waar de gebruiker wél een budget
+  // heeft ingegeven maar er geen historische data voor bestaat.
   const rawLeVal = (e: EntityName, m: string, k: string): number => {
     const ov = store.getLeOverride(e, m, k)
     if (ov != null) return ov
     if (isClosedMonth(m)) return getActualsFor(e, m)[k] ?? 0
-    return getForecastFor(e, m, k)
+    const forecast = getForecastFor(e, m, k)
+    if (forecast !== 0) return forecast
+    return rawBudget(e, m, k)
   }
   const getLeVal = (e: EntityName, m: string, k: string): number => {
     // Voor CLOSED maanden gebruiken we de werkelijke aggregaat-waarde
@@ -355,12 +444,44 @@ export function BudgetsTab({ filter: _filter }: Props) {
     }
     return rawLeVal(e, m, k)
   }
-  const getLeSource = (e: EntityName, m: string, k: string): 'override' | 'actual' | 'forecast' | 'derived' => {
+  const getLeSource = (e: EntityName, m: string, k: string): 'override' | 'actual' | 'forecast' | 'derived' | 'budget' => {
     if (READONLY_KEYS.has(k)) return 'derived'
     if (store.getLeOverride(e, m, k) != null) return 'override'
     if (isClosedMonth(m)) return 'actual'
+    // Als forecast leeg is maar er staat budget → labelen we de cel als 'budget'
+    const forecast = getForecastFor(e, m, k)
+    if (forecast === 0 && rawBudget(e, m, k) !== 0) return 'budget'
     return 'forecast'
   }
+
+  // ── FTE budget per BV/maand ────────────────────────────────────────────
+  // Wordt opgeslagen in useFteStore (kolom fteBudget op fte_entries-tabel).
+  // Holdings heeft geen FTE-flow.
+  const getFteBudget = (bv: BvId, m: string): number | undefined =>
+    fteGetEntry(bv, m)?.fteBudget
+  const setFteBudget = (bv: BvId, m: string, v: number | undefined) => {
+    fteUpsert(bv, m, { fteBudget: v })
+  }
+
+  // ── Capaciteit-% (productief / verlof / improductief / ziek) ───────────
+  // Per BV/maand, opgeslagen via useBudgetStore.overrides met pseudo-keys
+  // (zie CAPACITY_KEYS). Geen DB-migratie nodig — budget_overrides is
+  // al een generiek key/value-schema.
+  const getCapacityPct = (e: EntityName, m: string, k: string): number | undefined => {
+    const ov = store.overrides[e]?.[m]?.[k]
+    return ov === undefined ? undefined : ov
+  }
+  const setCapacityPct = (e: EntityName, m: string, k: string, v: number | undefined) => {
+    if (v === undefined) {
+      // We hebben geen "delete one key"-API; zet 0 zodat hij in DB nog
+      // bestaat maar als leeg telt. Display interpreteert 0 als null.
+      store.setValue(e, m, k, 0)
+    } else {
+      store.setValue(e, m, k, v)
+    }
+  }
+  const capacityTotal = (e: EntityName, m: string): number =>
+    CAPACITY_KEYS.reduce((s, c) => s + (getCapacityPct(e, m, c.key) ?? 0), 0)
 
   // ── Kopieer alle bewerkbare waardes van vorige maand naar deze maand ──
   const copyPrevMonth = (e: EntityName, mIdx: number) => {
@@ -372,6 +493,16 @@ export function BudgetsTab({ filter: _filter }: Props) {
       if (READONLY_KEYS.has(item.key)) continue
       const val = rawBudget(e, prev, item.key)
       store.setValue(e, cur, item.key, val)
+    }
+    // Kopieer ook capaciteit-% naar de nieuwe maand
+    for (const cap of CAPACITY_KEYS) {
+      const v = store.overrides[e]?.[prev]?.[cap.key]
+      if (v != null) store.setValue(e, cur, cap.key, v)
+    }
+    // En FTE-budget (alleen voor productie-BVs)
+    if (e !== 'Holdings') {
+      const v = fteGetEntry(e as BvId, prev)?.fteBudget
+      if (v != null) fteUpsert(e as BvId, cur, { fteBudget: v })
     }
   }
 
@@ -493,18 +624,20 @@ export function BudgetsTab({ filter: _filter }: Props) {
   // LE is read-only overal: waardes komen automatisch uit actuals of forecast.
   // Geen click-to-edit meer — als de gebruiker iets wil corrigeren gaat dat
   // via het Budget, niet via een LE-override.
-  const renderLeCell = (val: number, src: 'override' | 'actual' | 'forecast' | 'derived') => {
+  const renderLeCell = (val: number, src: 'override' | 'actual' | 'forecast' | 'derived' | 'budget') => {
     const color =
       val === 0         ? 'var(--t3)' :
       src === 'derived' ? 'var(--brand)' :
       src === 'actual'  ? 'var(--brand)' :
       src === 'override'? 'var(--green)' :
+      src === 'budget'  ? 'var(--blue)' :
       'var(--amber)' // forecast
     const fontStyle = src === 'forecast' ? 'italic' : 'normal'
     const bg =
       src === 'actual'   ? 'rgba(0,169,224,.06)' :
       src === 'override' ? 'rgba(38,201,151,.06)' :
       src === 'forecast' ? 'rgba(245,158,11,.05)' :
+      src === 'budget'   ? 'rgba(59,130,246,.06)' :
       undefined
     return (
       <span
@@ -521,6 +654,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
           src === 'derived'  ? 'Auto-afgeleid van subposten' :
           src === 'actual'   ? 'Werkelijk (uit Maandafsluiting/OHW)' :
           src === 'override' ? 'Handmatige override uit eerder (read-only)' :
+          src === 'budget'   ? 'Geen forecast-signaal — terugval op ingevoerd budget' :
                                'Forecast — 60% seizoen × performance × FTE + 40% run-rate × FTE'
         }
       >
@@ -724,7 +858,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
         // Value-lookups voor deze scope (BV of som over alle BVs)
         const bVal = (m: string, k: string) => isTot ? totalBudgetVal(m, k) : getBudgetVal(scope as EntityName, m, k)
         const lVal = (m: string, k: string) => isTot ? totalLeVal(m, k) : getLeVal(scope as EntityName, m, k)
-        const lSrc = (m: string, k: string): 'override' | 'actual' | 'forecast' | 'derived' =>
+        const lSrc = (m: string, k: string): 'override' | 'actual' | 'forecast' | 'derived' | 'budget' =>
           isTot
             ? (READONLY_KEYS.has(k) ? 'derived' : isClosedMonth(m) ? 'actual' : 'forecast')
             : getLeSource(scope as EntityName, m, k)
@@ -816,6 +950,151 @@ export function BudgetsTab({ filter: _filter }: Props) {
                   </table>
                 </div>
 
+                {/* ── FTE & Capaciteit-budget — alleen voor productie-BVs ── */}
+                {!isTot && scope !== 'Holdings' && (() => {
+                  const bv = scope as BvId
+                  // FY-gemiddelde % per capaciteit-categorie (alleen maanden
+                  // met ingevulde waarde meegenomen)
+                  const fyAvgPct = (k: string): number | null => {
+                    const vals = months
+                      .map(m => getCapacityPct(scope as EntityName, m, k))
+                      .filter((v): v is number => v != null && v > 0)
+                    if (vals.length === 0) return null
+                    return vals.reduce((s, v) => s + v, 0) / vals.length
+                  }
+                  const fyTotalFte = months.reduce((s, m) => s + (getFteBudget(bv, m) ?? 0), 0)
+                  const fyAvgFte = fyTotalFte / 12
+                  return (
+                    <>
+                      <div style={{ padding: '14px 14px 0', fontSize: 10, color: 'var(--t3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                        FTE &amp; Capaciteit-budget 2026
+                        <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, letterSpacing: 0 }}>
+                          — geplande FTE en capaciteits-verdeling per maand · totaal % moet ≈ 100 zijn
+                        </span>
+                      </div>
+                      <div style={{ overflowX: 'auto', marginTop: 4 }}>
+                        <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse', width: TABLE_BASE_WIDTH }}>
+                          <MonthTableColgroup />
+                          <thead>
+                            <tr>
+                              <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2 }}>Regel</th>
+                              {months.map(m => (
+                                <th key={m} className="r" style={{ padding: '4px 6px' }}>{m}</th>
+                              ))}
+                              <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)' }}>FY ø</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {/* FTE budget-rij */}
+                            <tr style={{ background: 'var(--bg3)' }}>
+                              <td style={{
+                                position: 'sticky', left: 0, zIndex: 1,
+                                background: 'var(--bg3)',
+                                padding: '4px 12px',
+                                fontWeight: 700,
+                                color: BV_COLORS[bv],
+                                fontSize: 12,
+                                whiteSpace: 'nowrap',
+                              }}>FTE budget</td>
+                              {months.map(m => (
+                                <td key={m} className="r mono" style={{ padding: '3px 6px', fontSize: 11 }}>
+                                  <NumberInput
+                                    value={getFteBudget(bv, m)}
+                                    onCommit={v => setFteBudget(bv, m, v)}
+                                    decimals={1}
+                                    width={75}
+                                  />
+                                </td>
+                              ))}
+                              <td className="r mono" style={{
+                                fontWeight: 700, color: 'var(--brand)',
+                                borderLeft: '1px solid var(--bd2)',
+                                padding: '3px 6px', fontSize: 11,
+                              }}>
+                                {fyTotalFte === 0 ? '—' : fyAvgFte.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                              </td>
+                            </tr>
+                            {/* Capaciteit-% rijen */}
+                            {CAPACITY_KEYS.map(cap => {
+                              const fyAvg = fyAvgPct(cap.key)
+                              return (
+                                <tr key={cap.key}>
+                                  <td style={{
+                                    position: 'sticky', left: 0, zIndex: 1,
+                                    background: 'var(--bg2)',
+                                    padding: '4px 12px',
+                                    fontSize: 11,
+                                    color: cap.color,
+                                    fontWeight: 600,
+                                    whiteSpace: 'nowrap',
+                                  }}>{cap.label}</td>
+                                  {months.map(m => {
+                                    const val = getCapacityPct(scope as EntityName, m, cap.key)
+                                    const display = val == null || val === 0 ? undefined : val
+                                    return (
+                                      <td key={m} className="r mono" style={{ padding: '3px 6px', fontSize: 11 }}>
+                                        <NumberInput
+                                          value={display}
+                                          onCommit={v => setCapacityPct(scope as EntityName, m, cap.key, v)}
+                                          suffix="%"
+                                          decimals={1}
+                                          width={75}
+                                        />
+                                      </td>
+                                    )
+                                  })}
+                                  <td className="r mono" style={{
+                                    fontWeight: 700, color: cap.color,
+                                    borderLeft: '1px solid var(--bd2)',
+                                    padding: '3px 6px', fontSize: 11,
+                                  }}>
+                                    {fyAvg == null ? '—' : fyAvg.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                            {/* Totaal-% rij (auto) */}
+                            <tr style={{ background: 'var(--bg3)' }}>
+                              <td style={{
+                                position: 'sticky', left: 0, zIndex: 1,
+                                background: 'var(--bg3)',
+                                padding: '4px 12px',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                whiteSpace: 'nowrap',
+                              }}>Totaal %</td>
+                              {months.map(m => {
+                                const t = capacityTotal(scope as EntityName, m)
+                                const filled = t > 0
+                                const ok = filled && Math.abs(t - 100) < 0.05
+                                const color = !filled
+                                  ? 'var(--t3)'
+                                  : ok
+                                    ? 'var(--green)'
+                                    : 'var(--amber)'
+                                return (
+                                  <td key={m} className="r mono" style={{
+                                    padding: '3px 6px', fontSize: 11,
+                                    color, fontWeight: 700,
+                                  }}
+                                    title={filled && !ok ? `Som = ${t.toFixed(1)}% — moet 100% zijn` : undefined}
+                                  >
+                                    {filled
+                                      ? t.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'
+                                      : '—'}
+                                    {filled && !ok && <span style={{ marginLeft: 3 }}>⚠</span>}
+                                  </td>
+                                )
+                              })}
+                              <td style={{ borderLeft: '1px solid var(--bd2)' }} />
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )
+                })()}
+
                 {/* ── Latest Estimate-tabel — read-only met methodiek-kolom ── */}
                 <div style={{ padding: '14px 14px 0', fontSize: 10, color: 'var(--t3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>
                   Latest Estimate 2026
@@ -826,6 +1105,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
                 <div style={{ padding: '4px 14px', fontSize: 10, color: 'var(--t3)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(0,169,224,.2)', border: '1px solid var(--brand)', marginRight: 4, verticalAlign: 'middle' }} /> actual (Maandafsluiting/OHW)</span>
                   <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(245,158,11,.15)', border: '1px solid var(--amber)', marginRight: 4, verticalAlign: 'middle' }} /> forecast (60% seizoen + 40% run-rate × FTE)</span>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(59,130,246,.15)', border: '1px solid var(--blue)', marginRight: 4, verticalAlign: 'middle' }} /> budget (geen forecast-signaal — terugval op ingegeven budget)</span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
                   <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse', width: TABLE_LE_WIDTH }}>

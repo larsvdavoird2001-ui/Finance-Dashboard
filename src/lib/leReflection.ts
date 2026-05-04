@@ -50,9 +50,18 @@ export interface ReflectionContext {
   fteDelta: number | null
   fteCurrent: number
   ftePrev: number | null
+  /** FTE-budget voor deze maand (uit Budgetten-tab) en de variance. null
+   *  betekent: geen budget ingegeven (bv. Software waar geen FTE-budget loopt). */
+  fteBudget: number | null
+  fteVsBudget: number | null
   /** Declarabiliteit deze maand vs gemiddelde van eerdere closed months. */
   declarability: number
   declarabilityPrevAvg: number
+  /** Capaciteits-percentages — actual (afgeleid uit hours-uren) en budget
+   *  (uit Budgetten-tab). Variance = actual - budget in procentpunten.
+   *  null fields = niet beschikbaar (bv. geen budget). */
+  capacityActual: { productive: number; leave: number; nonproductive: number; sick: number } | null
+  capacityBudget: { productive: number | null; leave: number | null; nonproductive: number | null; sick: number | null } | null
   /** Vakantie/ziekte-uren in deze maand. */
   vakantie: number
   ziekte: number
@@ -197,6 +206,10 @@ export function buildReflectionContext(args: {
   getBudget: (bv: EntityName, m: string, key: string) => number
   fteEntries: FteEntry[]
   hoursEntries: HoursEntry[]
+  /** Capaciteit-budget % uit Budgetten-tab (useBudgetStore.overrides) per
+   *  categorie. key ∈ { 'capacity_productive_pct', 'capacity_leave_pct',
+   *  'capacity_nonproductive_pct', 'capacity_sick_pct' }. */
+  getCapacityBudgetPct?: (bv: EntityName, m: string, key: string) => number | undefined
   /** Optionele LE-snapshot uit de Maandafsluiting van targetMonth — als
    *  aanwezig wordt deze waarde gebruikt voor preCloseLe i.p.v. de live
    *  forecast-simulatie. Zo komen de getallen in dit panel exact overeen
@@ -205,7 +218,7 @@ export function buildReflectionContext(args: {
    *  vallen terug op de live simulatie. */
   preCloseLeOverride?: LeSnapshotByBv
 }): ReflectionContext {
-  const { bv, targetMonth, closedMonthsIncl, getMonthly, getBudget, fteEntries, hoursEntries, preCloseLeOverride } = args
+  const { bv, targetMonth, closedMonthsIncl, getMonthly, getBudget, fteEntries, hoursEntries, getCapacityBudgetPct, preCloseLeOverride } = args
   const priorClosed = closedMonthsIncl.filter(m => monthIdx(m) < monthIdx(targetMonth))
   const prevMonth = priorClosed.length > 0 ? priorClosed[priorClosed.length - 1] : null
 
@@ -268,6 +281,11 @@ export function buildReflectionContext(args: {
   const ftePrev = prevMonth ? getFte(bv, prevMonth) : null
   const fteDelta = fteCurrent > 0 && ftePrev != null && ftePrev > 0 ? fteCurrent - ftePrev : null
 
+  // FTE-budget voor deze maand (Budgetten-tab) — variance vs actual.
+  const fteBudgetRaw = fteEntries.find(x => x.bv === bv && x.month === targetMonth)?.fteBudget
+  const fteBudget = fteBudgetRaw != null && fteBudgetRaw > 0 ? fteBudgetRaw : null
+  const fteVsBudget = (fteBudget != null && fteCurrent > 0) ? fteCurrent - fteBudget : null
+
   // Declarabiliteit: deze maand vs gem. eerdere maanden.
   const heCur = getHours(bv, targetMonth)
   const declarability = heCur && (heCur.declarable + heCur.internal) > 0
@@ -283,6 +301,47 @@ export function buildReflectionContext(args: {
   }
   const declarabilityPrevAvg = prevDeclCount > 0 ? prevDeclSum / prevDeclCount : 0
 
+  // ── Capaciteit-actual % vs budget % ───────────────────────────────────
+  // Actual = afgeleid uit de hours-store (zelfde formule als HoursTab/Budgetten):
+  //   productive    = declarable
+  //   leave         = vakantie + overigVerlof
+  //   nonproductive = internal  (missing-uren niet apart in maand-store)
+  //   sick          = ziekte
+  // Noemer = som van alle vier (= totaal aantal uren waarop we %-en bouwen).
+  let capacityActual: ReflectionContext['capacityActual'] = null
+  if (heCur) {
+    const productive    = heCur.declarable
+    const leave         = heCur.vakantie + heCur.overigVerlof
+    const nonproductive = heCur.internal
+    const sick          = heCur.ziekte
+    const totaal = productive + leave + nonproductive + sick
+    if (totaal > 0) {
+      capacityActual = {
+        productive:    (productive / totaal) * 100,
+        leave:         (leave / totaal) * 100,
+        nonproductive: (nonproductive / totaal) * 100,
+        sick:          (sick / totaal) * 100,
+      }
+    }
+  }
+
+  let capacityBudget: ReflectionContext['capacityBudget'] = null
+  if (getCapacityBudgetPct) {
+    const p = getCapacityBudgetPct(bv, targetMonth, 'capacity_productive_pct')
+    const l = getCapacityBudgetPct(bv, targetMonth, 'capacity_leave_pct')
+    const n = getCapacityBudgetPct(bv, targetMonth, 'capacity_nonproductive_pct')
+    const s = getCapacityBudgetPct(bv, targetMonth, 'capacity_sick_pct')
+    // Alleen wegschrijven als minstens één categorie ingegeven is
+    if ((p ?? 0) > 0 || (l ?? 0) > 0 || (n ?? 0) > 0 || (s ?? 0) > 0) {
+      capacityBudget = {
+        productive:    (p ?? 0) > 0 ? p! : null,
+        leave:         (l ?? 0) > 0 ? l! : null,
+        nonproductive: (n ?? 0) > 0 ? n! : null,
+        sick:          (s ?? 0) > 0 ? s! : null,
+      }
+    }
+  }
+
   return {
     month: targetMonth,
     bv,
@@ -290,8 +349,12 @@ export function buildReflectionContext(args: {
     fteDelta,
     fteCurrent,
     ftePrev,
+    fteBudget,
+    fteVsBudget,
     declarability,
     declarabilityPrevAvg,
+    capacityActual,
+    capacityBudget,
     vakantie: heCur?.vakantie ?? 0,
     ziekte: heCur?.ziekte ?? 0,
     prevMonth,
@@ -330,7 +393,7 @@ function pick<T>(arr: T[], month: string, bv: string, qId: string): T {
  *  van elkaar, en blijft dezelfde combinatie stabiel bij refresh. */
 export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
   const out: AiQuestion[] = []
-  const { month, bv, variances, fteDelta, fteCurrent, ftePrev, declarability, declarabilityPrevAvg, vakantie, ziekte, prevMonth, prevMonthRevenue, sameMonth2025Revenue } = ctx
+  const { month, bv, variances, fteDelta, fteCurrent, ftePrev, fteBudget, fteVsBudget, declarability, declarabilityPrevAvg, capacityActual, capacityBudget, vakantie, ziekte, prevMonthRevenue, sameMonth2025Revenue } = ctx
 
   const rev = variances.find(v => v.key === 'netto_omzet')
   const margin = variances.find(v => v.key === 'brutomarge')
@@ -389,41 +452,121 @@ export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
     })
   }
 
-  // ── FTE-mutatie ────────────────────────────────────────────────────────
-  if (fteDelta != null && Math.abs(fteDelta) >= 1) {
-    const dir = fteDelta > 0 ? 'gestegen' : 'gedaald'
-    const sign = fteDelta >= 0 ? '+' : ''
-    const phrasings = fteDelta > 0
+  // ── FTE-vraag (mutatie + vs-budget gecombineerd) ──────────────────────
+  // Eén FTE-vraag per BV/maand om dubbeling te voorkomen. Trigger:
+  //   - significante mutatie t.o.v. vorige maand (|delta| ≥ 1.0), OF
+  //   - significante afwijking t.o.v. budget (|vs-budget| ≥ 0.5)
+  // De vraag toont beide signalen wanneer ze bestaan, met budget-context
+  // erin verwerkt zodat je niet twee keer hoeft te lezen.
+  const hasMomDelta    = fteDelta != null && Math.abs(fteDelta) >= 1
+  const hasBudgetDelta = fteBudget != null && fteVsBudget != null && Math.abs(fteVsBudget) >= 0.5
+  if (hasMomDelta || hasBudgetDelta) {
+    // Bouw een kop-zin die beide signalen meeneemt indien aanwezig.
+    const parts: string[] = []
+    if (hasMomDelta) {
+      const sign = fteDelta! >= 0 ? '+' : ''
+      const dir  = fteDelta! > 0 ? 'gestegen' : 'gedaald'
+      parts.push(`MoM ${sign}${fteDelta!.toFixed(1)} (${ftePrev?.toFixed(1) ?? '?'} → ${fteCurrent.toFixed(1)}, ${dir})`)
+    }
+    if (hasBudgetDelta) {
+      const sign = fteVsBudget! >= 0 ? '+' : ''
+      parts.push(`vs budget ${sign}${fteVsBudget!.toFixed(1)} (actual ${fteCurrent.toFixed(1)} · budget ${fteBudget!.toFixed(1)})`)
+    }
+    const ctx = parts.join(' · ')
+
+    // Phrasings: kies set op basis van wat het sterkste signaal is.
+    const dominantBudget = hasBudgetDelta && (!hasMomDelta || Math.abs(fteVsBudget!) * 1.5 > Math.abs(fteDelta ?? 0))
+    const phrasings = dominantBudget
       ? [
-          `${bv}: FTE is in ${month} met ${sign}${fteDelta.toFixed(1)} ${dir} (${ftePrev?.toFixed(1) ?? '?'} → ${fteCurrent.toFixed(1)})${prevMonth ? ` t.o.v. ${prevMonth}` : ''}. Wat is de oorzaak en is dit eenmalig of structureel? Hoelang verwacht je dit niveau?`,
-          `${bv} hire-update: ${ftePrev?.toFixed(1) ?? '?'} → ${fteCurrent.toFixed(1)} FTE in ${month} (${sign}${fteDelta.toFixed(1)}). Welke rollen zijn ingestapt en hoeveel productiviteit verwacht je in de eerste 1-3 maanden?`,
-          `${bv}: ${sign}${fteDelta.toFixed(1)} FTE erbij in ${month}. Zijn dit consultants, ondersteuning of leiderschap — en is de pijplijn er klaar voor?`,
-          `${bv} ${month}: bezetting groeit met ${sign}${fteDelta.toFixed(1)} FTE. Houdt deze groei aan komende kwartaal of stabiliseert het hier?`,
+          `${bv} ${month}: FTE wijkt af van budget — ${ctx}. Wat verklaart de afwijking en moet het FTE-budget voor de komende maanden bijgesteld?`,
+          `${bv} ${month}: bezetting ${fteVsBudget! > 0 ? 'hoger' : 'lager'} dan begroot (${ctx}). ${fteVsBudget! > 0 ? 'Vroege hire of extra inhuur?' : 'Hire-plan vertraagd, contract-uitloop?'}`,
+          `${bv} ${month}: FTE-budget loopt uit de pas (${ctx}). Pijplijn-vertraging, vacature-status, of versnelde groei?`,
         ]
-      : [
-          `${bv}: FTE is in ${month} met ${sign}${fteDelta.toFixed(1)} ${dir} (${ftePrev?.toFixed(1) ?? '?'} → ${fteCurrent.toFixed(1)})${prevMonth ? ` t.o.v. ${prevMonth}` : ''}. Wat is de oorzaak en is dit eenmalig of structureel? Hoelang verwacht je dit niveau?`,
-          `${bv} ${month}: ${Math.abs(fteDelta).toFixed(1)} FTE eraf (${ftePrev?.toFixed(1) ?? '?'} → ${fteCurrent.toFixed(1)}). Vertrek, contract-einde of intern-doorschuiven? Wordt er vervangen?`,
-          `${bv}: bezetting daalt naar ${fteCurrent.toFixed(1)} in ${month} (${sign}${fteDelta.toFixed(1)}). Wat betekent dit voor de declarable capaciteit volgende maand?`,
-          `${bv} ${month}: krimp van ${Math.abs(fteDelta).toFixed(1)} FTE. Plan om weer aan te vullen of structureel slankere bezetting?`,
-        ]
-    const hints = fteDelta > 0
+      : (fteDelta! > 0
+        ? [
+            `${bv} ${month}: FTE ${ctx}. Welke rollen zijn ingestapt, en hoeveel productiviteit verwacht je in de eerste 1-3 maanden?`,
+            `${bv}: hire-update ${month} (${ctx}). Consultants, ondersteuning of leiderschap — en is de pijplijn er klaar voor?`,
+            `${bv} ${month}: bezetting groeit (${ctx}). Houdt deze groei aan of stabiliseert het hier?`,
+          ]
+        : [
+            `${bv} ${month}: FTE-krimp (${ctx}). Vertrek, contract-einde of intern-doorschuiven? Wordt er vervangen?`,
+            `${bv}: bezetting daalt (${ctx}). Wat betekent dit voor declarable capaciteit volgende maand?`,
+            `${bv} ${month}: ${ctx}. Plan om weer aan te vullen of structureel slankere bezetting?`,
+          ])
+    const hints = dominantBudget
       ? [
-          'Nieuwe hires (welke rol, wanneer instap?), contract-uitbreiding, terug van verlof',
-          'Junior of medior? Verwachte ramp-up tot vol declarabel?',
-          'Worden ze direct ingezet op een specifiek project of zit er bench-tijd tussen?',
+          'Hire-vertraging, contract-einde, freelance-buffer, vroege start nieuwe rol',
+          'Aanpassen FTE-budget komende maanden of voorzie je dit in te halen?',
+          'Heeft dit gevolgen voor de capaciteit-% verdeling (productief/verlof/improductief/ziek)?',
         ]
-      : [
-          'Vertrek (eind contract, opzegging), uitstroom, uitval, end-of-project',
-          'Welke project-impact en wordt overuren of freelance ingezet als overbrugging?',
-          'Vervolg-vacature open of bewuste afslanking?',
-        ]
+      : (fteDelta! > 0
+        ? [
+            'Nieuwe hires (rol, instap-datum?), contract-uitbreiding, terug van verlof',
+            'Junior of medior? Verwachte ramp-up tot vol declarabel?',
+            'Direct op een specifiek project of bench-tijd?',
+          ]
+        : [
+            'Vertrek (eind contract, opzegging), uitstroom, uitval, end-of-project',
+            'Project-impact — wordt overuren of freelance ingezet als overbrugging?',
+            'Vacature open of bewuste afslanking?',
+          ])
+    // Eén vraag-id zodat dezelfde reden niet dubbel wordt opgeslagen.
+    const id = dominantBudget ? 'fte-vs-budget' : 'fte-delta'
     out.push({
-      id: 'fte-delta',
-      question: v(phrasings, 'fte-delta'),
-      hint: v(hints, 'fte-delta-h'),
+      id,
+      question: v(phrasings, id),
+      hint: v(hints, `${id}-h`),
       category: 'fte',
-      weight: Math.abs(fteDelta) * 50000,
+      // Combineer signaal-zwaartes; budget-afwijking weegt iets zwaarder
+      // omdat die direct LE/forecast-aannames raakt.
+      weight: Math.max(
+        hasMomDelta    ? Math.abs(fteDelta!)    * 50000 : 0,
+        hasBudgetDelta ? Math.abs(fteVsBudget!) * 75000 : 0,
+      ),
     })
+  }
+
+  // ── Capaciteits-% vs budget (productief/verlof/improductief/ziek) ─────
+  // Trigger: budget % ingegeven én absolute afwijking ≥ 3pp. Per categorie
+  // één vraag (de belangrijkste — hoogste afwijking — wordt gepickt).
+  if (capacityActual && capacityBudget) {
+    type CapKey = 'productive' | 'leave' | 'nonproductive' | 'sick'
+    const labels: Record<CapKey, string> = { productive: 'Productief', leave: 'Verlof', nonproductive: 'Improductief', sick: 'Ziek' }
+    const cands: Array<{ k: CapKey; actual: number; budget: number; diff: number }> = []
+    for (const k of ['productive', 'leave', 'nonproductive', 'sick'] as CapKey[]) {
+      const b = capacityBudget[k]
+      const a = capacityActual[k]
+      if (b == null) continue
+      const diff = a - b
+      if (Math.abs(diff) >= 3) cands.push({ k, actual: a, budget: b, diff })
+    }
+    if (cands.length > 0) {
+      // Pak de zwaarste afwijking voor de vraag (max 1 capaciteit-vraag per BV
+      // om het panel compact te houden).
+      cands.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
+      const top = cands[0]
+      const dir = top.diff > 0 ? 'hoger' : 'lager'
+      const sign = top.diff >= 0 ? '+' : ''
+      const phrasings = [
+        `${bv} ${month}: ${labels[top.k]} ${top.actual.toFixed(1)}% vs budget ${top.budget.toFixed(1)}% (${sign}${top.diff.toFixed(1)}pp). Welke factor verschuift het uren-mix t.o.v. plan?`,
+        `${bv}: capaciteits-mix in ${month} wijkt af — ${labels[top.k]} ${dir} dan begroot (${sign}${top.diff.toFixed(1)}pp). Bench-tijd, project-pijplijn of vakantie-piek?`,
+        `${bv} ${month}: ${labels[top.k]}-percentage ${sign}${top.diff.toFixed(1)}pp t.o.v. capaciteit-budget. Wordt dit structureel of betreft het deze maand?`,
+      ]
+      const hints = [
+        'Project-pijplijn, onboarding nieuwe hires, opleidingsweken, sales-uren, vakantie-spreiding',
+        'Past het in de seizoens-pattern of bouwt het iets nieuws op?',
+        'Heeft deze afwijking impact op de declarabiliteits-forecast voor de rest van het jaar?',
+      ]
+      out.push({
+        id: 'capacity-vs-budget',
+        question: v(phrasings, 'capacity-vs-budget'),
+        hint: v(hints, 'capacity-vs-budget-h'),
+        category: top.k === 'leave' || top.k === 'sick' ? 'leave' : 'declarability',
+        // Weight ~ pp afwijking × FTE-equivalent zodat het naast omzet/marge
+        // afwijkingen op nuttige plek in de top-3 valt
+        weight: Math.abs(top.diff) * 12000,
+      })
+    }
   }
 
   // ── Declarabiliteit-mutatie ────────────────────────────────────────────
@@ -451,25 +594,59 @@ export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
   }
 
   // ── Vakantie/ziekte ────────────────────────────────────────────────────
+  // Toont actual % naast budget % zodat duidelijk is of dit binnen plan is.
+  // Trigger niet meer simpelweg op uren > 0, maar op afwijking: ofwel
+  // afwezigheid is significant (>15% van capaciteit) ofwel er zit ≥3pp
+  // afwijking t.o.v. capaciteit-budget. Hiermee verdwijnt deze vraag voor
+  // weken waar verlof/ziekte volledig in lijn met budget liggen.
   if (vakantie + ziekte > 0 && prevMonthRevenue > 0) {
-    const phrasings = [
-      `${bv}: in ${month} ${vakantie} uur vakantie en ${ziekte} uur ziekte. Is hier toekomstig nog rekening mee te houden (bv. structurele uitval, langdurig verzuim, naderende vakantieperiode)?`,
-      `${bv} ${month}: ${vakantie + ziekte} uur niet-werkbaar (${vakantie} vakantie / ${ziekte} ziekte). Eenmalig of doorlopend richting komende maanden?`,
-      `${bv}: ${ziekte > vakantie ? 'opvallend veel ziekte' : 'veel vakantie'} deze maand (${vakantie}u + ${ziekte}u). Re-integratietraject lopend of gewone seizoens-uitval?`,
-      `${bv} ${month}: verzuim en verlof samen ${vakantie + ziekte} uur. Heeft dit invloed op project-deadlines of capaciteit volgende maand?`,
-    ]
-    const hints = [
-      'Open-eind ziekte, eenmalige sabbatical, naderende collectieve vakantie',
-      'Welke maand verwacht je dat dit normaliseert?',
-      'Vervanging via freelance overwegen of accepteren?',
-    ]
-    out.push({
-      id: 'leave',
-      question: v(phrasings, 'leave'),
-      hint: v(hints, 'leave-h'),
-      category: 'leave',
-      weight: (vakantie + ziekte) * 80,
-    })
+    const leaveActPct = capacityActual?.leave ?? null
+    const sickActPct  = capacityActual?.sick  ?? null
+    const leaveBudPct = capacityBudget?.leave ?? null
+    const sickBudPct  = capacityBudget?.sick  ?? null
+    const leavePp = leaveActPct != null && leaveBudPct != null ? leaveActPct - leaveBudPct : null
+    const sickPp  = sickActPct  != null && sickBudPct  != null ? sickActPct  - sickBudPct  : null
+    const totalSharePct = (leaveActPct ?? 0) + (sickActPct ?? 0)
+    // Skip als budget bestaat en zowel verlof/ziekte ≤ 1pp afwijking
+    // én niet onnatuurlijk hoog (<15% gecombineerd). Anders altijd vraag.
+    const significantAbsence = totalSharePct >= 15
+    const significantDelta =
+      (leavePp != null && Math.abs(leavePp) >= 3) ||
+      (sickPp  != null && Math.abs(sickPp)  >= 3)
+    const noBudgetCtx = leaveBudPct == null && sickBudPct == null
+    if (significantAbsence || significantDelta || noBudgetCtx) {
+      const fmtPp = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}pp`
+      const budCtx = (leaveBudPct != null || sickBudPct != null)
+        ? ` (budget: ${leaveBudPct != null ? `verlof ${leaveBudPct.toFixed(1)}%` : 'verlof —'} · ${sickBudPct != null ? `ziekte ${sickBudPct.toFixed(1)}%` : 'ziekte —'})`
+        : ''
+      const actCtx = leaveActPct != null && sickActPct != null
+        ? ` — actual: verlof ${leaveActPct.toFixed(1)}%, ziekte ${sickActPct.toFixed(1)}%${budCtx}`
+        : budCtx
+      const deltaParts: string[] = []
+      if (leavePp != null) deltaParts.push(`verlof ${fmtPp(leavePp)}`)
+      if (sickPp  != null) deltaParts.push(`ziekte ${fmtPp(sickPp)}`)
+      const deltaCtx = deltaParts.length > 0 ? ` · Δ vs budget: ${deltaParts.join(', ')}` : ''
+
+      const phrasings = [
+        `${bv} ${month}: ${vakantie} u vakantie + ${ziekte} u ziekte${actCtx}${deltaCtx}. Is dit eenmalig of zet de afwijking richting komende maanden door?`,
+        `${bv}: in ${month} ${vakantie + ziekte} u niet-werkbaar${actCtx}${deltaCtx}. Welke verklaring — sabbatical, langdurig verzuim, naderende collectieve vakantie?`,
+        `${bv} ${month}: verlof + ziekte${actCtx}${deltaCtx}. Heeft dit gevolgen voor project-deadlines of declarable-capaciteit komende maanden?`,
+      ]
+      const hints = [
+        'Vergelijk met capaciteit-budget (Budgetten-tab) — moet de LE voor komende maanden bijgesteld worden?',
+        'Open-eind ziekte, re-integratie, naderende vakantieperiode — eenmalig of structureel?',
+        'Vervanging via freelance overwegen of accepteren?',
+      ]
+      out.push({
+        id: 'leave',
+        question: v(phrasings, 'leave'),
+        hint: v(hints, 'leave-h'),
+        category: 'leave',
+        weight: (vakantie + ziekte) * 80
+              + (leavePp != null ? Math.abs(leavePp) * 5000 : 0)
+              + (sickPp  != null ? Math.abs(sickPp)  * 5000 : 0),
+      })
+    }
   }
 
   // ── Directe personeelskosten ────────────────────────────────────────────

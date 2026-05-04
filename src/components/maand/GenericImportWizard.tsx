@@ -35,7 +35,7 @@ interface SlotMeta {
 
 const SLOT_META: Record<string, SlotMeta> = {
   factuurvolume:           { id: 'factuurvolume',           label: 'Factuurvolume',           icon: '🧾', unit: 'eur' },
-  geschreven_uren:         { id: 'geschreven_uren',         label: 'Geschreven uren YTD',     icon: '⏱',  unit: 'hours' },
+  geschreven_uren:         { id: 'geschreven_uren',         label: 'Werknemertijden YTD',     icon: '⏱',  unit: 'hours' },
   // uren-lijst (slot-id stabiel om bestaande imports niet te breken): de
   // NTF-uren-lijst — Nog Te Factureren netto waarde (€) per BV → OHW.
   uren_lijst:              { id: 'uren_lijst',              label: 'NTF Uren',                icon: '📋', unit: 'eur' },

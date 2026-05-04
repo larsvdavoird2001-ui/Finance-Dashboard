@@ -577,6 +577,34 @@ export interface ParsedHoursEntry {
   overigVerlof: number
 }
 
+/** Resultaat-rij voor de NIEUWE per-week SAP Analytics timesheet: per
+ *  (BV, jaar, ISO-week) de breakdown plus planned-vs-registered uit de
+ *  Missing Hours kolom. */
+export interface ParsedHoursWeekEntry {
+  id: string          // `${bv}-${year}-W${week}` (week zero-padded)
+  bv: BvId
+  year: number
+  week: number        // ISO 1..53
+  /** Maand-code (Jan-26) waar de donderdag van deze week in valt. Gebruikt
+   *  voor aggregatie naar maand-niveau in de bestaande HoursStore. */
+  month: string
+  /** Begin- en einddatum van deze ISO-week (Mon..Sun, ISO 8601). */
+  weekStart: string   // YYYY-MM-DD
+  weekEnd: string     // YYYY-MM-DD
+  declarable: number
+  internal: number
+  vakantie: number
+  ziekte: number
+  overigVerlof: number
+  /** "Geplande werktijd" voor de hele BV in deze week (uit de Missing Hours
+   *  kolom op de Geplande werktijd-rij). */
+  plannedWork: number
+  /** Open missing-hours = plannedWork minus de som van geregistreerde uren
+   *  in de Missing Hours kolom (die als negatieve waarden staan). 0 als
+   *  alles is geregistreerd of de week pas net begint. */
+  missingHoursOpen: number
+}
+
 /** Detecteer of het bestand de SAP Analytics timesheet layout heeft. */
 export function isSapTimesheetHeaders(headers: string[]): boolean {
   const lower = headers.map(h => h.toLowerCase().trim())
@@ -589,6 +617,17 @@ export function isSapTimesheetHeaders(headers: string[]): boolean {
     (has('gewerkte tijd') || has('werktijd')) &&
     has('afwezigheidstijd')
   )
+}
+
+/** Bepaalt of de SAP-timesheet per-week is gestructureerd (nieuw format met
+ *  Kalenderjaar/-week kolom + Missing Hours kolom) of per-maand (oud format). */
+export function detectSapTimesheetPeriodUnit(headers: string[]): 'week' | 'month' {
+  const kj = headers.find(h => h.toLowerCase().includes('kalenderjaar'))
+  if (kj && /week/i.test(kj)) return 'week'
+  // Backup: als er een "Missing Hours" kolom is gaan we ervan uit dat het
+  // ook per-week is — die kolom hoort bij het nieuwe format.
+  if (headers.some(h => /missing\s*hours/i.test(h))) return 'week'
+  return 'month'
 }
 
 /** Parse een getal uit SAP-format: "2.808 u" / "485 u" / "1 u" (dot = thousand sep). */
@@ -611,7 +650,7 @@ function detectBvFromBedrijf(raw: unknown): BvId | null {
   return null
 }
 
-/** "01.2026" → "Jan-26". */
+/** "01.2026" → "Jan-26" (interpreteer als maand-nummer). */
 const MMM_FROM_IDX = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 function parseSapMonth(raw: unknown): string | null {
   const s = String(raw ?? '').trim()
@@ -621,6 +660,48 @@ function parseSapMonth(raw: unknown): string | null {
   const yy = m[2].slice(-2)
   if (idx < 0 || idx > 11) return null
   return `${MMM_FROM_IDX[idx]}-${yy}`
+}
+
+/** "01.2026" → { year: 2026, week: 1 } (interpreteer als ISO-week.jaar). */
+function parseSapWeek(raw: unknown): { year: number; week: number } | null {
+  const s = String(raw ?? '').trim()
+  const m = s.match(/^(\d{1,2})\.(\d{4})$/)
+  if (!m) return null
+  const week = Number(m[1])
+  const year = Number(m[2])
+  if (week < 1 || week > 53) return null
+  return { year, week }
+}
+
+/** Eerste dag (maandag) van ISO-week, in YYYY-MM-DD. Standaard ISO 8601. */
+function isoWeekStart(year: number, week: number): Date {
+  // ISO: dag 4 januari valt altijd in week 1
+  const jan4 = new Date(Date.UTC(year, 0, 4))
+  const jan4Day = (jan4.getUTCDay() + 6) % 7  // ma=0..zo=6
+  const monday = new Date(jan4)
+  monday.setUTCDate(jan4.getUTCDate() - jan4Day + (week - 1) * 7)
+  return monday
+}
+
+/** Geef voor een ISO-week de maand waarin de DONDERDAG van die week valt
+ *  (ISO-conventie: een week "hoort bij" het jaar/maand van zijn donderdag). */
+function isoWeekToMonth(year: number, week: number): string {
+  const monday = isoWeekStart(year, week)
+  const thursday = new Date(monday)
+  thursday.setUTCDate(monday.getUTCDate() + 3)
+  const m = thursday.getUTCMonth()
+  const yy = String(thursday.getUTCFullYear()).slice(-2)
+  return `${MMM_FROM_IDX[m]}-${yy}`
+}
+
+/** YYYY-MM-DD voor begin/einde van ISO-week. */
+function isoWeekRange(year: number, week: number): { start: string; end: string } {
+  const monday = isoWeekStart(year, week)
+  const sunday = new Date(monday)
+  sunday.setUTCDate(monday.getUTCDate() + 6)
+  const fmt = (d: Date) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+  return { start: fmt(monday), end: fmt(sunday) }
 }
 
 /** Is een projecttype declarable? 'Intern TPG' is internal, 'Niet toegewezen'
@@ -716,6 +797,167 @@ export function aggregateSapTimesheet(rows: Record<string, unknown>[], headers: 
   return { entries, parsedCount: parsed, skippedCount: skipped, warnings }
 }
 
+/** Aggregator voor het NIEUWE per-week SAP-formaat. Onderscheidt declarable/
+ *  internal/verlof/ziekte (zelfde categorisatie als de monthly variant) maar
+ *  per ISO-week, en pakt extra de Missing Hours kolom op om
+ *  per BV per week de geplande werktijd en open missing-hours te bepalen.
+ *
+ *  Returned `monthEntries` is dezelfde shape als aggregateSapTimesheet zodat
+ *  het bestaande store-pad (HoursStore op maand-niveau) ongewijzigd blijft. */
+export function aggregateSapTimesheetWeekly(
+  rows: Record<string, unknown>[],
+  headers: string[],
+): {
+  weekEntries: ParsedHoursWeekEntry[]
+  monthEntries: ParsedHoursEntry[]
+  parsedCount: number
+  skippedCount: number
+  warnings: string[]
+} {
+  const warnings: string[] = []
+  const findHeader = (kw: string) => headers.find(h => h.toLowerCase().includes(kw)) ?? ''
+  const colBedrijf = findHeader('bedrijf')
+  const colWeek    = findHeader('kalenderjaar')
+  const colProject = findHeader('projecttype')
+  const colTijd    = findHeader('tijdtype')
+  const colGewerkt = findHeader('gewerkte tijd') || findHeader('werktijd')
+  const colAfw     = findHeader('afwezigheid')
+  const colMiss    = headers.find(h => /missing\s*hours/i.test(h)) ?? ''
+
+  // Per (bv, year, week) een accumulator
+  type Accum = Omit<ParsedHoursWeekEntry, 'plannedWork' | 'missingHoursOpen' | 'id' | 'month' | 'weekStart' | 'weekEnd'> & {
+    plannedWork: number
+    /** Som van geregistreerde negatieve missing-hours waardes — wordt straks
+     *  van plannedWork afgetrokken (= plannedWork + sumNegative, waarbij
+     *  sumNegative ≤ 0). */
+    sumOtherMissing: number
+  }
+  const agg = new Map<string, Accum>()
+  const keyOf = (bv: BvId, y: number, w: number) => `${bv}-${y}-W${String(w).padStart(2, '0')}`
+  const getOrInit = (bv: BvId, year: number, week: number): Accum => {
+    const id = keyOf(bv, year, week)
+    let e = agg.get(id)
+    if (!e) {
+      e = { bv, year, week, declarable: 0, internal: 0, vakantie: 0, ziekte: 0, overigVerlof: 0, plannedWork: 0, sumOtherMissing: 0 }
+      agg.set(id, e)
+    }
+    return e
+  }
+
+  let parsed = 0
+  let skipped = 0
+  for (const row of rows) {
+    const bv = detectBvFromBedrijf(row[colBedrijf])
+    const wk = parseSapWeek(row[colWeek])
+    if (!bv || !wk) { skipped++; continue }
+    const projecttype = String(row[colProject] ?? '').trim()
+    const tijdtype    = String(row[colTijd] ?? '').trim()
+    const gewerkt = parseSapHours(row[colGewerkt])
+    const afw     = parseSapHours(row[colAfw])
+    const miss    = colMiss ? parseSapHours(row[colMiss]) : 0
+
+    const e = getOrInit(bv, wk.year, wk.week)
+
+    // Niet toegewezen → afwezigheid (verlof/ziekte/overig). Speciaal:
+    // Tijdtype 'Geplande werktijd' bevat in de Missing Hours kolom de
+    // capaciteit voor de hele week (positief getal). Werkuren-categorie
+    // niet aangeraakt voor deze rij.
+    if (projecttype.toLowerCase() === 'niet toegewezen') {
+      const t = tijdtype.toLowerCase()
+      if (t === 'geplande werktijd') {
+        // Missing Hours kolom = positief getal = totale capaciteit
+        e.plannedWork += miss
+      } else {
+        const kind = classifyVerlofType(tijdtype)
+        if (kind === 'vakantie') e.vakantie += afw
+        else if (kind === 'ziekte') e.ziekte += afw
+        else e.overigVerlof += afw
+        // Missing Hours kolom op een verlof-rij is een negatieve correctie
+        // (geregistreerd verlof). Telt mee bij sumOtherMissing.
+        if (miss < 0) e.sumOtherMissing += miss
+      }
+      parsed++
+      continue
+    }
+
+    // Werkuren (declarable / internal)
+    const cls = classifyWerkuurRow(projecttype)
+    if (!cls) { skipped++; continue }
+    if (cls === 'declarable') e.declarable += gewerkt
+    else e.internal += gewerkt
+    // Missing Hours-correctie voor werkuren is ook negatief
+    if (miss < 0) e.sumOtherMissing += miss
+    parsed++
+  }
+
+  if (agg.size === 0 && rows.length > 0) {
+    warnings.push('Geen geldige BV/week-combinaties gevonden — controleer of de Kalenderjaar/-week kolom aanwezig is en de regels herkend worden.')
+  }
+  if (!colMiss && rows.length > 0) {
+    warnings.push('Geen "Missing Hours" kolom gevonden — Open missing-hours per week worden niet berekend.')
+  }
+
+  // Bouw week-entries (incl. month-mapping + datums). We bewaren 2-decimalen
+  // precisie zodat SAP's halve/kwart uren (bv. 29,25) niet wegvallen door
+  // afronding op heel uur.
+  const r2 = (n: number): number => Math.round(n * 100) / 100
+  const weekEntries: ParsedHoursWeekEntry[] = []
+  for (const a of agg.values()) {
+    const month = isoWeekToMonth(a.year, a.week)
+    const range = isoWeekRange(a.year, a.week)
+    // Open missing-hours = geplande werktijd + som_negatieve_miss-waardes.
+    // sumOtherMissing is altijd ≤ 0; als de week volledig geboekt is komt
+    // dit op ~0 uit. Cap op 0: weken met over-registratie tonen géén
+    // negatief getal (per user-eis: "alle weken waar negatief uitkomt
+    // moet gewoon 0 worden").
+    const open = Math.max(0, a.plannedWork + a.sumOtherMissing)
+    weekEntries.push({
+      id: keyOf(a.bv, a.year, a.week),
+      bv: a.bv,
+      year: a.year,
+      week: a.week,
+      month,
+      weekStart: range.start,
+      weekEnd:   range.end,
+      declarable:   r2(a.declarable),
+      internal:     r2(a.internal),
+      vakantie:     r2(a.vakantie),
+      ziekte:       r2(a.ziekte),
+      overigVerlof: r2(a.overigVerlof),
+      plannedWork:  r2(a.plannedWork),
+      missingHoursOpen: r2(open),
+    })
+  }
+
+  // Aggregeer naar maand voor backward-compat met de bestaande maand-store
+  // (declarable/internal/vakantie/ziekte/overigVerlof, géén plannedWork).
+  const monthAcc = new Map<string, ParsedHoursEntry>()
+  for (const w of weekEntries) {
+    const id = `${w.bv}-${w.month}`
+    let m = monthAcc.get(id)
+    if (!m) {
+      m = { id, bv: w.bv, month: w.month, declarable: 0, internal: 0, vakantie: 0, ziekte: 0, overigVerlof: 0 }
+      monthAcc.set(id, m)
+    }
+    m.declarable   += w.declarable
+    m.internal     += w.internal
+    m.vakantie     += w.vakantie
+    m.ziekte       += w.ziekte
+    m.overigVerlof += w.overigVerlof
+  }
+  // Rond ook hier op 2 decimalen — voorkomt floating-point ruis bij sommen
+  const monthEntries = Array.from(monthAcc.values()).map(m => ({
+    ...m,
+    declarable:   r2(m.declarable),
+    internal:     r2(m.internal),
+    vakantie:     r2(m.vakantie),
+    ziekte:       r2(m.ziekte),
+    overigVerlof: r2(m.overigVerlof),
+  }))
+
+  return { weekEntries, monthEntries, parsedCount: parsed, skippedCount: skipped, warnings }
+}
+
 // ── Publieke interface ────────────────────────────────────────────────────────
 export interface ParseResult {
   perBv: Record<BvId, number>
@@ -746,6 +988,10 @@ export interface ParseResult {
    *  timesheet layout herkent (Bedrijf / Kalenderjaar-maand / Projecttype /
    *  Tijdtype / Gewerkte tijd / Afwezigheidstijd). */
   hoursEntries?: ParsedHoursEntry[]
+  /** Geparseerde geschreven-uren per BV × ISO-week × categorie + Missing
+   *  Hours (open). Alleen gevuld als de SAP-export het nieuwe per-week
+   *  formaat heeft (Kalenderjaar/-week kolom + Missing Hours kolom). */
+  hoursWeekEntries?: ParsedHoursWeekEntry[]
   /** Gedetailleerde bucket-tellingen zodat de UI volledige verantwoording
    *  kan tonen: hoe zijn rowCount rijen opgesplitst? Alleen gevuld voor
    *  missing_hours flow. */
@@ -1347,16 +1593,40 @@ export async function parseImportFile(
         }
 
         // ── Geschreven uren (SAP Analytics timesheet): structured per
-        // BV × maand × projecttype → declarable / internal / verlof
+        // BV × maand/week × projecttype → declarable / internal / verlof
         if (slotId === 'geschreven_uren' && isSapTimesheetHeaders(headers)) {
+          const unit = detectSapTimesheetPeriodUnit(headers)
+          if (unit === 'week') {
+            // Nieuw per-week formaat met Missing Hours kolom
+            const { weekEntries, monthEntries, parsedCount: pc, skippedCount: sc, warnings: ws } =
+              aggregateSapTimesheetWeekly(rows, headers)
+            const perBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
+            for (const e of monthEntries) {
+              perBv[e.bv] += e.declarable + e.internal + e.vakantie + e.ziekte + e.overigVerlof
+            }
+            const totalAmount = perBv.Consultancy + perBv.Projects + perBv.Software
+            resolve({
+              perBv,
+              totalAmount,
+              rowCount: rows.length,
+              parsedCount: pc,
+              skippedCount: sc,
+              detectedAmountCol: '(gewerkte tijd + afwezigheidstijd · per week)',
+              detectedBvCol: '(Bedrijf)',
+              headers,
+              preview: rows.slice(0, 5) as Record<string, unknown>[],
+              rawRows: rows as Record<string, unknown>[],
+              warnings: ws,
+              unmatchedCount: 0,
+              hoursEntries: monthEntries,
+              hoursWeekEntries: weekEntries,
+            })
+            return
+          }
+
+          // Oud per-maand formaat (legacy)
           const { entries, parsedCount: pc, skippedCount: sc, warnings: ws } =
             aggregateSapTimesheet(rows, headers)
-          // perBv-totaal = ALLE uren in het bestand per BV (gewerkte tijd +
-          // afwezigheidstijd) — dat geeft de gebruiker direct zicht op het
-          // totaal aantal uren per BV in de upload, ook al is dat een mix
-          // van declarable, internal en verlof. De feitelijke split per
-          // categorie blijft beschikbaar in `hoursEntries` voor de Hours-
-          // store en het Uren Dashboard.
           const perBv: Record<BvId, number> = { Consultancy: 0, Projects: 0, Software: 0 }
           for (const e of entries) {
             perBv[e.bv] += e.declarable + e.internal + e.vakantie + e.ziekte + e.overigVerlof

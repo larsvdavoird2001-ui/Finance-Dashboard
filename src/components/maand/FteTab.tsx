@@ -53,11 +53,11 @@ export function FteTab() {
   const months = useMemo(() => monthsForYear(year), [year])
   const prevYear = year === '2026' ? '2025' : '2024'
 
-  const getVal = (bv: BvId, month: string, key: 'fte' | 'headcount' | 'fteBudget' | 'headcountBudget'): number | undefined => {
+  const getVal = (bv: BvId, month: string, key: 'fte' | 'headcount'): number | undefined => {
     return entries.find(e => e.bv === bv && e.month === month)?.[key]
   }
 
-  const totalRow = (key: 'fte' | 'headcount' | 'fteBudget' | 'headcountBudget') =>
+  const totalRow = (key: 'fte' | 'headcount') =>
     months.map(m => {
       const vals = BVS.map(bv => getVal(bv, m, key)).filter((v): v is number => v != null)
       if (vals.length === 0) return null
@@ -66,24 +66,17 @@ export function FteTab() {
 
   const isFte = metric === 'fte'
   const actualKey: 'fte' | 'headcount' = metric
-  const budgetKey: 'fteBudget' | 'headcountBudget' = metric === 'fte' ? 'fteBudget' : 'headcountBudget'
   const unit = isFte ? 'FTE' : 'Headcount'
 
-  // ── Analyse: welke actuals/budgets zijn er? ───────────────────────────────
-  // Tel ingevulde actuals en budgets voor huidig jaar+metric
-  const actualsFilled = months.map(m => BVS.map(bv => getVal(bv, m, actualKey)).some(v => v != null))
-  const budgetsFilled = months.map(m => BVS.map(bv => getVal(bv, m, budgetKey)).some(v => v != null))
-  const anyActual = actualsFilled.some(x => x)
-  const anyBudget = budgetsFilled.some(x => x)
-  const allBudgetFilledForActualsMonths = actualsFilled.every((a, i) => !a || budgetsFilled[i])
-
-  // Laatste maand met actuals per BV
+  // ── Per-BV: laatste maand met actuals ─────────────────────────────────
   const lastMonthWithActuals = (bv: BvId): { month: string; idx: number } | null => {
     for (let i = months.length - 1; i >= 0; i--) {
       if (getVal(bv, months[i], actualKey) != null) return { month: months[i], idx: i }
     }
     return null
   }
+
+  const anyActual = BVS.some(bv => lastMonthWithActuals(bv) !== null)
 
   return (
     <div className="page">
@@ -122,49 +115,21 @@ export function FteTab() {
             </div>
           </div>
           <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)' }}>
-            Per BV per maand — actuals + budget + delta. Alleen ingevulde data wordt vergeleken.
+            Alleen actuals — vul {unit} per BV per maand in. Budget &amp; capaciteit-% staan in de Budgetten-tab.
           </span>
         </div>
       </div>
 
-      {/* ── Analyse card: MoM + YoY + budget-status ─────────────── */}
+      {/* ── Analyse card: MoM + YoY (geen budget-delta) ─────────── */}
       {anyActual && (
         <div className="card" style={{ overflow: 'visible' }}>
           <div className="card-hdr">
             <span className="card-title">Analyse — {unit} {year}</span>
             <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
-              Alleen ingevulde maanden worden met elkaar vergeleken
+              Month-over-month + year-over-year per BV
             </span>
           </div>
           <div style={{ padding: '12px 14px' }}>
-
-            {/* Budget-status warning */}
-            {!anyBudget && (
-              <div style={{
-                padding: '10px 12px', borderRadius: 7, marginBottom: 12,
-                background: 'var(--bd-amber)', border: '1px solid var(--amber)',
-                fontSize: 12, color: 'var(--t1)', display: 'flex', gap: 10, alignItems: 'flex-start',
-              }}>
-                <span style={{ fontSize: 16 }}>⚠</span>
-                <div>
-                  <strong style={{ color: 'var(--amber)' }}>Budget {unit} voor {year} is nog niet ingevuld.</strong>
-                  {' '}
-                  Vul hieronder de budgetregels in om actuals-vs-budget analyse en sturing mogelijk te maken.
-                  Zolang budget leeg is, tonen we alleen month-over-month en year-over-year vergelijkingen.
-                </div>
-              </div>
-            )}
-            {anyBudget && !allBudgetFilledForActualsMonths && (
-              <div style={{
-                padding: '8px 12px', borderRadius: 7, marginBottom: 12,
-                background: 'var(--bd-amber)', border: '1px solid var(--amber)',
-                fontSize: 11, color: 'var(--t1)',
-              }}>
-                ⚠ Budget is niet volledig ingevuld voor alle maanden met actuals — delta's worden alleen getoond waar beide waardes bestaan.
-              </div>
-            )}
-
-            {/* Per-BV insight blocks */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
               {BVS.map(bv => {
                 const last = lastMonthWithActuals(bv)
@@ -180,15 +145,11 @@ export function FteTab() {
                 const prevVal = prevMonth ? getVal(bv, prevMonth, actualKey) : null
                 const mom = prevVal != null ? currentVal - prevVal : null
 
-                // Same month vorig jaar — zelfde suffix '-25' of '-26' vervangen
-                const monthName = last.month.slice(0, 3)  // 'Jan', 'Feb', etc
+                // Same month vorig jaar
+                const monthName = last.month.slice(0, 3)
                 const prevYearMonth = `${monthName}-${prevYear === '2024' ? '24' : '25'}`
                 const yoyVal = getVal(bv, prevYearMonth, actualKey)
                 const yoy = yoyVal != null ? currentVal - yoyVal : null
-
-                // Budget-delta alleen als budget voor deze maand is ingevuld
-                const budgetVal = getVal(bv, last.month, budgetKey)
-                const budgetDelta = budgetVal != null ? currentVal - budgetVal : null
 
                 return (
                   <div key={bv} style={{
@@ -232,19 +193,6 @@ export function FteTab() {
                       ) : (
                         <div style={{ color: 'var(--t3)' }}>— geen YoY vergelijking ({prevYearMonth} niet ingevuld)</div>
                       )}
-
-                      {budgetDelta != null ? (
-                        <div>
-                          <span style={{ color: 'var(--t3)' }}>Δ vs budget: </span>
-                          <strong style={{ color: budgetDelta === 0 ? 'var(--t2)' : budgetDelta <= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--mono)' }}>
-                            {fmtDelta(budgetDelta, isFte)}
-                          </strong>
-                        </div>
-                      ) : (
-                        <div style={{ color: 'var(--t3)', fontStyle: 'italic' }}>
-                          — budget {last.month} nog niet ingevuld
-                        </div>
-                      )}
                     </div>
                   </div>
                 )
@@ -254,29 +202,16 @@ export function FteTab() {
         </div>
       )}
 
-      {/* ── Per-BV tabellen ─────────────────────────────────────── */}
+      {/* ── Per-BV tabellen — alleen actuals ────────────────────── */}
       {BVS.map(bv => {
         const actuals = months.map(m => getVal(bv, m, actualKey))
-        const budgets = months.map(m => getVal(bv, m, budgetKey))
-        const deltas = months.map((_, i) => {
-          const a = actuals[i]; const b = budgets[i]
-          if (a == null || b == null) return null
-          return a - b
-        })
         const hasActuals = actuals.some(v => v != null)
-        const hasBudget = budgets.some(v => v != null)
-        const hasDelta = deltas.some(v => v != null)
 
         return (
           <div key={bv} className="card" style={{ overflow: 'visible' }}>
             <div className="card-hdr">
               <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: BV_COLORS[bv], marginRight: 8 }} />
               <span className="card-title">{bv}</span>
-              {!hasBudget && (
-                <span style={{ marginLeft: 10, fontSize: 10, color: 'var(--amber)', background: 'var(--bd-amber)', padding: '2px 7px', borderRadius: 3, border: '1px solid var(--amber)' }}>
-                  ⚠ budget ontbreekt
-                </span>
-              )}
               {!hasActuals && (
                 <span style={{ marginLeft: 10, fontSize: 10, color: 'var(--t3)' }}>Geen actuals voor {year}</span>
               )}
@@ -308,7 +243,6 @@ export function FteTab() {
                             onBlur={e => {
                               const raw = e.target.value.trim()
                               if (raw === '') {
-                                // Leeg → clear deze waarde (als die gezet was).
                                 if (v != null) upsertEntry(bv, m, { [actualKey]: undefined })
                                 return
                               }
@@ -322,59 +256,6 @@ export function FteTab() {
                       )
                     })}
                   </tr>
-                  {/* Budget-rij */}
-                  <tr>
-                    <td style={{ padding: '6px 12px', fontWeight: 600, color: 'var(--t2)', position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 1 }}>
-                      Budget
-                      {!hasBudget && <span style={{ marginLeft: 6, fontSize: 9, color: 'var(--amber)' }}>(nog invullen)</span>}
-                    </td>
-                    {months.map(m => {
-                      const v = getVal(bv, m, budgetKey)
-                      return (
-                        <td key={m} style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)' }}>
-                          <input
-                            key={`${bv}-${m}-bud-${v ?? ''}`}
-                            className="ohw-inp"
-                            style={{ width: 80, textAlign: 'right', fontFamily: 'var(--mono)', color: 'var(--t2)' }}
-                            defaultValue={v != null ? (isFte ? fmtFte(v) : fmtHc(v)) : ''}
-                            placeholder="—"
-                            onBlur={e => {
-                              const raw = e.target.value.trim()
-                              if (raw === '') {
-                                if (v != null) upsertEntry(bv, m, { [budgetKey]: undefined })
-                                return
-                              }
-                              const parsed = parseNumber(raw)
-                              if (parsed === null) return
-                              upsertEntry(bv, m, { [budgetKey]: parsed })
-                            }}
-                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                          />
-                        </td>
-                      )
-                    })}
-                  </tr>
-                  {/* Δ-rij — alleen tonen als er ÜBERHAUPT een delta berekenbaar is */}
-                  {hasDelta && (
-                    <tr style={{ background: 'var(--bg3)' }}>
-                      <td style={{ padding: '6px 12px', fontWeight: 700, position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 1 }}>
-                        Δ (Actuals − Budget)
-                      </td>
-                      {deltas.map((d, i) => (
-                        <td
-                          key={i}
-                          className="mono r"
-                          style={{
-                            padding: '5px 8px', fontWeight: 700,
-                            color: d == null ? 'var(--t3)' : d === 0 ? 'var(--t2)' : d <= 0 ? 'var(--green)' : 'var(--red)',
-                          }}
-                          title={d == null ? 'Actuals of budget niet ingevuld — geen delta' : undefined}
-                        >
-                          {d == null ? '—' : fmtDelta(d, isFte)}
-                        </td>
-                      ))}
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
@@ -382,7 +263,7 @@ export function FteTab() {
         )
       })}
 
-      {/* ── Totaal alle BV's ────────────────────────────────────── */}
+      {/* ── Totaal alle BV's — alleen actuals ───────────────────── */}
       <div className="card" style={{ overflow: 'visible' }}>
         <div className="card-hdr">
           <span className="card-title">Totaal alle BV's — {unit}</span>
@@ -405,39 +286,13 @@ export function FteTab() {
                   <td key={i} className="mono r" style={{ padding: '5px 8px', fontWeight: 600 }}>{isFte ? fmtFte(v) : fmtHc(v)}</td>
                 ))}
               </tr>
-              {anyBudget && (
-                <tr>
-                  <td style={{ padding: '6px 12px', fontWeight: 600, color: 'var(--t2)', position: 'sticky', left: 0, background: 'var(--bg2)' }}>Budget</td>
-                  {totalRow(budgetKey).map((v, i) => (
-                    <td key={i} className="mono r" style={{ padding: '5px 8px', fontWeight: 600, color: 'var(--t2)' }}>{isFte ? fmtFte(v) : fmtHc(v)}</td>
-                  ))}
-                </tr>
-              )}
-              {anyBudget && (
-                <tr style={{ background: 'var(--bg3)' }}>
-                  <td style={{ padding: '6px 12px', fontWeight: 700, position: 'sticky', left: 0, background: 'var(--bg3)' }}>Δ</td>
-                  {months.map((_, i) => {
-                    const a = totalRow(actualKey)[i]
-                    const b = totalRow(budgetKey)[i]
-                    const d = (a != null && b != null) ? a - b : null
-                    return (
-                      <td key={i} className="mono r" style={{
-                        padding: '5px 8px', fontWeight: 700,
-                        color: d == null ? 'var(--t3)' : d === 0 ? 'var(--t2)' : d <= 0 ? 'var(--green)' : 'var(--red)',
-                      }}>
-                        {d == null ? '—' : fmtDelta(d, isFte)}
-                      </td>
-                    )
-                  })}
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--t3)', padding: '8px 0' }}>
-        💡 <strong>Tip:</strong> een kostenreductie die samenvalt met een daling in FTE/Headcount is een signaal dat de besparing door lagere bezetting komt, niet door efficiëntie. Open de Budget vs Actuals tab om de koppeling tussen FTE en OPEX te zien.
+        💡 <strong>Budget &amp; capaciteit-%:</strong> ga naar de Budgetten-tab om FTE-budgetten en de verdeling productief / verlof / improductief / ziek per BV per maand vast te leggen.
       </div>
     </div>
   )
