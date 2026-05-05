@@ -233,9 +233,33 @@ export function UsersTab({
           </form>
 
           <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 10, lineHeight: 1.55 }}>
-            De ontvanger krijgt een e-mail met een eenmalige login-link. Bij eerste login kan de gebruiker zelf een wachtwoord kiezen.
-            Selecteer een BV om deze gebruiker te beperken tot data van die business unit.
+            De ontvanger krijgt een uitnodigings-mail met een eenmalige link. Bij de eerste login moet de gebruiker
+            een eigen wachtwoord aanmaken; daarna kan hij/zij voortaan met email + wachtwoord inloggen.
+            Selecteer een BV om deze gebruiker te beperken tot data van één business unit.
           </div>
+
+          <details style={{ marginTop: 8, fontSize: 11, color: 'var(--t3)' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--t2)' }}>
+              📭 Mail komt niet aan? Diagnose-tips
+            </summary>
+            <ol style={{ margin: '6px 0 0 18px', padding: 0, lineHeight: 1.65 }}>
+              <li>Check eerst de spam-folder van de ontvanger (mail van <code>noreply@mail.app.supabase.io</code>).</li>
+              <li>
+                Open Supabase dashboard → <strong>Logs → Auth Logs</strong>. Daar staat of de mail überhaupt is afgevuurd, of er een
+                rate-limit (<code>429</code>) is geraakt.
+              </li>
+              <li>
+                <strong>Default-SMTP rate-limit</strong> is slechts ~2 mails per uur. Configureer een eigen SMTP onder
+                Auth → <em>SMTP Settings</em> (Resend / Postmark / SendGrid hebben gratis tiers).
+              </li>
+              <li>
+                Voor robuuste server-side admin-invites: zet <code>SUPABASE_URL</code> en
+                <code> SUPABASE_SERVICE_ROLE_KEY</code> in de Vercel env vars en redeploy.
+                De app gebruikt dan automatisch de Admin-Invite API i.p.v. de magic-link flow.
+              </li>
+              <li>Egress-limiet (database bandbreedte) blokkeert e-mails NIET — dat zijn aparte limieten.</li>
+            </ol>
+          </details>
 
           {error && (
             <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 6, background: 'var(--bd-red)', border: '1px solid var(--red)', color: 'var(--red)', fontSize: 11 }}>

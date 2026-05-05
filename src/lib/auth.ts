@@ -240,23 +240,88 @@ export function useAuth(): AuthState & {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(norm)) {
       return { error: 'Ongeldig e-mailadres' }
     }
+
+    // Strategie:
+    //  • Stap A — probeer server-side admin invite via /api/invite. Die endpoint
+    //    gebruikt de service-role key, doet de user_profiles upsert + roept de
+    //    Supabase Admin Invite API aan. Voordeel: gebruikt de "Invite User"
+    //    email-template (i.p.v. Magic Link) en is niet onderhevig aan de
+    //    strikte 2/u rate-limit van signInWithOtp op default-SMTP.
+    //  • Stap B — fallback op de oude client-side flow:
+    //      1) upsertUserProfile met needs_password=true
+    //      2) supabase.auth.signInWithOtp (magic-link)
+    //    Wordt gebruikt bij:
+    //      - 501 NOT_CONFIGURED  → service-role env vars ontbreken in Vercel
+    //      - 404 / netwerk error → endpoint niet gedeployed (lokale dev)
+    //      - 409 ALREADY_REGISTERED → user bestaat al in auth.users; signInWithOtp
+    //        stuurt dan een login-link en de needs_password-flag (door de server
+    //        al gezet) zorgt dat hij alsnog op SetPasswordPage uitkomt.
+
+    type InviteResult = { ok: boolean; status: number; body: any }
+    const tryServerInvite = async (): Promise<InviteResult | null> => {
+      try {
+        const { data: { session: s } } = await supabase.auth.getSession()
+        const token = s?.access_token
+        if (!token) return null  // niet ingelogd → onmogelijk
+        const resp = await fetch('/api/invite', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            email: norm,
+            role,
+            bv: role === 'admin' ? null : (bv ?? null),
+            redirectTo: window.location.origin,
+          }),
+        })
+        // 404 = endpoint bestaat niet (lokale `vite dev` zonder vercel dev)
+        if (resp.status === 404) return null
+        let body: any = null
+        try { body = await resp.json() } catch { /* niet-JSON */ }
+        return { ok: resp.ok, status: resp.status, body }
+      } catch (e) {
+        console.warn('[auth] /api/invite failed:', e)
+        return null  // netwerk-fout → fallback
+      }
+    }
+
+    const serverResult = await tryServerInvite()
+
+    if (serverResult?.ok) {
+      // Server heeft alles gedaan: profile-upsert + invite mail verstuurd.
+      const profiles = await fetchUserProfiles()
+      setState(s => ({ ...s, profiles }))
+      return { error: null }
+    }
+
+    // Server gaf wel een respons, maar geen succes.
+    if (serverResult && !serverResult.ok) {
+      const code = serverResult.body?.error
+      const msg  = serverResult.body?.message ?? ''
+      // ALREADY_REGISTERED → fall-through naar client-side OTP (magic-link)
+      // NOT_CONFIGURED → fall-through naar client-side OTP
+      if (code !== 'ALREADY_REGISTERED' && code !== 'NOT_CONFIGURED') {
+        // Echte fout → terug aan UI
+        if (serverResult.status === 429) {
+          return { error: 'Rate-limit bereikt bij Supabase email-service. Wacht een uur of configureer een custom SMTP-provider in Supabase Auth → SMTP Settings.' }
+        }
+        return { error: msg || `Invite faalde (HTTP ${serverResult.status})` }
+      }
+    }
+
+    // -- Fallback: client-side flow (oude pad) ----------------------------
     const inviter = state.user?.email ?? 'admin'
-    // 1. Profiel aanmaken / activeren — met needs_password flag zodat de user
-    //    bij eerste login een wachtwoord moet kiezen.
     const up = await upsertUserProfile({
       email: norm,
       role,
       active: true,
       needsPassword: true,
       invitedBy: inviter,
-      // Admins hebben nooit een BV-restrictie. Voor 'user' alleen zetten als
-      // expliciet meegegeven; undefined laat de bestaande waarde staan
-      // (bij hersturen van de uitnodiging).
       bv: role === 'admin' ? null : bv,
     })
     if (up.error) return { error: up.error }
-    // 2. Magic-link verzenden zodat de user zichzelf kan inloggen +
-    //    daarna een wachtwoord kan instellen.
     const { error } = await supabase.auth.signInWithOtp({
       email: norm,
       options: {
@@ -264,8 +329,14 @@ export function useAuth(): AuthState & {
         emailRedirectTo: window.location.origin,
       },
     })
-    if (error) return { error: error.message }
-    // Refresh profielenlijst
+    if (error) {
+      const m = error.message || ''
+      // Maak rate-limit fouten leesbaar voor de admin
+      if (/rate.?limit/i.test(m) || /too.?many/i.test(m)) {
+        return { error: `Supabase email rate-limit bereikt: ${m}. Configureer custom SMTP in Supabase Auth → SMTP Settings, of zet SUPABASE_SERVICE_ROLE_KEY in Vercel om admin-invite te gebruiken.` }
+      }
+      return { error: m }
+    }
     const profiles = await fetchUserProfiles()
     setState(s => ({ ...s, profiles }))
     return { error: null }
