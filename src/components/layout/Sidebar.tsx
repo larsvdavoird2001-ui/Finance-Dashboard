@@ -10,7 +10,7 @@ interface Props {
   onSignOut?: () => void | Promise<void>
 }
 
-const items: { id: TabId; ic: string; label: string; group: string; adminOnly?: boolean }[] = [
+const items: { id: TabId; ic: string; label: string; group: string; adminOnly?: boolean; hideForViewer?: boolean }[] = [
   // CFO Dashboards
   { id: 'dashboard',  ic: '🏠', label: 'Executive Overview',   group: 'CFO Dashboard' },
   { id: 'hours',      ic: '⏱',  label: 'Uren Dashboard',       group: 'CFO Dashboard' },
@@ -19,14 +19,21 @@ const items: { id: TabId; ic: string; label: string; group: string; adminOnly?: 
   { id: 'budgets', ic: '💼', label: 'Budgetten',          group: 'Rapportage' },
   // Input
   { id: 'ohw',   ic: '📋', label: 'OHW Overzicht',   group: 'Input' },
-  { id: 'maand', ic: '📅', label: 'Maandafsluiting',  group: 'Input' },
+  // Maandafsluiting is alleen relevant voor users die data invullen/goedkeuren —
+  // viewers (alleen-lezen) hebben er niets te zoeken.
+  { id: 'maand', ic: '📅', label: 'Maandafsluiting',  group: 'Input', hideForViewer: true },
   // Beheer (admin-only)
   { id: 'users',   ic: '👥', label: 'Gebruikers', group: 'Beheer', adminOnly: true },
   { id: 'backups', ic: '💾', label: 'Backups',    group: 'Beheer', adminOnly: true },
 ]
 
 export function Sidebar({ active, onNav, userEmail, isAdmin, userRole, onSignOut }: Props) {
-  const visibleItems = items.filter(i => !i.adminOnly || isAdmin)
+  const isViewer = !isAdmin && userRole === 'viewer'
+  const visibleItems = items.filter(i => {
+    if (i.adminOnly && !isAdmin) return false
+    if (i.hideForViewer && isViewer) return false
+    return true
+  })
   const groups = [...new Set(visibleItems.map(i => i.group))]
   return (
     <nav className="sb">

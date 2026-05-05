@@ -241,18 +241,24 @@ export function BudgetsTab({ filter: _filter }: Props) {
   // (waardoor de LE-lijnen onterecht zouden verdwijnen).
   const finalizedMonths = useFinStore(s => s.finalized)
 
-  const [chartMetric,  setChartMetric]  = useState<string>('netto_omzet')
-  const [expandedBvs,  setExpandedBvs]  = useState<Set<EntityName | 'Totaal'>>(new Set(['Consultancy']))
-  // Chart-filters: welke BVs tonen + welke series (budget / LE)
-  const [chartBvs,     setChartBvs]     = useState<Set<EntityName>>(new Set(ENTITIES))
-  const [showBudget,   setShowBudget]   = useState<boolean>(true)
-  const [showLe,       setShowLe]       = useState<boolean>(true)
-  const [showTotal,    setShowTotal]    = useState<boolean>(false)
-
   const months = BUDGET_MONTHS_2026
   const activeEntities: EntityName[] = _lockedBv
     ? (ENTITIES.includes(_lockedBv as EntityName) ? [_lockedBv as EntityName] : [])
     : ENTITIES
+  // Toon "Totaal alle BVs"-aggregaten alleen voor users zonder BV-restrictie.
+  // Een Projects-only viewer ziet dus geen Totaal-knop, geen Totaal-accordion
+  // en geen totaal-rij in de header.
+  const showTotalScope = !_lockedBv
+
+  const [chartMetric,  setChartMetric]  = useState<string>('netto_omzet')
+  const [expandedBvs,  setExpandedBvs]  = useState<Set<EntityName | 'Totaal'>>(
+    new Set([activeEntities[0] ?? 'Consultancy'] as Array<EntityName | 'Totaal'>)
+  )
+  // Chart-filters: welke BVs tonen + welke series (budget / LE)
+  const [chartBvs,     setChartBvs]     = useState<Set<EntityName>>(new Set(activeEntities))
+  const [showBudget,   setShowBudget]   = useState<boolean>(true)
+  const [showLe,       setShowLe]       = useState<boolean>(true)
+  const [showTotal,    setShowTotal]    = useState<boolean>(false)
 
   // Map Apr-26 → Apr-25 (voor seizoenspatroon vanuit vorig jaar)
   const toPY = (m: string): string => {
@@ -773,10 +779,12 @@ export function BudgetsTab({ filter: _filter }: Props) {
             Per BV uitklapbaar · alle P&L regels bewerkbaar · aggregaten (netto-omzet, directe kosten, brutomarge, EBITDA, EBIT) auto-afgeleid uit subposten
           </div>
         </div>
-        <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)', textAlign: 'right' }}>
-          <div>Totaal netto-omzet: <strong style={{ color: 'var(--brand)' }}>{fmt(ENTITIES.reduce((s, e) => s + fyBudget(e, 'netto_omzet'), 0))}</strong></div>
-          <div style={{ marginTop: 2 }}>Totaal EBITDA: <strong style={{ color: 'var(--green)' }}>{fmt(ENTITIES.reduce((s, e) => s + fyBudget(e, 'ebitda'), 0))}</strong></div>
-        </div>
+        {showTotalScope && (
+          <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)', textAlign: 'right' }}>
+            <div>Totaal netto-omzet: <strong style={{ color: 'var(--brand)' }}>{fmt(ENTITIES.reduce((s, e) => s + fyBudget(e, 'netto_omzet'), 0))}</strong></div>
+            <div style={{ marginTop: 2 }}>Totaal EBITDA: <strong style={{ color: 'var(--green)' }}>{fmt(ENTITIES.reduce((s, e) => s + fyBudget(e, 'ebitda'), 0))}</strong></div>
+          </div>
+        )}
       </div>
 
       {/* Chart card — hoofdmetric selectie + BV/serie-filters */}
@@ -799,9 +807,9 @@ export function BudgetsTab({ filter: _filter }: Props) {
         <div style={{ padding: '8px 14px', display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid var(--bd)' }}>
           <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>Filters:</span>
 
-          {/* BV-filter chips */}
+          {/* BV-filter chips — alleen de BVs waarvoor de user toegang heeft. */}
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {ENTITIES.map(e => {
+            {activeEntities.map(e => {
               const active = chartBvs.has(e)
               return (
                 <button
@@ -838,10 +846,12 @@ export function BudgetsTab({ filter: _filter }: Props) {
               <input type="checkbox" checked={showLe} onChange={e => setShowLe(e.target.checked)} />
               Latest Estimate
             </label>
-            <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-              <input type="checkbox" checked={showTotal} onChange={e => setShowTotal(e.target.checked)} />
-              Totaal (som) <span style={{ display: 'inline-block', width: 10, height: 2, background: '#fbbf24', marginLeft: 2, verticalAlign: 'middle' }} />
-            </label>
+            {showTotalScope && (
+              <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                <input type="checkbox" checked={showTotal} onChange={e => setShowTotal(e.target.checked)} />
+                Totaal (som) <span style={{ display: 'inline-block', width: 10, height: 2, background: '#fbbf24', marginLeft: 2, verticalAlign: 'middle' }} />
+              </label>
+            )}
           </div>
         </div>
         <div style={{ padding: 14, height: 340 }}>
@@ -849,8 +859,9 @@ export function BudgetsTab({ filter: _filter }: Props) {
         </div>
       </div>
 
-      {/* Per-BV accordion + Totaal-accordion onderaan */}
-      {[...activeEntities, 'Totaal' as const].map(scope => {
+      {/* Per-BV accordion + Totaal-accordion onderaan (Totaal alleen voor users
+          zonder BV-restrictie) */}
+      {(showTotalScope ? [...activeEntities, 'Totaal' as const] : [...activeEntities]).map(scope => {
         const isTot   = scope === 'Totaal'
         const isOpen  = expandedBvs.has(scope)
         const color   = isTot ? '#fbbf24' : BV_COLORS[scope as EntityName]

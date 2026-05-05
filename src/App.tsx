@@ -97,9 +97,15 @@ export default function App() {
   }, [navPending])
 
   // Non-admin op admin-only tabs → terug naar dashboard
+  // Viewer-rol op de Maandafsluiting-tab → ook terug naar dashboard
   useEffect(() => {
     if ((tab === 'users' || tab === 'backups') && !isAdmin) setTab('dashboard')
-  }, [tab, isAdmin])
+    const viewerOnMaand =
+      tab === 'maand' &&
+      !isAdmin &&
+      profiles.find(p => p.email.toLowerCase() === (user?.email ?? '').toLowerCase())?.role === 'viewer'
+    if (viewerOnMaand) setTab('dashboard')
+  }, [tab, isAdmin, profiles, user])
 
   // Reset revoked-reason zodra een nieuwe user inlogt
   useEffect(() => {
