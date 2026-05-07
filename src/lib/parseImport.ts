@@ -321,8 +321,27 @@ export function looksLikeTotalLabel(val: unknown): boolean {
  *      ≤ 4 niet-lege cellen → total (kleine rij = samenvatting, niet detail)
  *   C. Alle niet-numerieke cellen zijn leeg behalve één die met "totaal"
  *      begint (klassieke SAP bold subtotaal-rij)
+ *
+ *  Resultaten worden per row-referentie gecachet via een module-level WeakMap.
+ *  Bij grote SAP-exports (D-lijst 10k+ rijen) wordt deze functie binnen één
+ *  user-actie meerdere keren over dezelfde rijen aangeroepen — éénmaal door
+ *  computeGenericImport en typisch 1-2× door getDistinctColumnValues per
+ *  filter-kolom. Zonder cache liep elke pass elke regel opnieuw door ~15
+ *  regex-tests per cel; met cache vervalt dat na de eerste pass tot een
+ *  WeakMap-lookup. Verlaagt de wizard-doorloop voor D-lijst van seconden naar
+ *  honderden ms.
  */
+const isLikelyTotalRowCache = new WeakMap<Record<string, unknown>, boolean>()
+
 export function isLikelyTotalRow(row: Record<string, unknown>): boolean {
+  const cached = isLikelyTotalRowCache.get(row)
+  if (cached !== undefined) return cached
+  const result = computeIsLikelyTotalRow(row)
+  isLikelyTotalRowCache.set(row, result)
+  return result
+}
+
+function computeIsLikelyTotalRow(row: Record<string, unknown>): boolean {
   const values = Object.values(row)
 
   // Signaal A: strict match op een exact total-label

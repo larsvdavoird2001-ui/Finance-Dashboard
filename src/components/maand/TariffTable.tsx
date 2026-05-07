@@ -3,6 +3,8 @@ import { useTariffStore } from '../../store/useTariffStore'
 import type { TariffEntry } from '../../data/types'
 import { useToast } from '../../hooks/useToast'
 import { Toast } from '../common/Toast'
+import { verticalForEmployeeId, VERTICAL_COLORS, VERTICALS } from '../../lib/verticals'
+import { PERSON_SPEC_SNAPSHOT_DATE } from '../../data/personSpec'
 
 const BV_COLORS: Record<string, string> = {
   Consultancy: '#00a9e0',
@@ -24,6 +26,7 @@ export function TariffTable() {
   const { toasts, showToast } = useToast()
   const [search, setSearch] = useState('')
   const [filterBv, setFilterBv] = useState<string>('all')
+  const [filterVertical, setFilterVertical] = useState<string>('all')
   const [onlyMissing, setOnlyMissing] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<TariffEntry | null>(null)
@@ -36,6 +39,12 @@ export function TariffTable() {
 
   const filtered = entries.filter(e => {
     if (filterBv !== 'all' && e.bedrijf !== filterBv) return false
+    if (filterVertical !== 'all') {
+      const v = verticalForEmployeeId(e.id)
+      if (filterVertical === '__none__') {
+        if (v !== null) return false
+      } else if (v !== filterVertical) return false
+    }
     if (onlyMissing && !hasMissingTariff(e)) return false
     if (search) {
       const s = search.toLowerCase()
@@ -198,6 +207,19 @@ export function TariffTable() {
             onChange={e => patchDraft({ stroming: e.target.value })}
           />
         </td>
+        <td style={{ padding: '4px 6px' }} title="Vertical wordt afgeleid uit Specificatie persoonsniveau (kolom O) en is hier alleen-lezen">
+          {(() => {
+            const v = verticalForEmployeeId(entry.id)
+            if (!v) return <span style={{ color: 'var(--t3)', fontSize: 10 }}>—</span>
+            return (
+              <span style={{
+                fontSize: 10, padding: '2px 6px', borderRadius: 3, fontWeight: 600,
+                background: VERTICAL_COLORS[v] + '22',
+                color: VERTICAL_COLORS[v],
+              }}>{v}</span>
+            )
+          })()}
+        </td>
         <td className="r" style={{ padding: '4px 6px' }}>
           <input
             style={{ ...inputStyle, textAlign: 'right', fontFamily: 'var(--mono)' }}
@@ -276,6 +298,19 @@ export function TariffTable() {
       <td style={{ color: 'var(--t2)' }}>{entry.functie || '—'}</td>
       <td style={{ color: 'var(--t3)' }}>{entry.team || '—'}</td>
       <td style={{ color: 'var(--t3)' }}>{entry.stroming || '—'}</td>
+      <td>
+        {(() => {
+          const v = verticalForEmployeeId(entry.id)
+          if (!v) return <span style={{ color: 'var(--t3)', fontSize: 10 }}>—</span>
+          return (
+            <span style={{
+              fontSize: 10, padding: '2px 6px', borderRadius: 3, fontWeight: 600,
+              background: VERTICAL_COLORS[v] + '22',
+              color: VERTICAL_COLORS[v],
+            }}>{v}</span>
+          )
+        })()}
+      </td>
       <td className="r mono" style={{
         fontWeight: 600,
         color: entry.tarief > 0 ? 'var(--t1)' : 'var(--red)',
@@ -329,6 +364,23 @@ export function TariffTable() {
           {bvs.map(bv => (
             <option key={bv} value={bv}>{bv} ({entries.filter(e => e.bedrijf === bv).length})</option>
           ))}
+        </select>
+        <select
+          style={{
+            background: 'var(--bg3)', border: '1px solid var(--bd2)', borderRadius: 6,
+            color: 'var(--t1)', fontSize: 12, padding: '6px 8px', outline: 'none', cursor: 'pointer',
+          }}
+          value={filterVertical}
+          onChange={e => setFilterVertical(e.target.value)}
+          title="Filter op vertical (uit Specificatie persoonsniveau)"
+        >
+          <option value="all">Alle verticals</option>
+          {VERTICALS.map(v => {
+            const c = entries.filter(e => verticalForEmployeeId(e.id) === v).length
+            if (c === 0) return null
+            return <option key={v} value={v}>{v} ({c})</option>
+          })}
+          <option value="__none__">— niet in spec ({entries.filter(e => verticalForEmployeeId(e.id) === null).length})</option>
         </select>
         <span style={{ fontSize: 11, color: 'var(--t3)' }}>{filtered.length} medewerker{filtered.length === 1 ? '' : 's'}</span>
         <button
@@ -400,6 +452,7 @@ export function TariffTable() {
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 120 }}>Functie</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 100 }}>Team</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 100 }}>Stroming</th>
+                <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 90 }} title={`Vertical uit Specificatie persoonsniveau (snapshot ${PERSON_SPEC_SNAPSHOT_DATE})`}>Vertical</th>
                 <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 90 }}>Tarief</th>
                 <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 60 }}>FTE</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, width: 70 }}></th>
@@ -407,7 +460,7 @@ export function TariffTable() {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--t3)', padding: 20 }}>Geen medewerkers gevonden</td></tr>
+                <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--t3)', padding: 20 }}>Geen medewerkers gevonden</td></tr>
               )}
               {filtered.map(entry =>
                 editingId === entry.id ? renderEditRow(entry) : renderDisplayRow(entry)

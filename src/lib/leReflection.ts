@@ -227,7 +227,7 @@ export function buildReflectionContext(args: {
   const prevMonth = priorClosed.length > 0 ? priorClosed[priorClosed.length - 1] : null
 
   const getFte = (e: EntityName, m: string): number =>
-    fteEntries.find(x => x.bv === e && x.month === m)?.fte ?? 0
+    fteEntries.find(x => x.bv === e && x.month === m && !x.vertical)?.fte ?? 0
   const getHours = (e: EntityName, m: string): HoursEntry | undefined =>
     hoursEntries.find(x => x.bv === e && x.month === m)
 
@@ -289,7 +289,7 @@ export function buildReflectionContext(args: {
   const fteDelta = fteCurrent > 0 && ftePrev != null && ftePrev > 0 ? fteCurrent - ftePrev : null
 
   // FTE-budget voor deze maand (Budgetten-tab) — variance vs actual.
-  const fteBudgetRaw = fteEntries.find(x => x.bv === bv && x.month === targetMonth)?.fteBudget
+  const fteBudgetRaw = fteEntries.find(x => x.bv === bv && x.month === targetMonth && !x.vertical)?.fteBudget
   const fteBudget = fteBudgetRaw != null && fteBudgetRaw > 0 ? fteBudgetRaw : null
   const fteVsBudget = (fteBudget != null && fteCurrent > 0) ? fteCurrent - fteBudget : null
 

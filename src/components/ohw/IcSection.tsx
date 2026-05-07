@@ -244,6 +244,9 @@ interface Props {
 export const IcSection = memo(function IcSection({ rows, totaalIC, months, onChange, currentBv, year, contactColWidth = 150, descColWidth = 340 }: Props) {
   const [open, setOpen] = useState(false)
   const [showAddDialog, setShowAddDialog] = useState(false)
+  // IC-rijen zonder waardes voor het actieve jaar (en zonder waardes aan de
+  // mirror-kant van de pair) verbergen — net als in OhwSection.
+  const [showEmptyIcRows, setShowEmptyIcRows] = useState(false)
 
   const addIcPair = useOhwStore(s => s.addIcPair)
   const removeIcPair = useOhwStore(s => s.removeIcPair)
@@ -336,7 +339,7 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
         <td style={{ background: hdrBg, width: 40 }} />
       </tr>
 
-      {open && rows.map(row => {
+      {open && (showEmptyIcRows ? rows : rows.filter(r => rowHasAnyValue(r))).map(row => {
         const isPaired = !!row.icPairId
         return (
           <tr key={row.id} className="sub">
@@ -411,6 +414,37 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
           </tr>
         )
       })}
+
+      {/* Verborgen-IC-rijen toggle */}
+      {open && (() => {
+        const hiddenCount = rows.length - rows.filter(r => rowHasAnyValue(r)).length
+        if (hiddenCount === 0) return null
+        return (
+          <tr>
+            <td colSpan={months.length + 3} style={{
+              background: 'var(--bg2)', padding: '3px 12px 3px 26px',
+              fontSize: 10, color: 'var(--t3)',
+            }}>
+              <button
+                onClick={() => setShowEmptyIcRows(v => !v)}
+                style={{
+                  background: 'transparent', border: 'none',
+                  color: 'var(--t3)', fontSize: 10, cursor: 'pointer',
+                  padding: '2px 6px', textDecoration: 'underline',
+                  fontStyle: 'italic',
+                }}
+                title={showEmptyIcRows
+                  ? 'Verberg lege IC-rijen weer'
+                  : `${hiddenCount} IC-rij(en) zonder waarde in dit jaar — klik om te tonen`}
+              >
+                {showEmptyIcRows
+                  ? `▴ Verberg ${hiddenCount} lege IC-rij(en)`
+                  : `▾ Toon ${hiddenCount} verborgen lege IC-rij(en)`}
+              </button>
+            </td>
+          </tr>
+        )
+      })()}
 
       {open && (
         <tr>

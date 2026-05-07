@@ -15,6 +15,7 @@ import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
 import { SUBS_OF, DERIVED_FORMULA, AGGREGATE_KEYS, DERIVED_KEYS, READONLY_KEYS } from '../../lib/plDerive'
 import { getFteLe } from '../../lib/fteLe'
+import { BudgetsFteSubtab } from './BudgetsFteSubtab'
 
 /**
  * Altijd-aan input cell voor Budget-invoer. Eén klik focus je, getallen
@@ -74,74 +75,7 @@ function BudgetInput({
   )
 }
 
-/**
- * Generieke decimaal-input voor FTE- en %-cellen. Toont '—' bij null/undefined,
- * accepteert NL-decimaal (komma) of dot. Commit op blur/Enter, Escape herstelt.
- */
-function NumberInput({
-  value,
-  onCommit,
-  suffix,
-  highlight,
-  decimals = 1,
-  width = 75,
-}: {
-  value: number | undefined
-  onCommit: (v: number | undefined) => void
-  suffix?: string
-  highlight?: boolean
-  decimals?: number
-  width?: number
-}) {
-  const [raw, setRaw] = useState<string | null>(null)
-  const editing = raw !== null
-  const display = editing
-    ? raw
-    : (value == null
-        ? ''
-        : value.toLocaleString('nl-NL', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + (suffix ?? ''))
-  const commit = () => {
-    if (raw === null) return
-    const trimmed = raw.replace(suffix ?? '', '').replace(/\s/g, '').replace(',', '.').trim()
-    if (trimmed === '') {
-      if (value != null) onCommit(undefined)
-    } else {
-      const v = parseFloat(trimmed)
-      if (!isNaN(v) && v !== value) onCommit(v)
-    }
-    setRaw(null)
-  }
-  return (
-    <input
-      className="ohw-inp"
-      value={display}
-      placeholder="—"
-      style={{
-        width, fontSize: 11, padding: '2px 6px',
-        textAlign: 'right',
-        fontFamily: 'var(--mono)',
-        color: value == null ? 'var(--t3)' : highlight ? 'var(--green)' : 'var(--t1)',
-        background: highlight ? 'rgba(38,201,151,.05)' : 'var(--bg1)',
-        border: '1px solid transparent',
-        borderRadius: 3,
-      }}
-      onFocus={e => {
-        setRaw(value == null ? '' : String(value))
-        setTimeout(() => e.target.select(), 0)
-      }}
-      onChange={e => setRaw(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => {
-        if (e.key === 'Enter') {
-          e.currentTarget.blur()
-        } else if (e.key === 'Escape') {
-          setRaw(null)
-          e.currentTarget.blur()
-        }
-      }}
-    />
-  )
-}
+// (NumberInput is verhuisd naar BudgetsFteSubtab.tsx — daar woont nu de FTE-flow.)
 
 const ENTITIES: EntityName[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 
@@ -250,6 +184,10 @@ export function BudgetsTab({ filter: _filter }: Props) {
   // en geen totaal-rij in de header.
   const showTotalScope = !_lockedBv
 
+  // Subtab: financieel (P&L budget+LE) vs FTE & Headcount (FTE-budget + capaciteit
+  // per BV per vertical). De FTE-subtab leeft in een eigen component zodat de
+  // P&L-flow (chart, accordion, comparison) niet verandert.
+  const [subTab, setSubTab] = useState<'financieel' | 'fte'>('financieel')
   const [chartMetric,  setChartMetric]  = useState<string>('netto_omzet')
   const [expandedBvs,  setExpandedBvs]  = useState<Set<EntityName | 'Totaal'>>(
     new Set([activeEntities[0] ?? 'Consultancy'] as Array<EntityName | 'Totaal'>)
@@ -470,34 +408,9 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return 'forecast'
   }
 
-  // ── FTE budget per BV/maand ────────────────────────────────────────────
-  // Wordt opgeslagen in useFteStore (kolom fteBudget op fte_entries-tabel).
-  // Holdings heeft geen FTE-flow.
-  const getFteBudget = (bv: BvId, m: string): number | undefined =>
-    fteGetEntry(bv, m)?.fteBudget
-  const setFteBudget = (bv: BvId, m: string, v: number | undefined) => {
-    fteUpsert(bv, m, { fteBudget: v })
-  }
-
-  // ── Capaciteit-% (productief / verlof / improductief / ziek) ───────────
-  // Per BV/maand, opgeslagen via useBudgetStore.overrides met pseudo-keys
-  // (zie CAPACITY_KEYS). Geen DB-migratie nodig — budget_overrides is
-  // al een generiek key/value-schema.
-  const getCapacityPct = (e: EntityName, m: string, k: string): number | undefined => {
-    const ov = store.overrides[e]?.[m]?.[k]
-    return ov === undefined ? undefined : ov
-  }
-  const setCapacityPct = (e: EntityName, m: string, k: string, v: number | undefined) => {
-    if (v === undefined) {
-      // We hebben geen "delete one key"-API; zet 0 zodat hij in DB nog
-      // bestaat maar als leeg telt. Display interpreteert 0 als null.
-      store.setValue(e, m, k, 0)
-    } else {
-      store.setValue(e, m, k, v)
-    }
-  }
-  const capacityTotal = (e: EntityName, m: string): number =>
-    CAPACITY_KEYS.reduce((s, c) => s + (getCapacityPct(e, m, c.key) ?? 0), 0)
+  // FTE-budget en capaciteit-% bewerken gebeurt nu in de subtab
+  // BudgetsFteSubtab. De helpers/getters daarvoor leven daar zelfstandig.
+  // copyPrevMonth gebruikt hieronder fteGetEntry/fteUpsert direct.
 
   // ── Kopieer alle bewerkbare waardes van vorige maand naar deze maand ──
   const copyPrevMonth = (e: EntityName, mIdx: number) => {
@@ -771,6 +684,30 @@ export function BudgetsTab({ filter: _filter }: Props) {
 
   return (
     <div className="page">
+      {/* Subtab switcher: Financieel | FTE */}
+      <div className="card" style={{ overflow: 'visible' }}>
+        <div style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Onderdeel:</span>
+          <div className="tabs-row">
+            <button className={`tab${subTab === 'financieel' ? ' active' : ''}`} onClick={() => setSubTab('financieel')}>
+              Financieel — P&amp;L budget &amp; LE
+            </button>
+            <button className={`tab${subTab === 'fte' ? ' active' : ''}`} onClick={() => setSubTab('fte')}>
+              FTE
+            </button>
+          </div>
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
+            {subTab === 'financieel'
+              ? 'P&L per BV — bewerkbaar budget, auto-afgeleide LE.'
+              : 'FTE-budget per BV en per vertical, capaciteits-% per BV.'}
+          </span>
+        </div>
+      </div>
+
+      {subTab === 'fte' && <BudgetsFteSubtab />}
+
+      {subTab === 'financieel' && (
+      <>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div>
@@ -971,150 +908,8 @@ export function BudgetsTab({ filter: _filter }: Props) {
                   </table>
                 </div>
 
-                {/* ── FTE & Capaciteit-budget — alleen voor productie-BVs ── */}
-                {!isTot && scope !== 'Holdings' && (() => {
-                  const bv = scope as BvId
-                  // FY-gemiddelde % per capaciteit-categorie (alleen maanden
-                  // met ingevulde waarde meegenomen)
-                  const fyAvgPct = (k: string): number | null => {
-                    const vals = months
-                      .map(m => getCapacityPct(scope as EntityName, m, k))
-                      .filter((v): v is number => v != null && v > 0)
-                    if (vals.length === 0) return null
-                    return vals.reduce((s, v) => s + v, 0) / vals.length
-                  }
-                  const fyTotalFte = months.reduce((s, m) => s + (getFteBudget(bv, m) ?? 0), 0)
-                  const fyAvgFte = fyTotalFte / 12
-                  return (
-                    <>
-                      <div style={{ padding: '14px 14px 0', fontSize: 10, color: 'var(--t3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>
-                        FTE &amp; Capaciteit-budget 2026
-                        <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, letterSpacing: 0 }}>
-                          — geplande FTE en capaciteits-verdeling per maand · totaal % moet ≈ 100 zijn
-                        </span>
-                      </div>
-                      <div style={{ overflowX: 'auto', marginTop: 4 }}>
-                        <table className="tbl" style={{ tableLayout: 'fixed', borderCollapse: 'collapse', width: TABLE_BASE_WIDTH }}>
-                          <MonthTableColgroup />
-                          <thead>
-                            <tr>
-                              <th style={{ position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 2 }}>Regel</th>
-                              {months.map(m => (
-                                <th key={m} className="r" style={{ padding: '4px 6px' }}>{m}</th>
-                              ))}
-                              <th className="r" style={{ borderLeft: '1px solid var(--bd2)', color: 'var(--brand)' }}>FY ø</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {/* FTE budget-rij */}
-                            <tr style={{ background: 'var(--bg3)' }}>
-                              <td style={{
-                                position: 'sticky', left: 0, zIndex: 1,
-                                background: 'var(--bg3)',
-                                padding: '4px 12px',
-                                fontWeight: 700,
-                                color: BV_COLORS[bv],
-                                fontSize: 12,
-                                whiteSpace: 'nowrap',
-                              }}>FTE budget</td>
-                              {months.map(m => (
-                                <td key={m} className="r mono" style={{ padding: '3px 6px', fontSize: 11 }}>
-                                  <NumberInput
-                                    value={getFteBudget(bv, m)}
-                                    onCommit={v => setFteBudget(bv, m, v)}
-                                    decimals={1}
-                                    width={75}
-                                  />
-                                </td>
-                              ))}
-                              <td className="r mono" style={{
-                                fontWeight: 700, color: 'var(--brand)',
-                                borderLeft: '1px solid var(--bd2)',
-                                padding: '3px 6px', fontSize: 11,
-                              }}>
-                                {fyTotalFte === 0 ? '—' : fyAvgFte.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-                              </td>
-                            </tr>
-                            {/* Capaciteit-% rijen */}
-                            {CAPACITY_KEYS.map(cap => {
-                              const fyAvg = fyAvgPct(cap.key)
-                              return (
-                                <tr key={cap.key}>
-                                  <td style={{
-                                    position: 'sticky', left: 0, zIndex: 1,
-                                    background: 'var(--bg2)',
-                                    padding: '4px 12px',
-                                    fontSize: 11,
-                                    color: cap.color,
-                                    fontWeight: 600,
-                                    whiteSpace: 'nowrap',
-                                  }}>{cap.label}</td>
-                                  {months.map(m => {
-                                    const val = getCapacityPct(scope as EntityName, m, cap.key)
-                                    const display = val == null || val === 0 ? undefined : val
-                                    return (
-                                      <td key={m} className="r mono" style={{ padding: '3px 6px', fontSize: 11 }}>
-                                        <NumberInput
-                                          value={display}
-                                          onCommit={v => setCapacityPct(scope as EntityName, m, cap.key, v)}
-                                          suffix="%"
-                                          decimals={1}
-                                          width={75}
-                                        />
-                                      </td>
-                                    )
-                                  })}
-                                  <td className="r mono" style={{
-                                    fontWeight: 700, color: cap.color,
-                                    borderLeft: '1px solid var(--bd2)',
-                                    padding: '3px 6px', fontSize: 11,
-                                  }}>
-                                    {fyAvg == null ? '—' : fyAvg.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                            {/* Totaal-% rij (auto) */}
-                            <tr style={{ background: 'var(--bg3)' }}>
-                              <td style={{
-                                position: 'sticky', left: 0, zIndex: 1,
-                                background: 'var(--bg3)',
-                                padding: '4px 12px',
-                                fontSize: 11,
-                                fontWeight: 700,
-                                whiteSpace: 'nowrap',
-                              }}>Totaal %</td>
-                              {months.map(m => {
-                                const t = capacityTotal(scope as EntityName, m)
-                                const filled = t > 0
-                                const ok = filled && Math.abs(t - 100) < 0.05
-                                const color = !filled
-                                  ? 'var(--t3)'
-                                  : ok
-                                    ? 'var(--green)'
-                                    : 'var(--amber)'
-                                return (
-                                  <td key={m} className="r mono" style={{
-                                    padding: '3px 6px', fontSize: 11,
-                                    color, fontWeight: 700,
-                                  }}
-                                    title={filled && !ok ? `Som = ${t.toFixed(1)}% — moet 100% zijn` : undefined}
-                                  >
-                                    {filled
-                                      ? t.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'
-                                      : '—'}
-                                    {filled && !ok && <span style={{ marginLeft: 3 }}>⚠</span>}
-                                  </td>
-                                )
-                              })}
-                              <td style={{ borderLeft: '1px solid var(--bd2)' }} />
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </>
-                  )
-                })()}
+                {/* ── FTE & Capaciteit-budget — verhuisd naar de subtab
+                    "FTE & Headcount" (zie BudgetsFteSubtab.tsx). ── */}
 
                 {/* ── Latest Estimate-tabel — read-only met methodiek-kolom ── */}
                 <div style={{ padding: '14px 14px 0', fontSize: 10, color: 'var(--t3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>
@@ -1208,6 +1003,8 @@ export function BudgetsTab({ filter: _filter }: Props) {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }

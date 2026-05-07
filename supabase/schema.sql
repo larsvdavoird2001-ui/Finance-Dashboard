@@ -323,6 +323,51 @@ DROP POLICY IF EXISTS "Allow all on closing_finalized" ON closing_finalized;
 CREATE POLICY "Allow all on closing_finalized" ON closing_finalized FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================================
+-- FTE-uitbreiding (mei-2026): Holdings als FTE-BV + vertical-breakdown.
+-- ----------------------------------------------------------------------------
+-- 1) De BV-CHECK constraint moet ook 'Holdings' toelaten zodat Holding B.V.
+--    en Ingenieurs en Specialisten B.V. (samen → Holdings) FTE/headcount-
+--    rijen kunnen krijgen.
+-- 2) Een vertical-kolom (Telecom/Public/Energy/Civiel/Industry/Overig of NULL)
+--    splitst de productie-BVs in sub-buckets. NULL = BV-totaal-rij (legacy
+--    gedrag — bestaande rijen blijven valide).
+-- 3) De UNIQUE(bv, month)-constraint moet eraf, want we slaan nu meerdere
+--    rijen per (bv, month) op (één totaal + n verticals). Identiteit wordt
+--    gegarandeerd door de PK (id).
+-- ============================================================================
+ALTER TABLE fte_entries ADD COLUMN IF NOT EXISTS vertical text;
+
+-- Drop de oude BV-CHECK; voeg de nieuwe toe (met Holdings).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.constraint_column_usage
+    WHERE table_name = 'fte_entries' AND constraint_name = 'fte_entries_bv_check'
+  ) THEN
+    EXECUTE 'ALTER TABLE fte_entries DROP CONSTRAINT fte_entries_bv_check';
+  END IF;
+END$$;
+ALTER TABLE fte_entries
+  ADD CONSTRAINT fte_entries_bv_check
+  CHECK (bv IN ('Consultancy', 'Projects', 'Software', 'Holdings'));
+
+-- Drop de UNIQUE(bv, month)-constraint zodat per (bv, month) zowel een
+-- totaal-rij (vertical IS NULL) als meerdere vertical-rijen kunnen bestaan.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fte_entries_bv_month_key'
+  ) THEN
+    EXECUTE 'ALTER TABLE fte_entries DROP CONSTRAINT fte_entries_bv_month_key';
+  END IF;
+END$$;
+
+-- Optioneel: extra fteBudget/headcountBudget-kolommen (idempotent — bestaan
+-- mogelijk al uit eerdere lokale migraties).
+ALTER TABLE fte_entries ADD COLUMN IF NOT EXISTS fte_budget numeric;
+ALTER TABLE fte_entries ADD COLUMN IF NOT EXISTS headcount_budget integer;
+
+-- ============================================================================
 -- Bootstrap: zorg dat de TPG Finance hoofd-admin altijd aanwezig is.
 -- Pas dit aan als jouw admin-email anders is.
 -- ============================================================================

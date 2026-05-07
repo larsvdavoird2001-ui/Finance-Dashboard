@@ -26,7 +26,10 @@ import { BUDGET_MONTHS_2026 } from '../store/useBudgetStore'
 export function getFteLeShift(entries: FteEntry[], bv: BvId): number {
   let lastDelta = 0
   for (const m of BUDGET_MONTHS_2026) {
-    const e = entries.find(x => x.bv === bv && x.month === m)
+    // Alleen BV-totaal-entries (geen vertical sub-buckets) — anders zou
+    // dezelfde maand meerdere kandidaten opleveren en zou de delta-berekening
+    // afhangen van array-volgorde.
+    const e = entries.find(x => x.bv === bv && x.month === m && !x.vertical)
     const a = e?.fte
     const b = e?.fteBudget
     if (a != null && a > 0 && b != null && b > 0) {
@@ -44,7 +47,8 @@ export function getFteLe(args: {
   isFinalized: (month: string) => boolean
 }): number | undefined {
   const { entries, bv, month, isFinalized } = args
-  const cur = entries.find(x => x.bv === bv && x.month === month)
+  // Alleen BV-totaal-entries (geen vertical sub-buckets) gebruiken in LE.
+  const cur = entries.find(x => x.bv === bv && x.month === month && !x.vertical)
   if (isFinalized(month) && cur?.fte != null) return cur.fte
   // Manueel ingevoerde .fte voor toekomst wint (bewuste plan-override).
   if (cur?.fte != null) return cur.fte
@@ -55,7 +59,7 @@ export function getFteLe(args: {
   // Fallback: meest recente eerdere actual (forward-fill).
   const idx = BUDGET_MONTHS_2026.indexOf(month)
   for (let i = idx - 1; i >= 0; i--) {
-    const prev = entries.find(x => x.bv === bv && x.month === BUDGET_MONTHS_2026[i])
+    const prev = entries.find(x => x.bv === bv && x.month === BUDGET_MONTHS_2026[i] && !x.vertical)
     if (prev?.fte != null) return prev.fte
   }
   return undefined

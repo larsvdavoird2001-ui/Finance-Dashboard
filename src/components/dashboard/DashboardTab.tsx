@@ -938,7 +938,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       }
 
       // ── Productie-BV (Cons / Proj / Soft) ─────────────────────────────
-      const fteEntry = fteEntries.find(e => e.bv === bv && e.month === lastClosed)
+      const fteEntry = fteEntries.find(e => e.bv === bv && e.month === lastClosed && !e.vertical)
       const fteCount = fteEntry?.fte ?? 0
       const headcount = fteEntry?.headcount ?? 0
 
@@ -988,7 +988,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       const sameMonth2025Next = nextMonth ? monthlyActuals2025[bv]?.[nextMonth.replace('-26', '-25')]?.['netto_omzet'] ?? 0 : 0
 
       // Geplande FTE-mutatie + vakantie voor de prognose-maand.
-      const plannedFte = nextMonth ? fteEntries.find(e => e.bv === bv && e.month === nextMonth)?.fte ?? null : null
+      const plannedFte = nextMonth ? fteEntries.find(e => e.bv === bv && e.month === nextMonth && !e.vertical)?.fte ?? null : null
       const fteDelta = plannedFte != null && fteCount > 0 ? plannedFte - fteCount : 0
       const plannedVakantie = nextMonth ? hoursEntries.find(e => e.bv === bv && e.month === nextMonth)?.vakantie ?? 0 : 0
 

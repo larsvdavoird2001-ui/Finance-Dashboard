@@ -467,9 +467,9 @@ export function HoursTab({ filter }: Props) {
   const isFinalized = (m: string) => finalizedSet.has(m)
 
   const getFteBudget = (bv: BvId, m: string): number | undefined =>
-    fteEntries.find(e => e.bv === bv && e.month === m)?.fteBudget
+    fteEntries.find(e => e.bv === bv && e.month === m && !e.vertical)?.fteBudget
   const getFteActual = (bv: BvId, m: string): number | undefined =>
-    fteEntries.find(e => e.bv === bv && e.month === m)?.fte
+    fteEntries.find(e => e.bv === bv && e.month === m && !e.vertical)?.fte
 
   // ── LE-shifts: bouw één keer per BV de YTD over/under-run vs budget ──
   // FTE: gedeelde helper (`sharedGetFteLe`) — actual als finalized, anders

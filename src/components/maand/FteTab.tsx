@@ -1,13 +1,16 @@
 import { useState, useMemo } from 'react'
-import type { BvId } from '../../data/types'
+import type { BvId, FteBv } from '../../data/types'
 import { useFteStore, FTE_YEARS, monthsForYear } from '../../store/useFteStore'
 import { useLockedBv } from '../../lib/permissions'
+import { verticalsForBv, snapshotActuals, VERTICAL_COLORS, type Vertical } from '../../lib/verticals'
+import { PERSON_SPEC_MONTH, PERSON_SPEC_SNAPSHOT_DATE } from '../../data/personSpec'
 
-const BVS_FULL: BvId[] = ['Consultancy', 'Projects', 'Software']
-const BV_COLORS: Record<BvId, string> = {
+const BVS_FULL: FteBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
+const BV_COLORS: Record<FteBv, string> = {
   Consultancy: '#00a9e0',
   Projects:    '#26c997',
   Software:    '#8b5cf6',
+  Holdings:    '#8fa3c0',
 }
 
 type Metric = 'fte' | 'headcount'
@@ -42,19 +45,26 @@ export function FteTab() {
   const entries = useFteStore(s => s.entries)
   const upsertEntry = useFteStore(s => s.upsertEntry)
   const lockedBv = useLockedBv()
-  // Holdings heeft geen FTE-flow — voor een Holdings-locked user blijft de
-  // lijst leeg. Voor andere BV-locked users tonen we alleen die BV.
-  const BVS: BvId[] = lockedBv && lockedBv !== 'Holdings'
-    ? [lockedBv as BvId]
-    : (lockedBv === 'Holdings' ? [] : BVS_FULL)
+  // BV-locked viewers zien alleen hun eigen BV. Holdings kan ook deelnemen
+  // aan FTE-tracking (top-down totaal, geen vertical-breakdown).
+  const BVS: FteBv[] = lockedBv
+    ? (BVS_FULL.includes(lockedBv as FteBv) ? [lockedBv as FteBv] : [])
+    : BVS_FULL
 
   const [year, setYear] = useState<'2025' | '2026'>('2026')
   const [metric, setMetric] = useState<Metric>('fte')
   const months = useMemo(() => monthsForYear(year), [year])
   const prevYear = year === '2026' ? '2025' : '2024'
 
-  const getVal = (bv: BvId, month: string, key: 'fte' | 'headcount'): number | undefined => {
-    return entries.find(e => e.bv === bv && e.month === month)?.[key]
+  /** Lookup BV-totaal voor (bv, month). */
+  const getVal = (bv: FteBv, month: string, key: 'fte' | 'headcount'): number | undefined => {
+    return entries.find(e => e.bv === bv && e.month === month && !e.vertical)?.[key]
+  }
+  /** Lookup vertical-specifiek voor (bv, vertical, month). */
+  const getVerticalVal = (
+    bv: FteBv, vertical: Vertical, month: string, key: 'fte' | 'headcount',
+  ): number | undefined => {
+    return entries.find(e => e.bv === bv && e.month === month && e.vertical === vertical)?.[key]
   }
 
   const totalRow = (key: 'fte' | 'headcount') =>
@@ -69,7 +79,7 @@ export function FteTab() {
   const unit = isFte ? 'FTE' : 'Headcount'
 
   // ── Per-BV: laatste maand met actuals ─────────────────────────────────
-  const lastMonthWithActuals = (bv: BvId): { month: string; idx: number } | null => {
+  const lastMonthWithActuals = (bv: FteBv): { month: string; idx: number } | null => {
     for (let i = months.length - 1; i >= 0; i--) {
       if (getVal(bv, months[i], actualKey) != null) return { month: months[i], idx: i }
     }
@@ -115,7 +125,8 @@ export function FteTab() {
             </div>
           </div>
           <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)' }}>
-            Alleen actuals — vul {unit} per BV per maand in. Budget &amp; capaciteit-% staan in de Budgetten-tab.
+            Vul {unit}-totaal per BV per maand in. Onder elk totaal kun je optioneel de
+            vertical-breakdown invullen. Snapshot {PERSON_SPEC_SNAPSHOT_DATE} → ref. {PERSON_SPEC_MONTH}.
           </span>
         </div>
       </div>
@@ -140,12 +151,10 @@ export function FteTab() {
                   </div>
                 )
                 const currentVal = getVal(bv, last.month, actualKey)!
-                // Vorige maand (alleen als beschikbaar)
                 const prevMonth = last.idx > 0 ? months[last.idx - 1] : null
                 const prevVal = prevMonth ? getVal(bv, prevMonth, actualKey) : null
                 const mom = prevVal != null ? currentVal - prevVal : null
 
-                // Same month vorig jaar
                 const monthName = last.month.slice(0, 3)
                 const prevYearMonth = `${monthName}-${prevYear === '2024' ? '24' : '25'}`
                 const yoyVal = getVal(bv, prevYearMonth, actualKey)
@@ -202,10 +211,22 @@ export function FteTab() {
         </div>
       )}
 
-      {/* ── Per-BV tabellen — alleen actuals ────────────────────── */}
+      {/* ── Per-BV tabellen — totaal-rij + (voor productie-BVs) verticals ── */}
       {BVS.map(bv => {
         const actuals = months.map(m => getVal(bv, m, actualKey))
         const hasActuals = actuals.some(v => v != null)
+        const verticals = verticalsForBv(bv) // [] voor Holdings
+        const snapshot = snapshotActuals(bv)
+
+        // Som van vertical-actuals voor consistency-check
+        const verticalSumForMonth = (m: string): number | null => {
+          if (verticals.length === 0) return null
+          const vals = verticals
+            .map(v => getVerticalVal(bv, v, m, actualKey))
+            .filter((x): x is number => x != null)
+          if (vals.length === 0) return null
+          return vals.reduce((s, v) => s + v, 0)
+        }
 
         return (
           <div key={bv} className="card" style={{ overflow: 'visible' }}>
@@ -215,29 +236,38 @@ export function FteTab() {
               {!hasActuals && (
                 <span style={{ marginLeft: 10, fontSize: 10, color: 'var(--t3)' }}>Geen actuals voor {year}</span>
               )}
+              {snapshot && (
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
+                  Snapshot {PERSON_SPEC_MONTH}: <strong style={{ color: BV_COLORS[bv] }}>
+                    {isFte ? fmtFte(snapshot.fte) : fmtHc(snapshot.headcount)} {unit.toLowerCase()}
+                  </strong>
+                </span>
+              )}
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table className="tbl" style={{ minWidth: 'max-content', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 160, position: 'sticky', left: 0, background: 'var(--bg3)', top: 0, zIndex: 3, padding: '6px 12px' }}>{unit}</th>
+                    <th style={{ minWidth: 220, position: 'sticky', left: 0, background: 'var(--bg3)', top: 0, zIndex: 3, padding: '6px 12px' }}>{unit}</th>
                     {months.map(m => (
                       <th key={m} className="r" style={{ minWidth: 95, background: 'var(--bg3)', position: 'sticky', top: 0, zIndex: 2, padding: '6px 8px' }}>{m}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Actuals-rij */}
-                  <tr>
-                    <td style={{ padding: '6px 12px', fontWeight: 600, position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 1 }}>Actuals</td>
+                  {/* Totaal-rij (BV-niveau) */}
+                  <tr style={{ background: 'var(--bg3)' }}>
+                    <td style={{ padding: '6px 12px', fontWeight: 700, position: 'sticky', left: 0, background: 'var(--bg3)', zIndex: 1, color: BV_COLORS[bv] }}>
+                      Totaal {bv}
+                    </td>
                     {months.map(m => {
                       const v = getVal(bv, m, actualKey)
                       return (
-                        <td key={m} style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)' }}>
+                        <td key={m} style={{ padding: 2, textAlign: 'right', background: 'var(--bg3)' }}>
                           <input
                             key={`${bv}-${m}-actual-${v ?? ''}`}
                             className="ohw-inp"
-                            style={{ width: 80, textAlign: 'right', fontFamily: 'var(--mono)' }}
+                            style={{ width: 80, textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 700 }}
                             defaultValue={v != null ? (isFte ? fmtFte(v) : fmtHc(v)) : ''}
                             placeholder="—"
                             onBlur={e => {
@@ -256,6 +286,78 @@ export function FteTab() {
                       )
                     })}
                   </tr>
+
+                  {/* Vertical-rijen (alleen productie-BVs) */}
+                  {verticals.map(v => (
+                    <tr key={v}>
+                      <td style={{
+                        padding: '4px 12px 4px 28px', fontSize: 11,
+                        position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 1,
+                        color: VERTICAL_COLORS[v], fontWeight: 600,
+                      }}>
+                        ↳ {v}
+                      </td>
+                      {months.map(m => {
+                        const vv = getVerticalVal(bv, v, m, actualKey)
+                        return (
+                          <td key={m} style={{ padding: 2, textAlign: 'right', background: 'var(--bg2)' }}>
+                            <input
+                              key={`${bv}-${v}-${m}-actual-${vv ?? ''}`}
+                              className="ohw-inp"
+                              style={{
+                                width: 80, textAlign: 'right', fontFamily: 'var(--mono)',
+                                fontSize: 11,
+                                color: vv == null ? 'var(--t3)' : 'var(--t1)',
+                              }}
+                              defaultValue={vv != null ? (isFte ? fmtFte(vv) : fmtHc(vv)) : ''}
+                              placeholder="—"
+                              onBlur={e => {
+                                const raw = e.target.value.trim()
+                                if (raw === '') {
+                                  if (vv != null) upsertEntry(bv as BvId, m, { [actualKey]: undefined }, v)
+                                  return
+                                }
+                                const parsed = parseNumber(raw)
+                                if (parsed === null) return
+                                upsertEntry(bv as BvId, m, { [actualKey]: parsed }, v)
+                              }}
+                              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                            />
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+
+                  {/* Verschil-rij: som verticals vs ingevoerd totaal */}
+                  {verticals.length > 0 && (
+                    <tr>
+                      <td style={{
+                        padding: '4px 12px 4px 28px', fontSize: 10,
+                        position: 'sticky', left: 0, background: 'var(--bg2)', zIndex: 1,
+                        color: 'var(--t3)', fontStyle: 'italic',
+                      }}>
+                        Σ verticals → check vs totaal
+                      </td>
+                      {months.map(m => {
+                        const sum = verticalSumForMonth(m)
+                        const tot = getVal(bv, m, actualKey)
+                        const diff = (sum != null && tot != null) ? sum - tot : null
+                        const ok = diff != null && Math.abs(diff) < (isFte ? 0.05 : 0.5)
+                        return (
+                          <td key={m} className="r mono" style={{
+                            padding: '4px 8px', fontSize: 10,
+                            color: sum == null ? 'var(--t3)' : (tot == null ? 'var(--t3)' : ok ? 'var(--green)' : 'var(--amber)'),
+                          }}
+                            title={diff != null && !ok ? `Som verticals = ${isFte ? fmtFte(sum!) : fmtHc(sum!)}, totaal = ${isFte ? fmtFte(tot!) : fmtHc(tot!)}, diff = ${fmtDelta(diff, isFte)}` : undefined}
+                          >
+                            {sum == null ? '—' : isFte ? fmtFte(sum) : fmtHc(sum)}
+                            {diff != null && !ok && <span style={{ marginLeft: 3 }}>⚠</span>}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -267,7 +369,9 @@ export function FteTab() {
       <div className="card" style={{ overflow: 'visible' }}>
         <div className="card-hdr">
           <span className="card-title">Totaal alle BV's — {unit}</span>
-          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>Consultancy + Projects + Software</span>
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
+            {BVS.join(' + ')}
+          </span>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table className="tbl" style={{ minWidth: 'max-content', borderCollapse: 'collapse' }}>
@@ -292,7 +396,9 @@ export function FteTab() {
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--t3)', padding: '8px 0' }}>
-        💡 <strong>Budget &amp; capaciteit-%:</strong> ga naar de Budgetten-tab om FTE-budgetten en de verdeling productief / verlof / improductief / ziek per BV per maand vast te leggen.
+        💡 <strong>Budget &amp; capaciteit-%:</strong> ga naar de Budgetten-tab → subtab
+        &quot;FTE&quot; om FTE-budgetten en de verdeling productief / verlof /
+        improductief / ziek per BV (en per vertical) per maand vast te leggen.
       </div>
     </div>
   )

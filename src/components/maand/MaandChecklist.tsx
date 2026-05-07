@@ -145,7 +145,7 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
 
   const fteFilledCount = useMemo(() => {
     return BVS.filter(bv => bv !== 'Holdings').filter(bv => {
-      const e = fteEntries.find(x => x.bv === bv && x.month === month)
+      const e = fteEntries.find(x => x.bv === bv && x.month === month && !x.vertical)
       return !!e && (e.fte ?? 0) > 0 && (e.headcount ?? 0) > 0
     }).length
   }, [fteEntries, month])

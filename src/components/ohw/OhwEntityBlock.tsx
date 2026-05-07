@@ -285,7 +285,21 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
                       Vooruitgefactureerd
                     </td>
                   </tr>
-                  {entity.vooruitgefactureerd.map(row => (
+                  {entity.vooruitgefactureerd
+                    .filter(row => {
+                      // Verberg lege vooruitgefactureerd-rijen voor het actieve jaar
+                      // (dezelfde regel als in OhwSection — geen waardes in
+                      // displayMonths én geen handmatige context).
+                      const hasValue = displayMonths.some(m => {
+                        const v = row.values?.[m]
+                        return v !== null && v !== undefined && v !== 0
+                      })
+                      if (hasValue) return true
+                      if (row.contactPerson && row.contactPerson.trim()) return true
+                      if (row.remarks && Object.values(row.remarks).some(r => r && r.trim())) return true
+                      return false
+                    })
+                    .map(row => (
                     <tr key={row.id}>
                       <td style={{ ...STICKY_LEFT_CONTACT, background: 'var(--bg2)', padding: '2px 8px', width: CONTACT_COL_WIDTH, minWidth: CONTACT_COL_WIDTH }}>
                         <input

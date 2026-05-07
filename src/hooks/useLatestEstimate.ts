@@ -113,9 +113,9 @@ export function useLatestEstimate(currentDate?: Date) {
   const rawActual2025 = (bv: EntityName, m25: string, key: string): number =>
     monthlyActuals2025[bv]?.[m25]?.[key] ?? 0
 
-  /** FTE-getter zonder forward-fill. */
+  /** FTE-getter zonder forward-fill. Alleen BV-totaal (geen vertical sub-buckets). */
   const getFteFor = (bv: BvId, month: string): number =>
-    fteEntries.find(e => e.bv === bv && e.month === month)?.fte ?? 0
+    fteEntries.find(e => e.bv === bv && e.month === month && !e.vertical)?.fte ?? 0
 
   /** Geplande FTE voor toekomstige maand. Gebruikt de gedeelde FTE-LE-logica
    *  (`getFteLe`): manuele .fte > (fteBudget + last-known shift) > forward-fill.

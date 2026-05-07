@@ -303,30 +303,77 @@ export const useOhwStore = create<OhwStore>()(
   },
 
   pruneEmptyRows: (year, entityName) => {
-    // rowHasAnyValue: alle cel-waardes null/undefined/0 → leeg
-    const isEmpty = (r: OhwRow) => !Object.values(r.values ?? {}).some(
-      v => v !== null && v !== undefined && v !== 0,
-    )
+    // Een rij is leeg als geen enkele cel een niet-null/niet-0 waarde heeft.
+    // Manuele context (contactpersoon of cel-remarks) telt als "user wil
+    // bewaren" en redt de rij ook al staan er geen getallen in.
+    const isEmpty = (r: OhwRow) => {
+      const hasValue = Object.values(r.values ?? {}).some(
+        v => v !== null && v !== undefined && v !== 0,
+      )
+      if (hasValue) return false
+      if (r.contactPerson && r.contactPerson.trim()) return false
+      if (r.remarks && Object.values(r.remarks).some(rk => rk && rk.trim())) return false
+      return true
+    }
     const removedIds: string[] = []
     const touched: OhwEntityData[] = []
+
+    // Voor IC-pairs: een rij is alleen écht leeg als BEIDE kanten van het
+    // pair leeg zijn — anders zou een Projects-rij verdwijnen terwijl de
+    // gespiegelde Consultancy-rij wél data heeft. Bouw eerst een set van
+    // pair-IDs met data ergens in welk-BV-dan-ook in dit jaar.
+    const buildPairsWithData = (yearKey: 'data2025' | 'data2026'): Set<string> => {
+      const result = new Set<string>()
+      const yearData = get()[yearKey]
+      for (const ent of yearData.entities) {
+        for (const row of ent.icVerrekening) {
+          if (row.icPairId && !isEmpty(row)) result.add(row.icPairId)
+        }
+      }
+      return result
+    }
+    const pairsWithData = buildPairsWithData(year === '2025' ? 'data2025' : 'data2026')
+
     set(state => {
       const key = year === '2025' ? 'data2025' : 'data2026'
       const prev = state[key]
       const entities = prev.entities.map(entity => {
         if (entityName && entity.entity !== entityName) return entity
         let changed = false
+
+        // 1) Onderhanden: filter binnen elke section
         const onderhanden = entity.onderhanden.map(sec => {
           const kept = sec.rows.filter(row => {
             if (row.locked) return true             // locked (import-targets) blijft
-            if (!isEmpty(row)) return true          // met waarde blijft
+            if (!isEmpty(row)) return true
             removedIds.push(row.id)
             changed = true
             return false
           })
           return kept.length === sec.rows.length ? sec : { ...sec, rows: kept }
         })
+
+        // 2) icVerrekening: lege rijen weg (paired alleen als beide kanten leeg)
+        const icVerrekening = entity.icVerrekening.filter(row => {
+          if (!isEmpty(row)) return true
+          if (row.icPairId && pairsWithData.has(row.icPairId)) return true
+          removedIds.push(row.id)
+          changed = true
+          return false
+        })
+
+        // 3) vooruitgefactureerd: lege rijen weg
+        const vooruitgefactureerd = entity.vooruitgefactureerd?.filter(row => {
+          if (!isEmpty(row)) return true
+          removedIds.push(row.id)
+          changed = true
+          return false
+        })
+
         if (!changed) return entity
-        const updated = recomputeEntity({ ...entity, onderhanden }, prev.allMonths)
+        const updated = recomputeEntity({
+          ...entity, onderhanden, icVerrekening, vooruitgefactureerd,
+        }, prev.allMonths)
         touched.push(updated)
         return updated
       })

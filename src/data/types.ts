@@ -67,6 +67,11 @@ export type BvId = 'Consultancy' | 'Projects' | 'Software'
  *  in de FinStore (closing entries + kosten-overrides) en in de P&L. */
 export type ClosingBv = BvId | 'Holdings'
 
+/** BVs die meedoen aan de FTE & Headcount registratie (Maandafsluiting +
+ *  Budgetten). Identiek aan ClosingBv, maar gemodelleerd als eigen alias
+ *  zodat we per flow apart kunnen evolueren. */
+export type FteBv = BvId | 'Holdings'
+
 export interface HoursRecord {
   bv: BvId
   month: string
@@ -146,8 +151,13 @@ export interface GlobalFilter {
 
 export interface FteEntry {
   id: string
-  bv: BvId
+  bv: FteBv
   month: string
+  /** Vertical-sub-bucket binnen de BV (Telecom/Public/Energy/Civiel/Industry/
+   *  Overig). undefined = totaal-rij voor de BV (de bestaande gedrags-modus
+   *  vóór de vertical-uitbreiding). Holdings heeft géén vertical-breakdown,
+   *  daar blijft het altijd undefined. */
+  vertical?: string
   /** Fulltime equivalent (decimaal, bv. 12.4). Optioneel zodat clearen van
    *  de invoer een 'geen waarde'-state kan opleveren i.p.v. 0 of stale. */
   fte?: number
@@ -155,4 +165,29 @@ export interface FteEntry {
   headcount?: number
   fteBudget?: number       // begrote FTE voor deze BV/maand (voor variance)
   headcountBudget?: number // begroot aantal personen
+}
+
+/** Persoonsregel uit de "Specificatie op persoonsniveau" export — gebruikt om
+ *  IC-tarieven te verrijken (vertical), om actuals te tonen op de FTE & Head-
+ *  count tab, en om de Maand-snapshot van de bezetting te valideren. TPG
+ *  Europe SL is uitgesloten. Holding B.V. en Ingenieurs en Specialisten B.V.
+ *  zijn samengevoegd onder bv='Holdings'. */
+export interface PersonSpec {
+  id: string
+  naam: string
+  voornaam: string
+  achternaam: string
+  geslacht: string
+  tarief: number | null
+  leidingGevende: string
+  bedrijfRaw: string         // originele "Bedrijf"-kolom (bv. "Consultancy B.V.")
+  bv: FteBv
+  startdatum: string         // dd.mm.jjjj
+  geboortedatum: string
+  functie: string
+  fte: number
+  externalCode: string
+  /** null voor Holdings én voor TPG Europe SL (uitgesloten). Voor de drie
+   *  productie-BVs een van de standaard-verticals of "Overig". */
+  vertical: string | null
 }

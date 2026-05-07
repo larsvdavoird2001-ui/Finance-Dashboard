@@ -35,6 +35,33 @@ function rowHasAnyValue(row: OhwRow): boolean {
   return Object.values(row.values ?? {}).some(v => v !== null && v !== undefined && v !== 0)
 }
 
+/** Heeft de rij ten minste één niet-nul/niet-null waarde in de gegeven
+ *  weergave-maanden? Gebruikt om template-rijen die in het actieve jaar leeg
+ *  zijn te verbergen. Dezelfde rij kan in 2025 wél verschijnen en in 2026 niet
+ *  (of andersom) zonder dat hij verwijderd hoeft te worden. */
+function rowHasValueInMonths(row: OhwRow, months: string[]): boolean {
+  if (!row.values) return false
+  for (const m of months) {
+    const v = row.values[m]
+    if (v !== null && v !== undefined && v !== 0) return true
+  }
+  return false
+}
+
+/** Bepaalt of een rij zichtbaar moet zijn in het actieve jaar.
+ *
+ *  Geen waarde dit jaar → niet tonen, ongeacht of de rij locked is. Een
+ *  locked import-target zonder data is een placeholder die het beeld
+ *  vervuilt; zodra een goedgekeurde import binnenkomt vult die de waarde
+ *  en verschijnt de rij vanzelf weer. Manuele context (contactpersoon,
+ *  cel-remarks) telt ook als "user wil tonen". */
+function rowShouldShow(row: OhwRow, months: string[]): boolean {
+  if (rowHasValueInMonths(row, months)) return true
+  if (row.contactPerson && row.contactPerson.trim()) return true
+  if (row.remarks && Object.values(row.remarks).some(r => r && r.trim())) return true
+  return false
+}
+
 // Source slot labels for locked rows
 const SOURCE_LABELS: Record<string, string> = {
   uren_lijst: 'NTF Uren',
@@ -154,6 +181,10 @@ function DescCell({
 
 export const OhwSection = memo(function OhwSection({ section, entity, year = '2026', months, onChange, descColWidth = 340, contactColWidth = 150, flashRowId }: Props) {
   const [open, setOpen] = useState(true)
+  // Toggle: verborgen lege rijen alsnog tonen. Default = verborgen, want de
+  // hele aanleiding voor deze filter is dat template-rijen anders het beeld
+  // vol gooien terwijl ze in het actieve jaar nog niets bevatten.
+  const [showEmptyRows, setShowEmptyRows] = useState(false)
   const navigateTo = useNavStore(s => s.navigateTo)
   const evidenceEntries = useEvidenceStore(s => s.entries)
   const [expandedEvidenceRow, setExpandedEvidenceRow] = useState<string | null>(null)
@@ -302,7 +333,11 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
       {open && (
         <>
           {/* ── Data rows ──────────────────────────────────────────── */}
-          {section.rows.map(row => {
+          {/* Filter rijen die geen enkele waarde hebben in het actieve jaar.
+              Locked import-targets en rijen met contactpersoon/remarks blijven
+              staan; de overige worden verborgen totdat de "Toon lege"-toggle
+              aanstaat. */}
+          {(showEmptyRows ? section.rows : section.rows.filter(r => rowShouldShow(r, months))).map(row => {
             const rowEvidence = entity
               ? evidenceEntries.filter(e => e.entity === entity && e.ohwRowId === row.id)
               : []
@@ -513,6 +548,38 @@ export const OhwSection = memo(function OhwSection({ section, entity, year = '20
             </Fragment>
             )
           })}
+
+          {/* ── Verborgen-rijen toggle (toont aantal als er iets verborgen is) ── */}
+          {(() => {
+            const hiddenCount = section.rows.length - section.rows.filter(r => rowShouldShow(r, months)).length
+            if (hiddenCount === 0) return null
+            return (
+              <tr>
+                <td colSpan={months.length + 3} style={{
+                  background: 'var(--bg2)', padding: '3px 12px 3px 26px',
+                  fontSize: 10, color: 'var(--t3)',
+                }}>
+                  <button
+                    onClick={() => setShowEmptyRows(v => !v)}
+                    style={{
+                      background: 'transparent', border: 'none',
+                      color: 'var(--t3)', fontSize: 10, cursor: 'pointer',
+                      padding: '2px 6px', textDecoration: 'underline',
+                      fontStyle: 'italic',
+                    }}
+                    title={showEmptyRows
+                      ? 'Verberg lege rijen weer'
+                      : `${hiddenCount} rij(en) zonder waarde in dit jaar — klik om te tonen`}
+                    data-rw="hide"
+                  >
+                    {showEmptyRows
+                      ? `▴ Verberg ${hiddenCount} lege rij(en)`
+                      : `▾ Toon ${hiddenCount} verborgen lege rij(en)`}
+                  </button>
+                </td>
+              </tr>
+            )
+          })()}
 
           {/* ── + Regel toevoegen ───────────────────────────────────── */}
           <tr>

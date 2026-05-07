@@ -508,7 +508,7 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
     let anyData = false
     for (const bv of bvs) {
       for (const m of fteMonthsForPeriod) {
-        const e = fteEntries.find(f => f.bv === bv && f.month === m)
+        const e = fteEntries.find(f => f.bv === bv && f.month === m && !f.vertical)
         if (!e) continue
         if (e.fte != null) { sumActual += e.fte; anyData = true }
         if (e.fteBudget != null) sumBudget += e.fteBudget
