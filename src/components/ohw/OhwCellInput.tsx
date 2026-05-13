@@ -13,6 +13,10 @@ interface Props {
   navCol?: string
   /** Tooltip bij hover (bv. bij IC-pair spiegeling). */
   title?: string
+  /** Read-only: input wordt disabled en accepteert geen edits. Gebruikt voor
+   *  IC-rijen die uit de IC facturatie-upload komen — de waarden zijn de
+   *  bron-van-waarheid, gebruiker moet het bestand opnieuw uploaden. */
+  readOnly?: boolean
 }
 
 /** Generieke cel-input voor de OHW Overzicht (en IC Sectie, Vooruit-
@@ -25,13 +29,14 @@ interface Props {
  *   - Enter: commit + spring naar de volgende input in dezelfde kolom
  *   - Tab: default browser (rechts).
  */
-export const OhwCellInput = memo(function OhwCellInput({ value, onCommit, style, navRow, navCol, title }: Props) {
+export const OhwCellInput = memo(function OhwCellInput({ value, onCommit, style, navRow, navCol, title, readOnly }: Props) {
   const [editing, setEditing] = useState(false)
   const [raw, setRaw] = useState('')
-  const display = editing ? raw : (value !== 0 ? fmt(value) : '')
+  const display = editing && !readOnly ? raw : (value !== 0 ? fmt(value) : '')
 
   const commit = () => {
     setEditing(false)
+    if (readOnly) return
     const parsed = parseNL(raw || '0')
     if (!isFinite(parsed)) return
     if (parsed !== value) onCommit(parsed)
@@ -40,20 +45,25 @@ export const OhwCellInput = memo(function OhwCellInput({ value, onCommit, style,
   return (
     <input
       className="ohw-inp"
-      style={style}
+      style={readOnly
+        ? { ...style, cursor: 'not-allowed', opacity: 0.85 }
+        : style}
       value={display}
-      placeholder="€ 0"
+      placeholder={readOnly ? '' : '€ 0'}
       title={title}
-      data-nav-col={navCol}
-      data-nav-row={navRow}
+      readOnly={readOnly}
+      data-nav-col={readOnly ? undefined : navCol}
+      data-nav-row={readOnly ? undefined : navRow}
       onFocus={(e) => {
+        if (readOnly) { e.target.blur(); return }
         setEditing(true)
         setRaw(value !== 0 ? String(value) : '')
         setTimeout(() => e.target.select(), 0)
       }}
-      onChange={e => setRaw(e.target.value)}
+      onChange={e => { if (!readOnly) setRaw(e.target.value) }}
       onBlur={commit}
       onKeyDown={e => {
+        if (readOnly) return
         if (e.key === 'Enter') {
           e.preventDefault()
           const target = e.currentTarget

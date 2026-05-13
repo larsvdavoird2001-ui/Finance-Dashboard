@@ -12,7 +12,7 @@ import { create } from 'zustand'
 export interface NavTarget {
   tab: 'maand' | 'ohw' | 'budget' | 'dashboard'
   /** Voor tab='maand' */
-  section?: 'import' | 'afsluiting' | 'tarieven' | 'fte' | 'export'
+  section?: 'import' | 'afsluiting' | 'tarieven' | 'fte' | 'export' | 'ic_facturatie'
   /** Voor tab='maand' met section='import' (slot-highlight in importoverzicht) */
   month?: string
   slotId?: string
@@ -24,6 +24,10 @@ export interface NavTarget {
    *  zojuist afgesloten maand (LE-leerlus / actuals + LE-prognose voor de
    *  maand erna). Gebruikt o.a. door MaandChecklist na finalize. */
   reviewMonth?: string
+  /** Optioneel DOM-id om naar te scrollen na het schakelen van de tab/section.
+   *  Gebruikt door MaandChecklist om gericht binnen de Maandafsluiting-sectie
+   *  naar bv. de kostenposten-tabel of een specifieke OHW-rubriek te springen. */
+  anchor?: string
 }
 
 interface NavStore {

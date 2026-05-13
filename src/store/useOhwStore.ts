@@ -5,6 +5,7 @@ import { recomputeEntity } from '../lib/calc'
 import { ohwYearData2025 } from '../data/ohwData2025'
 import { ohwYearData2026 } from '../data/ohwData2026'
 import { fetchOhwEntities, upsertOhwEntity, upsertAllOhwEntities } from '../lib/db'
+import type { IcFacturatieAggregated, IcReceiverBv } from '../lib/parseImport'
 
 function initYear(yearData: OhwYearData): OhwYearData {
   const entities = yearData.entities.map(e => recomputeEntity(e, yearData.allMonths))
@@ -42,8 +43,10 @@ interface OhwStore {
    *  Returnt true bij succes, false als de section niet leeg was. */
   removeSection: (year: '2025' | '2026', entityName: string, sectionId: string) => boolean
   /** IC-pair: voegt TWEE gekoppelde IC-rijen toe (één in fromBv, één in toBv)
-   *  met gedeelde icPairId. Waardes blijven leeg; user vult ze later in. */
-  addIcPair: (year: '2025' | '2026', fromBv: BvName, toBv: BvName, description: string, responsible?: string) => void
+   *  met gedeelde icPairId. Waardes blijven leeg; user vult ze later in.
+   *  Retourneert de gegenereerde icPairId zodat caller direct kan focussen
+   *  op de net toegevoegde rij in de UI. */
+  addIcPair: (year: '2025' | '2026', fromBv: BvName, toBv: BvName, description: string, responsible?: string) => string
   /** IC-pair: verwijder BEIDE kanten van een gekoppelde IC-regel. */
   removeIcPair: (year: '2025' | '2026', icPairId: string) => void
   /** Update een IC-pair waarde. Zet de waarde bij de opgegeven entity en
@@ -51,6 +54,23 @@ interface OhwStore {
   updateIcPairValue: (year: '2025' | '2026', entityName: string, rowId: string, month: string, value: number) => void
   /** Update de beschrijving van een IC-pair (beide kanten synchroon). */
   updateIcPairDescription: (year: '2025' | '2026', icPairId: string, description: string) => void
+  /** IC Facturatie upload: vervangt alle auto-rijen (sourceSlot='ic_facturatie')
+   *  voor de gegeven (receiverBv, month) door rijen op basis van de upload.
+   *  Voor elke (werknemer, klant, van→naar) komt er een paar-rij aan beide
+   *  kanten met deterministische icPairId zodat re-uploads idempotent zijn:
+   *  - bestaande pair gevonden → maand-waarde wordt geüpdatet
+   *  - nieuwe combinatie       → nieuw pair aangemaakt (locked, beide BVs)
+   *  - bestaande pair niet meer in upload → maand-waarde wordt op 0 gezet;
+   *    als de hele rij dan leeg is wordt het pair verwijderd. */
+  upsertIcFacturatie: (
+    year: '2025' | '2026',
+    receiverBv: IcReceiverBv,
+    month: string,
+    rows: IcFacturatieAggregated[],
+  ) => { addedPairs: number; updatedPairs: number; removedPairs: number }
+  /** Eénmalige migratie-flag: alle bestaande IC-rijen zonder locked-veld
+   *  krijgen locked=true bij rehydration. Voorkomt re-locking telkens. */
+  icLockedMigrated?: boolean
 }
 
 export const useOhwStore = create<OhwStore>()(
@@ -417,7 +437,7 @@ export const useOhwStore = create<OhwStore>()(
 
   // ── IC-pair acties: gekoppelde verrekening tussen twee BV's ─────────────
   addIcPair: (year, fromBv, toBv, description, responsible) => {
-    if (fromBv === toBv) return
+    if (fromBv === toBv) return ''
     const icPairId = `icp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const touched: OhwEntityData[] = []
     set(state => {
@@ -433,6 +453,9 @@ export const useOhwStore = create<OhwStore>()(
           icPairId,
           icFromBv: fromBv,
           icToBv: toBv,
+          // Handmatig toegevoegd via UI → editable (alle andere IC-rijen
+          // zijn standaard locked).
+          manualIc: true,
         }
         const updated = { ...entity, icVerrekening: [...entity.icVerrekening, newRow] }
         const recomputed = recomputeEntity(updated, prev.allMonths)
@@ -442,6 +465,7 @@ export const useOhwStore = create<OhwStore>()(
       return { [key]: { ...prev, entities } }
     })
     for (const e of touched) upsertOhwEntity(year, e)
+    return icPairId
   },
 
   removeIcPair: (year, icPairId) => {
@@ -521,6 +545,183 @@ export const useOhwStore = create<OhwStore>()(
     for (const e of touched) upsertOhwEntity(year, e)
   },
 
+  upsertIcFacturatie: (year, receiverBv, month, uploadRows) => {
+    // Deterministische pair-id zodat re-uploads bestaande paren updaten ipv
+    // duplicaten te maken. Worker-id (uit tarief-tabel) is stabiel; bij
+    // unmatched workers vallen we terug op de raw naam.
+    const norm = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'x'
+    const pairIdFor = (r: IcFacturatieAggregated) =>
+      `ic-auto-${norm(r.werknemerId ?? r.werknemerRaw)}-${norm(r.klant)}-${norm(r.fromBv)}-${norm(r.toBv)}`
+
+    // Stats voor caller-rapport
+    let addedPairs = 0
+    let updatedPairs = 0
+    let removedPairs = 0
+    const touchedEntities: OhwEntityData[] = []
+
+    set(state => {
+      const key = year === '2025' ? 'data2025' : 'data2026'
+      const prev = state[key]
+
+      // Stap 1: verzamel alle bestaande auto-pairs in de hele year (we updaten
+      // ze indien nog steeds in de upload; anders clearen we maand-waarde).
+      const uploadPairIds = new Set<string>()
+      for (const r of uploadRows) {
+        if (r.fromBv !== receiverBv) continue  // alleen rijen voor déze receiver
+        uploadPairIds.add(pairIdFor(r))
+      }
+      // Vind bestaande pair-ids die GEINITIEERD zijn door een eerdere upload
+      // VAN DEZELFDE RECEIVER. Dat doen we door alleen pairs te pakken waar
+      // receiverBv de FROM-kant is (icFromBv === receiverBv). Anders zouden
+      // mirror-rijen van andere BV's hun uploads (waar receiverBv de TO-kant
+      // is) hier verschijnen — en CASE B zou ze ten onrechte clearen omdat
+      // ze niet in DEZE upload zitten. Verspringt anders bij een 3e upload.
+      const existingPairIds = new Set<string>()
+      const receiverEntity = prev.entities.find(e => e.entity === receiverBv)
+      if (receiverEntity) {
+        for (const row of receiverEntity.icVerrekening) {
+          if (row.sourceSlot !== 'ic_facturatie') continue
+          if (!row.icPairId) continue
+          // Alleen rijen waar deze BV de betaler is — d.w.z. uit een eerdere
+          // upload met DEZE BV als receiver. Mirror-rijen uit andere uploads
+          // overslaan zodat we ze niet stilletjes verwijderen.
+          if (row.icFromBv !== receiverBv) continue
+          existingPairIds.add(row.icPairId)
+        }
+      }
+
+      // Stap 2: bouw lookup van upload-rows per pair-id voor snelle access
+      const uploadByPairId: Record<string, IcFacturatieAggregated> = {}
+      for (const r of uploadRows) {
+        if (r.fromBv !== receiverBv) continue
+        uploadByPairId[pairIdFor(r)] = r
+      }
+
+      // Stap 3: voor elke pair-id in (upload ∪ existing) → bereken target
+      // state per entity-rij. We werken één pair tegelijk af zodat beide
+      // kanten consistent blijven.
+      type PairAction = {
+        pairId: string
+        upload?: IcFacturatieAggregated   // undefined = niet meer in upload
+      }
+      const allPairIds = new Set([...uploadPairIds, ...existingPairIds])
+      const actions: PairAction[] = [...allPairIds].map(pairId => ({
+        pairId, upload: uploadByPairId[pairId],
+      }))
+
+      // Stap 4: muteer de entities
+      const entitiesById: Record<string, OhwEntityData> = {}
+      for (const e of prev.entities) entitiesById[e.entity] = e
+
+      /** Zorg dat er een rij met deze pairId+side bestaat in entityBv;
+       *  retourneert {row, created}. Muteert entitiesById in-place. */
+      const ensureRow = (
+        entityBv: string,
+        pairId: string,
+        side: 'from' | 'to',
+        upload: IcFacturatieAggregated,
+      ): { row: OhwRow; created: boolean } => {
+        const ent = entitiesById[entityBv]
+        const existing = ent.icVerrekening.find(r => r.icPairId === pairId && r.id.endsWith(`-${side}`))
+        if (existing) return { row: existing, created: false }
+        const newRow: OhwRow = {
+          id: `${pairId}-${side}`,
+          // "Werknemer — Klant" — van→naar wordt visueel getoond via icFromBv/icToBv badges
+          description: `${upload.werknemer} — ${upload.klant}`,
+          values: {},
+          locked: true,
+          sourceSlot: 'ic_facturatie',
+          icPairId: pairId,
+          icFromBv: upload.fromBv,
+          icToBv: upload.toBv,
+        }
+        entitiesById[entityBv] = { ...ent, icVerrekening: [...ent.icVerrekening, newRow] }
+        return { row: newRow, created: true }
+      }
+
+      /** Zet de maand-waarde op een bestaande rij (in entitiesById). */
+      const setRowMonth = (entityBv: string, rowId: string, value: number) => {
+        const ent = entitiesById[entityBv]
+        entitiesById[entityBv] = {
+          ...ent,
+          icVerrekening: ent.icVerrekening.map(r =>
+            r.id === rowId ? { ...r, values: { ...r.values, [month]: value } } : r,
+          ),
+        }
+      }
+
+      for (const action of actions) {
+        const upload = action.upload
+
+        if (upload) {
+          // CASE A: pair zit in upload → ensure + zet maand-waarde.
+          //
+          // Sign-conventie (per user-feedback): het bestand toont WAT DEZE BV
+          // moet betalen aan de andere BV. Dat is een KOST voor de BV-van-het-
+          // bestand (receiver in onze upload, fromBv genaamd) → NEGATIEF in
+          // hun IC verrekening. De andere kant (de provider-BV) ziet hetzelfde
+          // bedrag als OPBRENGST → POSITIEF.
+          //
+          // NB: eerdere implementatie had dit andersom (fromBv +amount, toBv
+          // -amount) wat de user als "het staat positief, maar moet negatief"
+          // ervaarde. Zie commit-historie voor context.
+          if (!entitiesById[upload.fromBv] || !entitiesById[upload.toBv]) continue
+
+          const fromR = ensureRow(upload.fromBv, action.pairId, 'from', upload)
+          const toR   = ensureRow(upload.toBv,   action.pairId, 'to',   upload)
+          // fromBv (= upload-BV) krijgt het MINTEKEN (kost: zij betalen)
+          setRowMonth(upload.fromBv, fromR.row.id, -Math.abs(upload.amount))
+          // toBv (= provider-BV) krijgt het PLUSTEKEN (opbrengst: zij ontvangen)
+          setRowMonth(upload.toBv,   toR.row.id,   +Math.abs(upload.amount))
+
+          if (fromR.created || toR.created) addedPairs++
+          else updatedPairs++
+        } else {
+          // CASE B: pair was er, niet meer in upload → maand-waarde op 0
+          // Als rij na clearen helemaal leeg is → verwijder pair (beide kanten)
+          for (const ent of Object.values(entitiesById)) {
+            const matchRow = ent.icVerrekening.find(r => r.icPairId === action.pairId)
+            if (!matchRow) continue
+            const newValues = { ...matchRow.values, [month]: 0 }
+            // Heeft de rij nog niet-nul waardes voor andere maanden?
+            const hasOther = Object.entries(newValues).some(([, v]) => v !== null && v !== 0)
+            if (hasOther) {
+              const updatedRow = { ...matchRow, values: newValues }
+              entitiesById[ent.entity] = {
+                ...ent,
+                icVerrekening: ent.icVerrekening.map(r => r.id === matchRow.id ? updatedRow : r),
+              }
+            } else {
+              // Rij is leeg → verwijder
+              entitiesById[ent.entity] = {
+                ...ent,
+                icVerrekening: ent.icVerrekening.filter(r => r.id !== matchRow.id),
+              }
+            }
+          }
+          removedPairs++
+        }
+      }
+
+      // Stap 5: recompute alle aangeraakte entities (totaalIC etc.)
+      const nextEntities = prev.entities.map(e => {
+        const updated = entitiesById[e.entity] ?? e
+        if (updated === e) return e
+        const recomputed = recomputeEntity(updated, prev.allMonths)
+        touchedEntities.push(recomputed)
+        return recomputed
+      })
+
+      return { [key]: { ...prev, entities: nextEntities } }
+    })
+
+    // Stap 6: push aangeraakte entities naar Supabase
+    for (const e of touchedEntities) upsertOhwEntity(year, e)
+
+    return { addedPairs, updatedPairs, removedPairs }
+  },
+
   updateIcPairDescription: (year, icPairId, description) => {
     const touched: OhwEntityData[] = []
     set(state => {
@@ -552,12 +753,39 @@ export const useOhwStore = create<OhwStore>()(
         data2025: state.data2025,
         data2026: state.data2026,
         deletedRowIds: state.deletedRowIds,
+        icLockedMigrated: state.icLockedMigrated,
       }) as unknown as OhwStore,
       // Accepteer elke oude versie uit localStorage zonder data te verliezen
       // (fail-safe voor wanneer persist-versies ooit wel opzettelijk bumpen).
       migrate: (persistedState) => persistedState as OhwStore,
       onRehydrateStorage: () => (state) => {
         if (!state) return
+        // Eénmalige migratie: alle bestaande IC-verrekeningsrijen krijgen
+        // locked=true, behalve rijen die de gebruiker NA deze migratie
+        // handmatig toevoegt (die starten zonder locked-flag). Sentinel
+        // voorkomt herhaalde migratie bij elke rehydration.
+        if (!state.icLockedMigrated) {
+          const lockExistingIc = (entity: OhwEntityData): OhwEntityData => ({
+            ...entity,
+            icVerrekening: entity.icVerrekening.map(r =>
+              r.locked ? r : { ...r, locked: true },
+            ),
+          })
+          if (state.data2025?.entities) {
+            state.data2025 = {
+              ...state.data2025,
+              entities: state.data2025.entities.map(lockExistingIc),
+            }
+          }
+          if (state.data2026?.entities) {
+            state.data2026 = {
+              ...state.data2026,
+              entities: state.data2026.entities.map(lockExistingIc),
+            }
+          }
+          state.icLockedMigrated = true
+        }
+
         // Recompute afgeleide velden (mutatieOhw, mutatieVooruitgefactureerd,
         // nettoOmzet, etc) uit de ruwe rijen. Doet GEEN data-vernietiging —
         // alleen re-berekening van derived values met huidige calc-regels.

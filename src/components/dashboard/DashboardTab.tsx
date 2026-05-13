@@ -328,9 +328,23 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const declPct      = totalWritten > 0 ? (totalDecl / totalWritten * 100) : 0
 
   // ── WIP ──────────────────────────────────────────────────────────────────
-  const wipTotal = wipByMonth[period] ?? 0
+  // KPI-tegel: lees OHW direct uit de OHW-data voor de geselecteerde periode,
+  // ONAFHANKELIJK van finalized-status. wipByMonth (hierboven) is strict
+  // gekoppeld aan finalizedSet — bedoeld voor de OHW-maandbalken in de kaart —
+  // maar voor de KPI willen we de feitelijke OHW-stand tonen. Anders krijgen
+  // gebruikers die (nog) niet de finalized-records van een net-afgesloten
+  // maand binnen hebben (race, stale state, of een viewer waarvoor de
+  // closing_finalized fetch leeg terugkomt) misleidend €0 ondanks dat de
+  // OHW-cijfers gewoon in Supabase staan.
   const prevPeriod = ACTUAL_PERIODS[ACTUAL_PERIODS.indexOf(period) - 1]
-  const wipPrev  = prevPeriod ? (wipByMonth[prevPeriod] ?? 0) : 0
+  const wipTotal = ohwEntitiesFiltered.reduce(
+    (sum, e) => sum + (e.totaalOnderhanden[period] ?? 0), 0,
+  )
+  const wipPrev = prevPeriod
+    ? ohwEntitiesFiltered.reduce(
+        (sum, e) => sum + (e.totaalOnderhanden[prevPeriod] ?? 0), 0,
+      )
+    : 0
   const wipDelta = wipTotal - wipPrev
 
   // ── Charts: Actual + LE forecast trend ───────────────────────────────────

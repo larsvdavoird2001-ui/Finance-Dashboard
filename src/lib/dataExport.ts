@@ -1,18 +1,16 @@
-/** Auto-export van alle TPG-data naar een JSON-bestand op de gebruikers PC.
- *  Werkt als ultieme veiligheidsklep: zelfs als Supabase faalt EN localStorage
- *  wordt gewist, kan de gebruiker altijd het JSON-bestand uit zijn Downloads-
- *  map terughalen.
+/** Hand-getriggerde export van alle TPG-data naar een JSON-bestand op de
+ *  gebruikers PC. Werkt als veiligheidsklep voor het geval Supabase faalt EN
+ *  localStorage wordt gewist.
  *
- *  - Eens per app-start (alleen voor admin) downloaden we een snapshot.
  *  - Filename: tpg-finance-backup-<datum>.json
  *  - Bevat: alle tpg-* localStorage keys, niet alleen wat in Supabase staat.
+ *  - Wordt aangeroepen vanuit BackupPanel / BackupsTab (knop), niet automatisch.
  */
 
 const DATA_PREFIX = 'tpg-'
 const BACKUP_PREFIX = 'tpg-backup-'
 const IGNORE_KEYS = new Set(['tpg-last-user'])
 const LAST_DOWNLOAD_KEY = 'tpg-last-export-ts'
-const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
 interface ExportSnapshot {
   exportedAt: string
@@ -65,22 +63,6 @@ export function downloadBackupNow(user: string | null): void {
     console.info(`[dataExport] backup gedownload: ${filename}`)
   } catch (e) {
     console.warn('[dataExport] download mislukt:', e)
-  }
-}
-
-/** Auto-download als er sinds de laatste download minstens 24 uur voorbij is.
- *  Returnt true als er gedownload is. */
-export function autoDownloadIfStale(user: string | null): boolean {
-  try {
-    const lastTs = Number(localStorage.getItem(LAST_DOWNLOAD_KEY) ?? 0)
-    if (Date.now() - lastTs < ONE_DAY_MS) return false
-    // Geen data om te exporteren? Skip.
-    if (Object.keys(collectData()).length === 0) return false
-    downloadBackupNow(user)
-    return true
-  } catch (e) {
-    console.warn('[dataExport] autoDownloadIfStale failed:', e)
-    return false
   }
 }
 

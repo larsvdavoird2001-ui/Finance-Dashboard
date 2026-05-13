@@ -1,5 +1,6 @@
 // parseImport.ts — intelligente SAP Excel/CSV parser voor TPG Finance imports
 import * as XLSX from 'xlsx'
+import type { TariffEntry } from '../data/types'
 
 type BvId = 'Consultancy' | 'Projects' | 'Software'
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
@@ -2778,4 +2779,298 @@ export function getUnmatchedSamplesForColumn(
     }
   }
   return out
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// IC FACTURATIE — uren-export per ontvangende BV. Bevat werknemers uit
+// andere BV's die werk hebben verricht voor projecten van DEZE BV. Berekent
+// per (werknemer, van→naar, klant) het totaal aantal uren × IC-tarief →
+// vult de IC-verrekening in OHW Overzicht: ontvanger BV (= file-BV) krijgt
+// een minteken, leverancier BV krijgt een plusteken.
+// ════════════════════════════════════════════════════════════════════════════
+
+export type IcReceiverBv = 'Consultancy' | 'Projects' | 'Software'
+
+/** Normaliseer een willekeurige bedrijfs-string naar één van de drie BVs.
+ *  De files gebruiken "The People Group | Projects" / "...Consultancy B.V."
+ *  etc. matchesBedrijf vangt al die varianten met SAP-codes als bonus. */
+export function normalizeBedrijfToBv(s: unknown): IcReceiverBv | null {
+  if (matchesBedrijf(s, 'Consultancy')) return 'Consultancy'
+  if (matchesBedrijf(s, 'Projects'))    return 'Projects'
+  if (matchesBedrijf(s, 'Software'))    return 'Software'
+  return null
+}
+
+/** Eén geaggregeerde IC-regel: per (werknemer, van→naar, klant) optellen.
+ *  Wordt gebruikt om OHW IC-verrekeningsrijen aan te maken én om de wizard
+ *  een review-overzicht te tonen. */
+export interface IcFacturatieAggregated {
+  werknemer: string              // display-naam (eerste voorkomen in file)
+  werknemerRaw: string           // ruwe identifier — voor missing-tariff lookup
+  werknemerId?: string           // tariff-entry id na match
+  tarief: number                 // uurtarief (0 als ontbrekend / unmatched)
+  klant: string                  // "Klant (Project)" kolomwaarde
+  fromBv: IcReceiverBv           // ontvanger (= betaalt, min-teken in OHW)
+  toBv: IcReceiverBv             // leverancier (= ontvangt, plus-teken)
+  hours: number
+  amount: number                 // hours × tarief
+  matched: boolean               // false = werknemer niet in tarief-tabel
+}
+
+/** Werknemer die in de upload staat maar niet in de IC Tarieven-tabel.
+ *  Wordt aan de wizard getoond zodat de gebruiker een entry kan aanmaken. */
+export interface IcFacturatieUnmatched {
+  werknemerRaw: string
+  providerBv: IcReceiverBv  // BV waar de werknemer hoort te zitten
+  totalHours: number
+  klanten: string[]
+}
+
+/** Werknemer wél in tarief-tabel, maar tarief = 0 / ontbrekend. Wizard kan
+ *  de gebruiker laten invullen voordat de import goedgekeurd wordt. */
+export interface IcFacturatieMissingTariff {
+  id: string
+  naam: string
+  providerBv: IcReceiverBv
+  totalHours: number
+}
+
+export interface IcFacturatieParseResult {
+  /** Geaggregeerde rijen (matched + unmatched + missing-tariff samen — bij
+   *  unmatched/missing-tariff staat amount=0 en matched=false). */
+  rows: IcFacturatieAggregated[]
+  unmatchedWorkers: IcFacturatieUnmatched[]
+  workersWithoutTariff: IcFacturatieMissingTariff[]
+  warnings: string[]
+  rawRowCount: number
+  parsedRowCount: number
+  /** Som van alle bedragen (excl. unmatched/missing-tariff). Wordt in
+   *  ImportRecord.totalAmount opgenomen voor cross-checking. */
+  totalAmount: number
+  /** Verwachte receiver-BV uit het bestand zelf — gebaseerd op de meest
+   *  voorkomende waarde in "Bedrijf (Project)". Als deze niet overeenkomt
+   *  met de receiver die de gebruiker bij de upload-slot heeft gekozen,
+   *  geeft de wizard een waarschuwing. */
+  detectedReceiverBv: IcReceiverBv | null
+}
+
+/** Parser: leest een IC facturatie-bestand en aggregeert per
+ *  (werknemer, van→naar, klant). Tariff-lookups per provider-BV zodat
+ *  een werknemer uit Projects niet per ongeluk gematcht wordt aan een
+ *  homoniem in Consultancy. */
+export function parseIcFacturatie(
+  sheetRows: unknown[][],
+  receiverBv: IcReceiverBv,
+  tariffEntries: TariffEntry[],
+): IcFacturatieParseResult {
+  const warnings: string[] = []
+
+  // 1) Vind de header-rij — verwacht een rij met "Werknemer" + "Bedrijf"
+  let headerRowIdx = -1
+  for (let i = 0; i < Math.min(sheetRows.length, 12); i++) {
+    const r = sheetRows[i] ?? []
+    const joined = r.map(c => String(c ?? '').toLowerCase()).join('|')
+    if (joined.includes('werknemer') && joined.includes('bedrijf')) {
+      headerRowIdx = i
+      break
+    }
+  }
+  if (headerRowIdx < 0) {
+    return {
+      rows: [], unmatchedWorkers: [], workersWithoutTariff: [],
+      warnings: ['Geen header-rij gevonden — verwacht een rij met "Werknemer" en "Bedrijf".'],
+      rawRowCount: 0, parsedRowCount: 0, totalAmount: 0, detectedReceiverBv: null,
+    }
+  }
+
+  // sheet_to_json kan SPARSE arrays terug geven (gaten waar geen cell-waarde
+  // is). `.map()` preserveert die gaten en `findIndex` ziet ze als undefined
+  // → crash bij h.toLowerCase(). Densify via Array.from zodat elke index een
+  // string is.
+  const rawHeaders = (sheetRows[headerRowIdx] ?? []) as unknown[]
+  const headers: string[] = Array.from(
+    { length: rawHeaders.length },
+    (_, i) => String(rawHeaders[i] ?? '').trim(),
+  )
+  const dataRows = sheetRows.slice(headerRowIdx + 1)
+
+  // 2) Vind kolom-indices — name-based zodat we niet aan vaste posities vast zitten.
+  //    Defensief: skip ook undefined-cellen voor het geval er nog ergens een hole zit.
+  const findCol = (predicate: (lower: string) => boolean): number =>
+    headers.findIndex(h => typeof h === 'string' && predicate(h.toLowerCase().trim()))
+  const cWerknemer        = findCol(h => h === 'werknemer')
+  const cKlant            = findCol(h => h.startsWith('klant'))
+  const cBedrijfProject   = findCol(h => h === 'bedrijf (project)')
+  // "Bedrijf" — moet exact zijn want "Bedrijf (Project)" ook matcht /bedrijf/
+  const cBedrijfWerknemer = headers.findIndex(h => typeof h === 'string' && h.trim().toLowerCase() === 'bedrijf')
+  const cUren             = findCol(h => h.includes('geregistreerde tijd') || h.includes('tijd werknemer'))
+
+  const missing: string[] = []
+  if (cWerknemer < 0)        missing.push('Werknemer')
+  if (cKlant < 0)            missing.push('Klant (Project)')
+  if (cBedrijfProject < 0)   missing.push('Bedrijf (Project)')
+  if (cBedrijfWerknemer < 0) missing.push('Bedrijf')
+  if (cUren < 0)             missing.push('Geregistreerde tijd werknemer')
+  if (missing.length > 0) {
+    return {
+      rows: [], unmatchedWorkers: [], workersWithoutTariff: [],
+      warnings: [`Ontbrekende kolommen in bestand: ${missing.join(', ')}`],
+      rawRowCount: dataRows.length, parsedRowCount: 0, totalAmount: 0, detectedReceiverBv: null,
+    }
+  }
+
+  // 3) Bouw lookups per provider-BV — een werknemer wordt alleen gematcht
+  //    tegen de tarief-tabel van zijn eigen BV. Voorkomt bv. dat een
+  //    Projects-werknemer gemapt wordt aan een Consultancy-namesake.
+  const lookupByBv: Record<IcReceiverBv, TariffLookup> = {
+    Consultancy: buildTariffLookup(tariffEntries, 'Consultancy'),
+    Projects:    buildTariffLookup(tariffEntries, 'Projects'),
+    Software:    buildTariffLookup(tariffEntries, 'Software'),
+  }
+
+  // 4) Itereer over dataRows en aggregeer per (werknemer-key, klant, fromBv, toBv)
+  const aggKey = (a: { werknemerRaw: string; klant: string; fromBv: string; toBv: string }) =>
+    `${a.werknemerRaw}|${a.klant}|${a.fromBv}|${a.toBv}`.toLowerCase()
+
+  const agg: Record<string, IcFacturatieAggregated> = {}
+  // Onbekende werknemers: groeperen per (raw-naam, providerBv) zodat de
+  // wizard één rij per persoon krijgt met totale uren.
+  const unmatchedAgg: Record<string, IcFacturatieUnmatched> = {}
+  // Werknemers in tarief-tabel maar tarief=0/null
+  const missingTariffAgg: Record<string, IcFacturatieMissingTariff> = {}
+
+  const receiverBedrijfCounts: Record<string, number> = {}
+  let parsedCount = 0
+
+  for (const row of dataRows) {
+    if (!row || (row as unknown[]).length === 0) continue
+    const werknemerVal = row[cWerknemer]
+    const werknemerRaw = String(werknemerVal ?? '').trim()
+    if (!werknemerRaw) continue
+
+    const klant = String(row[cKlant] ?? '').trim() || '(geen klant)'
+    const bedrijfProjectStr  = String(row[cBedrijfProject] ?? '').trim()
+    const bedrijfWerknemerStr = String(row[cBedrijfWerknemer] ?? '').trim()
+    const hours = parseHoursCell(row[cUren])
+    if (hours === null || hours === 0) continue
+    if (hours < 0) continue  // correctie-regels niet meenemen
+
+    // Detecteer fromBv (ontvanger) en toBv (leverancier)
+    const fromBv = normalizeBedrijfToBv(bedrijfProjectStr)
+    const toBv   = normalizeBedrijfToBv(bedrijfWerknemerStr)
+    if (!fromBv || !toBv) {
+      warnings.push(
+        `Rij overgeslagen — BV niet herkenbaar: bedrijf(project)="${bedrijfProjectStr}", bedrijf="${bedrijfWerknemerStr}"`
+      )
+      continue
+    }
+    if (fromBv === toBv) {
+      // Geen IC nodig — werknemer en project zitten in dezelfde BV
+      continue
+    }
+    receiverBedrijfCounts[fromBv] = (receiverBedrijfCounts[fromBv] ?? 0) + 1
+
+    parsedCount++
+
+    // Match werknemer tegen tarief-tabel van zijn eigen BV (= toBv = leverancier)
+    const lookup = lookupByBv[toBv]
+    const match = matchRowValue(werknemerVal, lookup)
+
+    const key = aggKey({ werknemerRaw, klant, fromBv, toBv })
+    if (!match) {
+      // Onbekende werknemer — registreer voor wizard
+      const uKey = `${werknemerRaw}|${toBv}`.toLowerCase()
+      const u = unmatchedAgg[uKey] ?? {
+        werknemerRaw, providerBv: toBv, totalHours: 0, klanten: [],
+      }
+      u.totalHours += hours
+      if (!u.klanten.includes(klant)) u.klanten.push(klant)
+      unmatchedAgg[uKey] = u
+
+      // Voeg ook in agg als unmatched zodat we het in de preview kunnen tonen
+      const a = agg[key] ?? {
+        werknemer: werknemerRaw, werknemerRaw, klant, fromBv, toBv,
+        tarief: 0, hours: 0, amount: 0, matched: false,
+      }
+      a.hours += hours
+      agg[key] = a
+      continue
+    }
+
+    const tarief = match.tariff.tarief
+    if (!tarief || tarief <= 0) {
+      // Geen tarief ingevuld
+      const mtKey = `${match.tariff.id}|${toBv}`
+      const m = missingTariffAgg[mtKey] ?? {
+        id: match.tariff.id, naam: match.tariff.naam, providerBv: toBv, totalHours: 0,
+      }
+      m.totalHours += hours
+      missingTariffAgg[mtKey] = m
+
+      const a = agg[key] ?? {
+        werknemer: match.tariff.naam, werknemerRaw, werknemerId: match.tariff.id,
+        klant, fromBv, toBv, tarief: 0, hours: 0, amount: 0, matched: false,
+      }
+      a.hours += hours
+      agg[key] = a
+      continue
+    }
+
+    const a = agg[key] ?? {
+      werknemer: match.tariff.naam, werknemerRaw, werknemerId: match.tariff.id,
+      klant, fromBv, toBv, tarief, hours: 0, amount: 0, matched: true,
+    }
+    a.hours += hours
+    a.amount = a.hours * tarief
+    a.tarief = tarief
+    agg[key] = a
+  }
+
+  // 5) Bepaal de gedetecteerde ontvanger (meest voorkomende fromBv)
+  let detectedReceiverBv: IcReceiverBv | null = null
+  let detectedMax = 0
+  for (const bv of ['Consultancy','Projects','Software'] as IcReceiverBv[]) {
+    if ((receiverBedrijfCounts[bv] ?? 0) > detectedMax) {
+      detectedMax = receiverBedrijfCounts[bv] ?? 0
+      detectedReceiverBv = bv
+    }
+  }
+  if (detectedReceiverBv && detectedReceiverBv !== receiverBv) {
+    warnings.push(
+      `⚠ Bestand lijkt voor "${detectedReceiverBv}" te zijn (${detectedMax} rijen), niet voor "${receiverBv}". ` +
+      `Controleer of je het juiste bestand op de juiste plek upload.`,
+    )
+  }
+
+  const rows = Object.values(agg).sort((a, b) => {
+    if (a.toBv !== b.toBv) return a.toBv.localeCompare(b.toBv)
+    if (a.werknemer !== b.werknemer) return a.werknemer.localeCompare(b.werknemer)
+    return a.klant.localeCompare(b.klant)
+  })
+  const totalAmount = rows.reduce((s, r) => s + r.amount, 0)
+
+  warnings.push(
+    `${parsedCount} bruikbare regels uit ${dataRows.length} rijen — ${rows.length} unieke (werknemer, klant, van→naar) combinaties.`,
+  )
+  if (Object.keys(unmatchedAgg).length > 0) {
+    warnings.push(
+      `${Object.keys(unmatchedAgg).length} werknemer(s) niet in IC Tarieven-tabel gevonden.`,
+    )
+  }
+  if (Object.keys(missingTariffAgg).length > 0) {
+    warnings.push(
+      `${Object.keys(missingTariffAgg).length} werknemer(s) wél in tabel, maar zonder ingevuld IC-tarief.`,
+    )
+  }
+
+  return {
+    rows,
+    unmatchedWorkers: Object.values(unmatchedAgg).sort((a, b) => b.totalHours - a.totalHours),
+    workersWithoutTariff: Object.values(missingTariffAgg).sort((a, b) => b.totalHours - a.totalHours),
+    warnings,
+    rawRowCount: dataRows.length,
+    parsedRowCount: parsedCount,
+    totalAmount,
+    detectedReceiverBv,
+  }
 }

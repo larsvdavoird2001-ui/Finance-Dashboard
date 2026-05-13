@@ -55,10 +55,12 @@ interface Props {
    *  opnieuw draait met het nieuwe tarief. */
   onSetTariff: (employeeId: string, tarief: number) => void
   /** Wordt aangeroepen als user een onbekende identifier wil toevoegen aan
-   *  de IC Tarieven tabel. Krijgt de ruwe identifier-waarde zoals in de Excel
-   *  stond. De handler maakt een Consultancy entry aan met een slim gekozen
-   *  veld (naam/powerbiNaam/powerbiNaam2/id) op basis van de vorm. */
-  onAddEmployee: (rawIdentifier: string) => void
+   *  de IC Tarieven tabel — MET het IC-tarief dat ze inline in de wizard
+   *  hebben ingevuld. Krijgt de ruwe identifier-waarde + het tarief (€/u).
+   *  De handler maakt een Consultancy entry aan met tarief al gezet, zodat
+   *  de live preview meteen herrekent en de werknemer uit de unmatched-lijst
+   *  verdwijnt zonder dat de gebruiker naar de IC Tarieven-tab hoeft. */
+  onAddEmployee: (rawIdentifier: string, tarief: number) => void
 }
 
 type Step = 1 | 2 | 3 | 4
@@ -70,6 +72,10 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set())
   const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set())
   const [searchTerm, setSearchTerm] = useState<string>('')
+  // Stap 3: inline tarief-invoer per onbekende werknemer (key = raw identifier).
+  // Zelfde flow als bij IC Facturatie: vul tarief in, klik Toevoegen, het tarief
+  // wordt direct in IC Tarieven gezet en de live preview herrekent automatisch.
+  const [unmatchedTariefInputs, setUnmatchedTariefInputs] = useState<Record<string, string>>({})
 
   // Stap 1: sheet kiezen (default: eerste sheet, of sheet met "missing" in naam)
   const sheetNames = workbook.SheetNames
@@ -429,27 +435,53 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
                         <details open>
                           <summary style={{ color: 'var(--t2)', cursor: 'pointer', fontSize: 10 }}>
                             Voorbeelden van niet-gematchte waarden ({unmatchedSamples.length}) —
-                            klik "+ Voeg toe" om als Consultancy medewerker aan IC Tarieven toe te voegen
+                            vul het IC-tarief in en klik op "+ Toevoegen". De live berekening werkt direct bij.
                           </summary>
                           <div style={{ marginTop: 6, fontSize: 10 }}>
-                            {unmatchedSamples.map((v, i) => (
-                              <div key={i} style={{
-                                display: 'flex', alignItems: 'center', gap: 8,
-                                padding: '3px 0', borderBottom: '1px solid var(--bd)',
-                              }}>
-                                <span style={{ fontFamily: 'var(--mono)', color: 'var(--t2)', flex: 1 }}>
-                                  "{v.slice(0, 60)}"
-                                </span>
-                                <button
-                                  className="btn sm success"
-                                  onClick={() => onAddEmployee(v)}
-                                  style={{ fontSize: 9, padding: '2px 7px' }}
-                                  title="Toevoegen aan IC Tarieven als nieuwe Consultancy medewerker (tarief vul je daarna aan)"
-                                >
-                                  + Voeg toe aan IC Tarieven
-                                </button>
-                              </div>
-                            ))}
+                            {unmatchedSamples.map((v, i) => {
+                              const raw = unmatchedTariefInputs[v] ?? ''
+                              const tarief = parseFloat(raw.replace(',', '.'))
+                              const canAdd = isFinite(tarief) && tarief > 0
+                              const handleAdd = () => {
+                                if (!canAdd) return
+                                onAddEmployee(v, tarief)
+                                setUnmatchedTariefInputs(s => { const c = { ...s }; delete c[v]; return c })
+                              }
+                              return (
+                                <div key={i} style={{
+                                  display: 'flex', alignItems: 'center', gap: 6,
+                                  padding: '4px 0', borderBottom: '1px solid var(--bd)',
+                                }}>
+                                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--t2)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v}>
+                                    "{v.slice(0, 50)}"
+                                  </span>
+                                  <input
+                                    type="text"
+                                    value={raw}
+                                    onChange={e => setUnmatchedTariefInputs(s => ({ ...s, [v]: e.target.value }))}
+                                    onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
+                                    placeholder="€/u"
+                                    style={{
+                                      width: 56, padding: '2px 6px', fontSize: 10,
+                                      background: 'var(--bg1)', border: '1px solid var(--bd2)',
+                                      borderRadius: 4, color: 'var(--t1)', textAlign: 'right',
+                                      fontFamily: 'var(--mono)',
+                                    }}
+                                  />
+                                  <button
+                                    className="btn sm success"
+                                    onClick={handleAdd}
+                                    disabled={!canAdd}
+                                    style={{ fontSize: 9, padding: '2px 7px', opacity: canAdd ? 1 : 0.5, cursor: canAdd ? 'pointer' : 'not-allowed' }}
+                                    title={canAdd
+                                      ? `Toevoegen aan IC Tarieven als Consultancy medewerker met tarief €${tarief}/u`
+                                      : 'Vul eerst een geldig tarief in (> 0)'}
+                                  >
+                                    + Toevoegen
+                                  </button>
+                                </div>
+                              )
+                            })}
                           </div>
                         </details>
                       )}

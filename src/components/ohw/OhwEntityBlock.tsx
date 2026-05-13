@@ -184,12 +184,16 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
       </div>
 
       {/* ── Table body ──────────────────────────────────────────────
-         Overflow-x: visible zodat `position: sticky; top: 0` op de <th>
-         tegen de PAGE-scroll werkt (niet tegen een interne wrapper). Bij een
-         wrapper met overflow-x: auto wordt y ook auto volgens CSS-spec,
-         waardoor sticky enkel t.o.v. de wrapper plakt. */}
+         overflowX: auto zodat de brede tabel (alle maanden + Δ vs vorige +
+         Netto Omzet + Budget + Δ Budget) horizontaal scrollt binnen het
+         OHW-blok. .ohw-blk in index.css heeft overflow: hidden waardoor
+         zonder deze inner scroll de horizontale content visueel weggeklipt
+         werd. Sticky-top op de <th> hangt nu tegen deze wrapper aan i.p.v.
+         de page-scroll — accepteerbaar omdat in de huidige opstelling sticky
+         sowieso al niet tegen page-scroll plakte (.ohw-blk is ook een scroll-
+         context door overflow: hidden). */}
       {open && (
-        <div style={{ overflow: 'visible', borderRadius: '0 0 var(--r2) var(--r2)', borderTop: '1px solid var(--bd)' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'visible', borderRadius: '0 0 var(--r2) var(--r2)', borderTop: '1px solid var(--bd)' }}>
           <table className="tbl" style={{ minWidth: 'max-content', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
               <tr>

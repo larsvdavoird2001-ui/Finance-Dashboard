@@ -24,6 +24,10 @@ export interface OhwRow {
   icFromBv?: 'Consultancy' | 'Projects' | 'Software'
   /** BV die ontvangt (ziet de waarde met plusteken). Alleen gezet op IC-pair rijen. */
   icToBv?: 'Consultancy' | 'Projects' | 'Software'
+  /** IC-verrekening rij die handmatig is toegevoegd via de UI-knoppen na
+   *  introductie van de IC Facturatie-flow. Standaard zijn ALLE IC-rijen
+   *  locked — alleen rijen met manualIc=true zijn editable. */
+  manualIc?: boolean
 }
 
 export interface OhwSection {

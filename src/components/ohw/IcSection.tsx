@@ -36,12 +36,16 @@ function IcDescCell({
   onDescriptionSave,
   leftOffset = 0,
   width = 340,
+  readOnly = false,
+  lockTooltip,
 }: {
   row: OhwRow
   currentBv: BvName
   onDescriptionSave: (desc: string) => void
   leftOffset?: number
   width?: number
+  readOnly?: boolean
+  lockTooltip?: string
 }) {
   const [expanded, setExpanded] = useState(false)
   const isPaired = !!(row.icPairId && row.icFromBv && row.icToBv)
@@ -71,22 +75,25 @@ function IcDescCell({
             style={{
               width: expanded ? 420 : (isPaired ? 180 : 260),
               textAlign: 'left',
-              background: expanded ? 'var(--bg4)' : 'transparent',
-              border: expanded ? '1px solid var(--blue)' : 'none',
+              background: expanded && !readOnly ? 'var(--bg4)' : 'transparent',
+              border: expanded && !readOnly ? '1px solid var(--blue)' : 'none',
               fontSize: 11,
               overflow: expanded ? 'visible' : 'hidden',
               textOverflow: expanded ? 'clip' : 'ellipsis',
               whiteSpace: 'nowrap',
               paddingRight: isTruncatable && !expanded ? 20 : 7,
               transition: 'width 0.18s ease, background 0.12s',
-              boxShadow: expanded ? '0 4px 16px rgba(0,0,0,0.4)' : 'none',
+              boxShadow: expanded && !readOnly ? '0 4px 16px rgba(0,0,0,0.4)' : 'none',
               position: 'relative', zIndex: 2,
+              cursor: readOnly ? 'not-allowed' : undefined,
+              opacity: readOnly ? 0.85 : 1,
             }}
             defaultValue={row.description}
             placeholder="IC omschrijving..."
-            title={row.description || undefined}
-            onFocus={() => setExpanded(true)}
-            onBlur={e => { setExpanded(false); onDescriptionSave(e.target.value) }}
+            readOnly={readOnly}
+            title={readOnly ? lockTooltip : (row.description || undefined)}
+            onFocus={() => { if (!readOnly) setExpanded(true) }}
+            onBlur={e => { setExpanded(false); if (!readOnly) onDescriptionSave(e.target.value) }}
           />
           {isTruncatable && !expanded && (
             <span style={{
@@ -264,9 +271,34 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
     }
   }, [rows, onChange, updateIcPairDescription, year])
 
+  /** Focus de laatste-maand-cel van een net toegevoegde rij zodat de user
+   *  meteen kan typen. Wordt nodig na zowel addLegacyRow als addIcPair. */
+  const focusNewRowLastMonth = useCallback((rowId: string) => {
+    // Lege rijen worden weggefilterd door rowHasAnyValue — zet de toggle
+    // aan zodat de nieuwe rij ook echt rendert.
+    setShowEmptyIcRows(true)
+    setOpen(true)
+    // setTimeout zodat React eerst de nieuwe rij rendert; daarna pakken we
+    // de input via z'n data-nav-* attributen.
+    setTimeout(() => {
+      const targetMonth = months[months.length - 1]
+      const el = document.querySelector<HTMLInputElement>(
+        `input[data-nav-row="ic-${rowId}"][data-nav-col="${targetMonth}"]`,
+      )
+      if (el) {
+        el.focus()
+        el.select?.()
+      }
+    }, 60)
+  }, [months])
+
   const addLegacyRow = useCallback(() => {
-    onChange([...rows, { id: `ic-${Date.now()}`, description: '', values: {} }])
-  }, [rows, onChange])
+    // manualIc=true zodat de rij niet locked is — alle andere IC-rijen
+    // (uit upload of historische data) blijven standaard locked.
+    const newId = `ic-${Date.now()}`
+    onChange([...rows, { id: newId, description: '', values: {}, manualIc: true }])
+    focusNewRowLastMonth(newId)
+  }, [rows, onChange, focusNewRowLastMonth])
 
   // Check of de IC-rij één of meerdere ingevulde maand-waardes heeft.
   // Voor IC-pairs (icPairId gezet) kijken we óók naar de andere kant van
@@ -341,6 +373,15 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
 
       {open && (showEmptyIcRows ? rows : rows.filter(r => rowHasAnyValue(r))).map(row => {
         const isPaired = !!row.icPairId
+        // ALLE IC-rijen zijn standaard locked. Alleen rijen die de gebruiker
+        // expliciet via "+ IC-verrekening" / "+ enkelvoudig" heeft toegevoegd
+        // krijgen manualIc=true en blijven editable. Dit is robuuster dan
+        // alleen op row.locked vertrouwen, want Supabase-roundtrips kunnen
+        // die flag verliezen.
+        const isLocked = !row.manualIc
+        const lockTooltip = row.sourceSlot === 'ic_facturatie'
+          ? 'Deze regel komt uit de IC Facturatie-upload — upload het bestand opnieuw via Maandafsluiting → IC Facturatie om de waarden te wijzigen.'
+          : 'Deze regel is read-only. Voeg handmatige IC-verrekeningen toe via de "+ IC-verrekening tussen 2 BV\'s"-knop onderaan.'
         return (
           <tr key={row.id} className="sub">
             {/* Kolom 1: Contactpersoon (sticky-left) */}
@@ -352,21 +393,24 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
             }}>
               <input
                 className="ohw-inp"
-                style={{ width: '100%', fontSize: 11, textAlign: 'left', background: 'transparent', border: 'none' }}
+                style={{ width: '100%', fontSize: 11, textAlign: 'left', background: 'transparent', border: 'none', cursor: isLocked ? 'not-allowed' : undefined, opacity: isLocked ? 0.7 : 1 }}
                 defaultValue={row.contactPerson ?? ''}
                 placeholder="—"
-                onBlur={e => updateRowContactStore(year, currentBv, row.id, e.target.value)}
+                readOnly={isLocked}
+                onBlur={e => { if (!isLocked) updateRowContactStore(year, currentBv, row.id, e.target.value) }}
                 onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                title={row.contactPerson ? `Contact: ${row.contactPerson}` : 'Vul een contactpersoon in'}
+                title={isLocked ? lockTooltip : (row.contactPerson ? `Contact: ${row.contactPerson}` : 'Vul een contactpersoon in')}
               />
             </td>
             {/* Kolom 2: Omschrijving */}
             <IcDescCell
               row={row}
               currentBv={currentBv}
-              onDescriptionSave={desc => updateDescription(row, desc)}
+              onDescriptionSave={desc => { if (!isLocked) updateDescription(row, desc) }}
               leftOffset={contactColWidth}
               width={descColWidth}
+              readOnly={isLocked}
+              lockTooltip={isLocked ? lockTooltip : undefined}
             />
             {months.map(m => {
               const v = gv(row.values, m)
@@ -381,13 +425,24 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
                     navRow={`ic-${row.id}`}
                     navCol={m}
                     style={{ fontSize: 11, color: v < 0 ? 'var(--red)' : v > 0 ? 'var(--green)' : 'var(--t3)' }}
-                    title={isPaired ? `Pair — spiegelt naar ${row.icFromBv === currentBv ? row.icToBv : row.icFromBv} met omgekeerd teken` : undefined}
+                    title={isLocked
+                      ? lockTooltip
+                      : (isPaired ? `Pair — spiegelt naar ${row.icFromBv === currentBv ? row.icToBv : row.icFromBv} met omgekeerd teken` : undefined)}
+                    readOnly={isLocked}
                   />
                 </td>
               )
             })}
             <td style={{ background: 'var(--bg2)', width: 40, textAlign: 'center' }}>
               {(() => {
+                if (isLocked) {
+                  return (
+                    <span
+                      title={lockTooltip}
+                      style={{ fontSize: 11, color: 'var(--t3)', cursor: 'help' }}
+                    >🔒</span>
+                  )
+                }
                 const hasValue = rowHasAnyValue(row)
                 return (
                   <button
@@ -470,12 +525,20 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
                 + IC-verrekening tussen 2 BV's
               </button>
               <button
-                className="btn sm ghost"
-                style={{ fontSize: 10, color: 'var(--t3)', padding: '3px 10px' }}
+                className="btn sm"
+                style={{
+                  background: 'rgba(245,166,35,0.08)',
+                  border: '1px dashed var(--amber)',
+                  color: 'var(--amber)',
+                  fontSize: 11,
+                  padding: '3px 10px',
+                  flex: 1,
+                  justifyContent: 'center',
+                }}
                 onClick={addLegacyRow}
-                title="Losse IC-regel zonder koppeling (enkelzijdig)"
+                title="Voegt een eenzijdige IC-regel toe (alleen bij deze BV). Gebruik de omschrijving als toelichting/opmerking. Handig om het totale IC bedrag van deze BV handmatig bij te stellen na de auto-fill uit de IC Facturatie-upload."
               >
-                + enkelvoudig
+                ✏ Handmatige aanpassing IC + opmerking
               </button>
             </div>
           </td>
@@ -488,7 +551,13 @@ export const IcSection = memo(function IcSection({ rows, totaalIC, months, onCha
             currentBv={currentBv}
             onClose={() => setShowAddDialog(false)}
             onAdd={(from, to, desc) => {
-              addIcPair(year, from, to, desc)
+              const icPairId = addIcPair(year, from, to, desc)
+              if (icPairId) {
+                // De rij in currentBv heeft id `ic-<icPairId>-<currentBv>`
+                // (zie addIcPair in useOhwStore). Focus 'm direct zodat user
+                // meteen een bedrag kan invullen.
+                focusNewRowLastMonth(`ic-${icPairId}-${currentBv}`)
+              }
             }}
           />
         </td></tr>

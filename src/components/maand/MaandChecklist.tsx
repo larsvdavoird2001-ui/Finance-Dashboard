@@ -13,6 +13,7 @@ import { MaandFinalizeReport } from './MaandFinalizeReport'
 import type { ClosingBv } from '../../data/types'
 import type { LeSnapshotByBv } from '../../lib/db'
 import type { EntityName } from '../../data/plData'
+import type { NavTarget } from '../../store/useNavStore'
 
 interface ChecklistItem {
   key: string
@@ -50,7 +51,7 @@ const GROUPS: GroupDef[] = [
   { id: 'omzet',          step: 1,    title: 'Omzet importeren',         subtitle: 'Factuurvolume, NTF Uren, D-Lijst, Conceptfacturen, OHW Excel — vult de OHW-regels en factuurvolume per BV', countsForFinalize: true },
   { id: 'missing_ic',     step: 2,    title: 'Missing Hours + IC Tarieven', subtitle: 'Missing Hours import (Consultancy) + verificatie van IC-tarieven die ervoor gebruikt worden', countsForFinalize: true },
   { id: 'ohw_manual',     step: 3,    title: 'OHW Overzicht aanvullen',  subtitle: 'Niet-vergrendelde rijen handmatig invullen waar nodig (accruals, openstaande posten)', countsForFinalize: true },
-  { id: 'ic_verrekening', step: 4,    title: 'IC verrekeningen',         subtitle: 'IC-verrekeningsrijen in OHW Overzicht voor deze maand invullen', countsForFinalize: true },
+  { id: 'ic_verrekening', step: 4,    title: 'IC verrekeningen',         subtitle: 'Upload de 3 "ic facturatie"-bestanden (Consultancy/Projects/Software) — vult automatisch de IC verrekening in OHW Overzicht voor deze maand', countsForFinalize: true },
   { id: 'kosten',         step: 5,    title: 'Kostenposten invullen',    subtitle: 'Directe kosten / operationele kosten / amortisatie — via overrides of kosten-specificaties', countsForFinalize: true },
   { id: 'fte',            step: 6,    title: 'FTE & Headcount',          subtitle: 'Aantallen per BV in de FTE-tab — basis voor capaciteits- en LE-forecast', countsForFinalize: true },
   { id: 'extra',          step: null, title: 'Extra inzicht (optioneel)', subtitle: 'Niet vereist voor de Maandafsluiting — geeft wel meer detail in het Uren Dashboard', countsForFinalize: false },
@@ -212,7 +213,7 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
     { key: 'ohw_handmatig',     group: 'ohw_manual', label: 'OHW Overzicht handmatig aangevuld', icon: '🏗', description: `Niet-vergrendelde rijen in het OHW Overzicht voor ${month} — accruals, openstaande posten, etc. (${ohwManualCount} cellen ingevuld)`, auto: ohwManualCount > 0, required: true },
 
     // ── Stap 4: IC verrekeningen ────────────────────────────────────────
-    { key: 'ic_verrekening',    group: 'ic_verrekening', label: 'IC verrekeningen ingevuld', icon: '🔁', description: 'IC-verrekeningsrijen in het OHW Overzicht voor deze maand invullen — bepaalt netto-omzet per BV vóór en na IC', auto: icFilled, required: true },
+    { key: 'ic_verrekening',    group: 'ic_verrekening', label: 'IC verrekeningen ingevuld', icon: '🔁', description: 'Upload de 3 "ic facturatie"-bestanden (CO/PR/SW) in de IC Facturatie-subtab — vult automatisch de IC-regels in OHW Overzicht (werknemer × tarief × uren, beide kanten gespiegeld)', auto: icFilled, required: true },
 
     // ── Stap 5: Kostenposten ────────────────────────────────────────────
     { key: 'kostenposten',      group: 'kosten', label: 'Kostenposten ingevuld', icon: '💸', description: 'Directe kosten / operationele kosten / amortisatie via kosten-overrides óf kosten-specificaties', auto: kostenFilled, required: true },
@@ -272,6 +273,37 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
       default:
         return null
     }
+  }
+
+  // ── Navigatie per checklist-item ───────────────────────────────────────
+  // Klik op een rij stuurt de gebruiker naar de plek waar de stap uitgevoerd
+  // moet worden. Voor import-slots scrolt MaandTab automatisch naar de juiste
+  // upload-kaart en highlight 'm even; voor kostenposten gebruiken we de
+  // 'anchor' om binnen de Maandafsluiting-tabel naar de kosten-rubriek te
+  // springen. OHW-gerelateerde items (handmatig invullen + IC verrekeningen)
+  // springen naar het OHW Overzicht-tabblad.
+  const getNavTarget = (key: string): NavTarget | null => {
+    switch (key) {
+      case 'imp_factuurvolume': return { tab: 'maand', section: 'import', month, slotId: 'factuurvolume' }
+      case 'imp_ntf':           return { tab: 'maand', section: 'import', month, slotId: 'uren_lijst' }
+      case 'imp_d_lijst':       return { tab: 'maand', section: 'import', month, slotId: 'd_lijst' }
+      case 'imp_concept':       return { tab: 'maand', section: 'import', month, slotId: 'conceptfacturen' }
+      case 'imp_ohw':           return { tab: 'maand', section: 'import', month, slotId: 'ohw' }
+      case 'imp_missing':       return { tab: 'maand', section: 'import', month, slotId: 'missing_hours' }
+      case 'ic_tarieven':       return { tab: 'maand', section: 'tarieven' }
+      case 'ohw_handmatig':     return { tab: 'ohw', year: '2026' }
+      case 'ic_verrekening':    return { tab: 'maand', section: 'ic_facturatie' }
+      case 'kostenposten':      return { tab: 'maand', section: 'afsluiting', anchor: 'kostenposten-section' }
+      case 'fte_headcount':     return { tab: 'maand', section: 'fte' }
+      case 'imp_geschreven':    return { tab: 'maand', section: 'import', month, slotId: 'geschreven_uren' }
+      case 'imp_uren_fact':     return { tab: 'maand', section: 'import', month, slotId: 'uren_facturering_totaal' }
+      default:                  return null
+    }
+  }
+
+  const navigateForItem = (key: string) => {
+    const target = getNavTarget(key)
+    if (target) navigateTo(target)
   }
 
   // ── Acties ─────────────────────────────────────────────────────────────
@@ -579,6 +611,7 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
                   const softMismatch = done && item.auto === false && item.manualOnly === true
                   const hardMismatch = done && item.auto === false && !item.manualOnly
                   const mismatchReason = hardMismatch ? getMissingDataReason(item) : null
+                  const canNavigate = getNavTarget(item.key) !== null
                   return (
                     <div
                       key={item.key}
@@ -593,9 +626,9 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
                         }
                       }}
                       title={
-                        hardMismatch ? `⚠ ${mismatchReason}\n\n${item.description}`
-                        : softMismatch ? `ⓘ Geen onderbouwing — getal staat wel manueel ingevuld, maar het bron-bestand voor ${month} is niet geüpload.\n\n${item.description}`
-                        : item.description
+                        hardMismatch ? `⚠ ${mismatchReason}\n\nKlik op de tegel om af te vinken, of op → om naar de juiste plek te gaan.\n${item.description}`
+                        : softMismatch ? `ⓘ Geen onderbouwing — getal staat wel manueel ingevuld, maar het bron-bestand voor ${month} is niet geüpload.\n\nKlik op de tegel om af te vinken, of op → om naar de juiste plek te gaan.\n${item.description}`
+                        : `Klik op de tegel om af te vinken${canNavigate ? ', of op → om naar de juiste plek te gaan' : ''}.\n${item.description}`
                       }
                       style={{
                         display: 'flex', alignItems: 'center', gap: 6,
@@ -618,13 +651,10 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
                         outline: 'none',
                       }}
                     >
-                      {/* Custom checkbox-visual zodat klikken op de hele tegel
-                          werkt (een echte <input> reageert anders alleen op
-                          de checkbox zelf, en readOnly+disabled gedrag
-                          verschilt per browser). */}
+                      {/* Custom checkbox-visual — niet apart klikbaar meer,
+                          de hele tegel toggelt nu (zie onClick op div). */}
                       <span
-                        aria-checked={done}
-                        role="checkbox"
+                        aria-hidden="true"
                         style={{
                           width: 14, height: 14, borderRadius: 3,
                           border: `1.5px solid ${done ? 'var(--green)' : 'var(--bd2)'}`,
@@ -675,6 +705,42 @@ export function MaandChecklist({ month, currentUserEmail, showToast }: Props) {
                         >
                           auto
                         </span>
+                      )}
+                      {canNavigate && (
+                        <button
+                          type="button"
+                          aria-label={`Ga naar de plek waar je "${item.label}" kunt invullen`}
+                          title={`Ga naar de plek waar je "${item.label}" kunt invullen`}
+                          onClick={e => { e.stopPropagation(); navigateForItem(item.key) }}
+                          onKeyDown={e => {
+                            if (e.key === ' ' || e.key === 'Enter') {
+                              e.stopPropagation()
+                            }
+                          }}
+                          style={{
+                            flexShrink: 0, marginLeft: 2,
+                            background: 'transparent',
+                            border: '1px solid var(--bd2)',
+                            color: 'var(--t2)',
+                            borderRadius: 4,
+                            padding: '0 6px',
+                            height: 18,
+                            fontSize: 11,
+                            lineHeight: 1,
+                            cursor: 'pointer',
+                            fontFamily: 'var(--font)',
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.background = 'var(--bg4)'
+                            e.currentTarget.style.color = 'var(--blue)'
+                            e.currentTarget.style.borderColor = 'var(--blue)'
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.background = 'transparent'
+                            e.currentTarget.style.color = 'var(--t2)'
+                            e.currentTarget.style.borderColor = 'var(--bd2)'
+                          }}
+                        >→</button>
                       )}
                     </div>
                   )

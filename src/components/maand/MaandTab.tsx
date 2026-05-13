@@ -21,6 +21,7 @@ import type { ParseOverrides, ParseResult, MissingHoursComputeConfig } from '../
 import type * as XLSX from 'xlsx'
 import { MissingHoursWizard } from './MissingHoursWizard'
 import { GenericImportWizard } from './GenericImportWizard'
+import { IcFacturatieWizard } from './IcFacturatieWizard'
 import { BijlagenSection } from './BijlagenSection'
 import { buildMonthBundleZip, buildFullMonthReportZip, downloadBlob } from '../../lib/exportMonthBundle'
 import type { FullReportSections } from '../../lib/exportMonthBundle'
@@ -220,6 +221,25 @@ function sectionRow(label: string, children: React.ReactNode, bold?: boolean) {
   )
 }
 
+/** Banner-component die boven elke sectie verschijnt zodra de actieve maand
+ *  definitief is afgesloten — verklaart waarom inputs disabled zijn en wijst
+ *  naar de "Heropenen"-knop in de Maandafsluiting-checklist. */
+function FinalizedLockBanner({ month }: { month: string }) {
+  return (
+    <div style={{
+      background: 'var(--bd-amber)', border: '1px solid var(--amber)', borderRadius: 8,
+      padding: '10px 14px', fontSize: 11, color: 'var(--amber)',
+      display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600,
+    }}>
+      <span style={{ fontSize: 14 }}>🔒</span>
+      <span>
+        Maand {month} is definitief afgesloten — uploads, goedkeuringen en aanpassingen zijn vergrendeld.
+        Heropen de maand via Maandafsluiting → checklist → <strong>⟲ Heropenen</strong> om weer wijzigingen te kunnen doen.
+      </span>
+    </div>
+  )
+}
+
 interface Props { filter: GlobalFilter }
 
 const COST_SECTIONS = ['directe_kosten', 'operationele_kosten', 'amortisatie_afschrijvingen'] as const
@@ -255,7 +275,7 @@ export function MaandTab({ filter: _filter }: Props) {
   // gebruiken we `BVS` (geshadowd) voor renders, totalen en validaties.
   const BVS: ClosingBv[] = lockedBv ? [lockedBv] : BVS_FULL
   const [month, setMonth] = useState<string>('Mar-26')
-  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'fte' | 'bijlagen'>('afsluiting')
+  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'fte' | 'bijlagen' | 'ic_facturatie'>('afsluiting')
   const [expandedCosts, setExpandedCosts] = useState<Set<CostSectionId>>(new Set())
   const toggleCostSection = (id: CostSectionId) =>
     setExpandedCosts(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
@@ -271,6 +291,10 @@ export function MaandTab({ filter: _filter }: Props) {
   const [wizardState, setWizardState] = useState<{ workbook: XLSX.WorkBook; fileName: string; file: File } | null>(null)
   // Generic wizard state — voor factuurvolume / geschreven_uren / uren_lijst / d_lijst / conceptfacturen
   const [genericWizardState, setGenericWizardState] = useState<{ workbook: XLSX.WorkBook; fileName: string; file: File; slotId: string } | null>(null)
+  // IC Facturatie wizard state — kies welke receiver-BV bij welk bestand
+  const [icFactWizard, setIcFactWizard] = useState<{ workbook: XLSX.WorkBook; fileName: string; receiverBv: 'Consultancy' | 'Projects' | 'Software' } | null>(null)
+  // Drag-over feedback voor IC Facturatie upload-kaarten — null = niets sleept
+  const [icFactDragOver, setIcFactDragOver] = useState<'Consultancy' | 'Projects' | 'Software' | null>(null)
   const [exportMonths, setExportMonths] = useState<string[]>(['Jan-26', 'Feb-26', 'Mar-26'])
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const [highlightSlot, setHighlightSlot] = useState<string | null>(null)
@@ -280,23 +304,63 @@ export function MaandTab({ filter: _filter }: Props) {
   const navConsume = useNavStore(s => s.consume)
   const navigateTo = useNavStore(s => s.navigateTo)
   useEffect(() => {
+    // Alleen consumeren als het target ons aangaat (tab=maand of geen tab) —
+    // anders zou MaandTab het verbruiken voordat OhwTab het kan oppikken bij
+    // tab='ohw' navigatie.
+    if (navPending && navPending.tab && navPending.tab !== 'maand') return
     const target = navConsume()
-    if (target?.section === 'import' && target.month && target.slotId) {
-      setActiveSection('import')
-      setUploadMonth(target.month)
-      setHighlightSlot(target.slotId)
-      // Scroll de juiste kaart in beeld na korte render-delay
+    if (!target) return
+    if (target.month) setMonth(target.month)
+    if (target.section) {
+      setActiveSection(target.section)
+      if (target.section === 'import') {
+        if (target.month) setUploadMonth(target.month)
+        if (target.slotId) {
+          setHighlightSlot(target.slotId)
+          setTimeout(() => setHighlightSlot(null), 3000)
+        }
+      }
+    }
+    // Scroll naar slot-card (import) of expliciete anchor (bv. kostenposten).
+    const scrollId = target.section === 'import' && target.slotId
+      ? `import-slot-${target.slotId}`
+      : target.anchor
+    if (scrollId) {
       setTimeout(() => {
-        const el = document.getElementById(`import-slot-${target.slotId}`)
+        const el = document.getElementById(scrollId)
         el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       }, 100)
-      // Highlight na 3 seconden weer weghalen
-      setTimeout(() => setHighlightSlot(null), 3000)
     }
   }, [navPending])
 
+  // Zorg dat het slepen van een bestand naar buiten de upload-kaart NIET
+  // resulteert in een browser-default ("open file") waardoor de hele
+  // React-app uit beeld verdwijnt ("zwart beeld"). Zolang de IC Facturatie-
+  // tab open staat blokkeren we op window-niveau het default-gedrag voor
+  // dragover/drop; de specifieke onDrop op de kaart vangt het bestand op.
+  useEffect(() => {
+    if (activeSection !== 'ic_facturatie') return
+    const preventDefault = (e: DragEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('dragover', preventDefault)
+    window.addEventListener('drop', preventDefault)
+    return () => {
+      window.removeEventListener('dragover', preventDefault)
+      window.removeEventListener('drop', preventDefault)
+    }
+  }, [activeSection])
+
   const { entries, updateEntry } = useFinStore()
   const ensureEntry = useFinStore(s => s.ensureEntry)
+  // Re-subscribe op `finalized` zodat isMonthFinalized-resultaten herrekenen
+  // wanneer een maand wordt afgesloten/heropend in een andere render.
+  const finalizedMonths = useFinStore(s => s.finalized)
+  // Lock-status per relevante maand. Afsluiting-tab leest `month`; upload
+  // en IC Facturatie lezen `uploadMonth`. Banner + disabled inputs hangen
+  // hieraan zodat een afgesloten maand niet stilletjes aangepast wordt.
+  const afsluitingLocked = finalizedMonths.some(f => f.month === month)
+  const uploadLocked     = finalizedMonths.some(f => f.month === uploadMonth)
   const upsertHoursBulk = useHoursStore(s => s.upsertBulk)
   const upsertHoursWeekBulk = useHoursWeekStore(s => s.upsertBulk)
   // Pending geschreven-uren-batches per record-id. Worden gepusht naar de
@@ -313,6 +377,7 @@ export function MaandTab({ filter: _filter }: Props) {
   const { toasts, showToast } = useToast()
   const ohwData2026 = useOhwStore(s => s.data2026)
   const updateRowValue = useOhwStore(s => s.updateRowValue)
+  const upsertIcFacturatie = useOhwStore(s => s.upsertIcFacturatie)
   const tariffEntries = useTariffStore(s => s.entries)
   const updateTariffEntry = useTariffStore(s => s.updateEntry)
   const addTariffEntry = useTariffStore(s => s.addEntry)
@@ -700,6 +765,11 @@ export function MaandTab({ filter: _filter }: Props) {
   }
 
   const handleApprove = (record: ImportRecord) => {
+    // Guard: niet goedkeuren als de maand al definitief afgesloten is.
+    if (finalizedMonths.some(f => f.month === record.month)) {
+      showToast(`Maand ${record.month} is definitief afgesloten — heropen eerst via Maandafsluiting`, 'r')
+      return
+    }
     // flushSync: commit de modal-close onmiddellijk (in plaats van batched met
     // de store-updates hieronder). Mocht een downstream store-call gooien —
     // bv. localStorage-quota bij grote imports — dan is de modal al dicht.
@@ -1193,7 +1263,7 @@ export function MaandTab({ filter: _filter }: Props) {
   return (
     <>
       <div className="page">
-        {/* Section tabs + month selector */}
+        {/* Section tabs */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="tabs-row">
             <button className={`tab${activeSection === 'afsluiting' ? ' active' : ''}`} onClick={() => setActiveSection('afsluiting')}>Maandafsluiting</button>
@@ -1205,28 +1275,12 @@ export function MaandTab({ filter: _filter }: Props) {
                 </span>
               )}
             </button>
+            <button className={`tab${activeSection === 'ic_facturatie' ? ' active' : ''}`} onClick={() => setActiveSection('ic_facturatie')} title="Upload IC facturatie-bestanden (CO/PR/SW) — vult automatisch de IC verrekening in OHW Overzicht">🔁 IC Facturatie</button>
             <button className={`tab${activeSection === 'export' ? ' active' : ''}`} onClick={() => setActiveSection('export')}>Export & Log</button>
             <button className={`tab${activeSection === 'tarieven' ? ' active' : ''}`} onClick={() => setActiveSection('tarieven')}>IC Tarieven</button>
             <button className={`tab${activeSection === 'fte' ? ' active' : ''}`} onClick={() => setActiveSection('fte')}>FTE &amp; Headcount</button>
             <button className={`tab${activeSection === 'bijlagen' ? ' active' : ''}`} onClick={() => setActiveSection('bijlagen')}>📎 Bijlagen</button>
           </div>
-
-          {activeSection === 'afsluiting' && (
-            <div style={{ display: 'flex', gap: 4 }}>
-              {CLOSING_MONTHS.map(m => (
-                <button key={m} className={`btn sm${month === m ? ' primary' : ' ghost'}`} onClick={() => setMonth(m)}>{m}</button>
-              ))}
-            </div>
-          )}
-
-          {activeSection === 'import' && (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600 }}>MAAND:</span>
-              {CLOSING_MONTHS.map(m => (
-                <button key={m} className={`btn sm${uploadMonth === m ? ' primary' : ' ghost'}`} onClick={() => setUploadMonth(m)}>{m}</button>
-              ))}
-            </div>
-          )}
 
           {activeSection === 'afsluiting' && (
             <div style={{
@@ -1241,9 +1295,28 @@ export function MaandTab({ filter: _filter }: Props) {
           )}
         </div>
 
+        {/* Maand-filter — altijd op eigen rij ONDER de tabs (consistent over secties) */}
+        {(activeSection === 'afsluiting' || activeSection === 'import' || activeSection === 'ic_facturatie') && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+            <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600, letterSpacing: '.05em' }}>MAAND:</span>
+            {CLOSING_MONTHS.map(m => {
+              const isAfsluiting = activeSection === 'afsluiting'
+              const active = isAfsluiting ? month === m : uploadMonth === m
+              return (
+                <button
+                  key={m}
+                  className={`btn sm${active ? ' primary' : ' ghost'}`}
+                  onClick={() => isAfsluiting ? setMonth(m) : setUploadMonth(m)}
+                >{m}</button>
+              )
+            })}
+          </div>
+        )}
+
         {/* ── IMPORT SECTION ──────────────────────────────────────────────── */}
         {activeSection === 'import' && (
           <>
+            {uploadLocked && <FinalizedLockBanner month={uploadMonth} />}
             <div style={{ background: 'var(--bd-blue)', border: '1px solid var(--blue)', borderRadius: 8, padding: '10px 14px', fontSize: 11, color: 'var(--t2)' }}>
               <strong style={{ color: 'var(--blue)' }}>ℹ Bestandsimport voor {uploadMonth}</strong> — Upload SAP-exports of de OHW-Excel.
               Na het inlezen zie je een pop-up met de gedetecteerde bedragen per BV. Jij keurt goed of af vóór de cijfers worden doorgezet.
@@ -1317,7 +1390,8 @@ export function MaandTab({ filter: _filter }: Props) {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
+            <fieldset disabled={uploadLocked} style={{ border: 'none', padding: 0, margin: 0, minInlineSize: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12, opacity: uploadLocked ? 0.55 : 1 }}>
               {/* Section-header voor de Uren Analyse-tegels (geschreven_uren +
                   uren_facturering_totaal). Beslaat de volledige rasterbreedte
                   zodat hij visueel scheidt van de maandafsluiting-tegels. */}
@@ -1480,6 +1554,7 @@ export function MaandTab({ filter: _filter }: Props) {
                 )
               })}
             </div>
+            </fieldset>
           </>
         )}
 
@@ -1644,9 +1719,11 @@ export function MaandTab({ filter: _filter }: Props) {
                     {importRecords.length === 0 && (
                       <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--t3)', padding: 20 }}>Nog geen uploads</td></tr>
                     )}
-                    {importRecords.map(r => (
+                    {importRecords.map(r => {
+                      const rowLocked = finalizedMonths.some(f => f.month === r.month)
+                      return (
                       <tr key={r.id} className="sub">
-                        <td style={{ fontWeight: 600 }}>{r.month}</td>
+                        <td style={{ fontWeight: 600 }}>{r.month}{rowLocked && <span title="Maand definitief afgesloten" style={{ marginLeft: 4, fontSize: 9 }}>🔒</span>}</td>
                         <td>{UPLOAD_SLOTS.find(s => s.id === r.slotId)?.icon} {r.slotLabel}</td>
                         <td style={{ color: 'var(--t3)', fontSize: 11 }}>{r.fileName}</td>
                         <td className="mono r">{fmt(r.totalAmount)}</td>
@@ -1664,15 +1741,188 @@ export function MaandTab({ filter: _filter }: Props) {
                         </td>
                         <td style={{ fontSize: 10, color: 'var(--t3)' }}>{r.uploadedAt}</td>
                         <td>
-                          <button className="btn sm ghost" style={{ fontSize: 10, color: 'var(--t3)' }} onClick={() => handleRemoveRecord(r)}>✕</button>
+                          <button
+                            className="btn sm ghost"
+                            style={{ fontSize: 10, color: 'var(--t3)', cursor: rowLocked ? 'not-allowed' : 'pointer', opacity: rowLocked ? 0.4 : 1 }}
+                            disabled={rowLocked}
+                            onClick={() => handleRemoveRecord(r)}
+                            title={rowLocked ? `Maand ${r.month} is definitief afgesloten — heropen om aanpassingen te doen` : 'Verwijder dit record'}
+                          >✕</button>
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
           </>
+        )}
+
+        {/* ── IC FACTURATIE ───────────────────────────────────────────────── */}
+        {activeSection === 'ic_facturatie' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {uploadLocked && <FinalizedLockBanner month={uploadMonth} />}
+            <div style={{ fontSize: 13, fontWeight: 700 }}>IC Facturatie — automatische IC verrekening</div>
+            <fieldset disabled={uploadLocked} style={{ border: 'none', padding: 0, margin: 0, minInlineSize: 'auto', opacity: uploadLocked ? 0.55 : 1 }}>
+            <div className="card" style={{ padding: 14 }}>
+              <div style={{ fontSize: 11, color: 'var(--t2)', lineHeight: 1.5, marginBottom: 12 }}>
+                Upload per BV de "ic facturatie"-export. Voor elke werknemer die voor de gekozen BV gewerkt heeft maar uit een andere BV komt,
+                wordt automatisch een IC-verrekening aangemaakt in OHW Overzicht ({uploadMonth}): <strong>de ontvangende BV krijgt een minteken (kosten)</strong>,
+                <strong> de leverende BV een plusteken (opbrengst)</strong>, tarief = IC-tarief × uren.
+                Per (werknemer, klant, van→naar) komt er één regel. Ontbrekende IC-tarieven worden in de wizard inline gevraagd.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+                {(['Consultancy', 'Projects', 'Software'] as const).map(bv => {
+                  const isDragOver = icFactDragOver === bv
+                  // Bepaal of er een goedgekeurde IC Facturatie-upload is voor
+                  // deze (bv, uploadMonth) door te kijken naar OHW: tel alle
+                  // auto-rijen (sourceSlot='ic_facturatie') waarvan icFromBv ===
+                  // bv (deze BV is de betaler in het pair). Som van die rijen
+                  // is negatief (kost) — abs = bedrag te betalen.
+                  const bvEntity = ohwData2026.entities.find(e => e.entity === bv)
+                  let icAutoSum = 0
+                  let icAutoRowCount = 0
+                  if (bvEntity) {
+                    for (const row of bvEntity.icVerrekening) {
+                      if (row.sourceSlot !== 'ic_facturatie') continue
+                      if (row.icFromBv !== bv) continue  // alleen rijen waar deze BV betaalt
+                      const v = row.values?.[uploadMonth]
+                      if (v != null && v !== 0) {
+                        icAutoSum += v
+                        icAutoRowCount++
+                      }
+                    }
+                  }
+                  const hasUpload = icAutoRowCount > 0
+                  const teBetalen = Math.abs(icAutoSum)
+                  const handleFile = async (file: File) => {
+                    try {
+                      const workbook = await readWorkbookFromFile(file)
+                      setIcFactWizard({ workbook, fileName: file.name, receiverBv: bv })
+                    } catch (err) {
+                      showToast(`Bestand kon niet gelezen worden: ${err instanceof Error ? err.message : String(err)}`, 'r')
+                    }
+                  }
+                  return (
+                    <div
+                      key={bv}
+                      onDragEnter={e => { e.preventDefault(); e.stopPropagation(); if (!uploadLocked) setIcFactDragOver(bv) }}
+                      onDragOver={e => { e.preventDefault(); e.stopPropagation(); if (uploadLocked) { e.dataTransfer.dropEffect = 'none'; return } e.dataTransfer.dropEffect = 'copy'; if (icFactDragOver !== bv) setIcFactDragOver(bv) }}
+                      onDragLeave={e => {
+                        e.preventDefault(); e.stopPropagation()
+                        // Alleen clearen als de cursor de kaart écht verlaat
+                        // (niet als hij over een child-element komt).
+                        const related = e.relatedTarget as Node | null
+                        if (!related || !(e.currentTarget as Node).contains(related)) {
+                          setIcFactDragOver(prev => prev === bv ? null : prev)
+                        }
+                      }}
+                      onDrop={e => {
+                        e.preventDefault(); e.stopPropagation()
+                        setIcFactDragOver(null)
+                        if (uploadLocked) {
+                          showToast(`Maand ${uploadMonth} is definitief afgesloten — heropen via Maandafsluiting om uploads te doen.`, 'r')
+                          return
+                        }
+                        const dt = e.dataTransfer
+                        const file = dt?.files?.[0]
+                        if (!file) return
+                        if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
+                          showToast(`Onbekende bestandstype: ${file.name} — verwacht .xlsx, .xls of .csv`, 'r')
+                          return
+                        }
+                        void handleFile(file)
+                      }}
+                      style={{
+                        border: `${isDragOver ? '2px dashed' : '1px solid'} ${
+                          isDragOver ? BV_COLORS[bv]
+                          : hasUpload ? 'var(--green)'
+                          : 'var(--bd2)'
+                        }`,
+                        borderRadius: 8,
+                        padding: isDragOver ? 11 : 12,
+                        background: isDragOver
+                          ? `${BV_COLORS[bv]}11`
+                          : hasUpload ? 'rgba(38,201,151,0.06)'
+                          : 'var(--bg3)',
+                        transition: 'background .12s, border-color .12s',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{
+                          display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                          background: BV_COLORS[bv],
+                        }} />
+                        <span style={{ fontSize: 13, fontWeight: 700 }}>{bv}</span>
+                        {hasUpload && !isDragOver && (
+                          <span
+                            title={`${icAutoRowCount} IC-regel(s) ingelezen voor ${uploadMonth}. Upload opnieuw om bij te werken.`}
+                            style={{
+                              marginLeft: 'auto',
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              fontSize: 10, fontWeight: 700,
+                              color: 'var(--green)',
+                              background: 'rgba(38,201,151,0.12)',
+                              border: '1px solid var(--green)',
+                              borderRadius: 4,
+                              padding: '1px 6px',
+                            }}
+                          >
+                            ✓ Ingelezen
+                          </span>
+                        )}
+                        {isDragOver && (
+                          <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: BV_COLORS[bv] }}>
+                            Laat los om te uploaden
+                          </span>
+                        )}
+                      </div>
+                      {hasUpload && (
+                        <div style={{
+                          display: 'flex', alignItems: 'baseline', gap: 6,
+                          padding: '6px 8px', marginBottom: 8,
+                          background: 'var(--bg2)', borderRadius: 5,
+                          border: '1px solid var(--bd2)',
+                        }}>
+                          <span style={{ fontSize: 9, color: 'var(--t3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                            Te betalen ({uploadMonth})
+                          </span>
+                          <span style={{
+                            marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700,
+                            color: 'var(--red)',
+                          }}>
+                            {fmt(-teBetalen)}
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, color: 'var(--t3)', marginBottom: 8 }}>
+                        Bestand "ic facturatie {bv === 'Consultancy' ? 'co' : bv === 'Projects' ? 'pr' : 'sw'}".xlsx — werk voor {bv}-projecten door werknemers van andere BVs. Sleep het bestand hierin of klik op de knop.
+                      </div>
+                      <input
+                        ref={el => { fileRefs.current[`ic_fact_${bv}`] = el }}
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        style={{ display: 'none' }}
+                        onChange={async e => {
+                          const file = e.target.files?.[0]
+                          if (file) await handleFile(file)
+                          // Reset zodat re-upload van hetzelfde bestand opnieuw triggert
+                          e.target.value = ''
+                        }}
+                      />
+                      <button
+                        className={`btn sm${hasUpload ? ' ghost' : ' primary'}`}
+                        style={{ width: '100%', justifyContent: 'center' }}
+                        onClick={() => fileRefs.current[`ic_fact_${bv}`]?.click()}
+                      >{hasUpload ? '↻ Opnieuw uploaden' : '📥 Upload bestand'}</button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            </fieldset>
+          </div>
         )}
 
         {/* ── IC TARIEVEN ─────────────────────────────────────────────────── */}
@@ -1693,6 +1943,7 @@ export function MaandTab({ filter: _filter }: Props) {
         {/* ── AFSLUITING ──────────────────────────────────────────────────── */}
         {activeSection === 'afsluiting' && (
           <>
+            {afsluitingLocked && <FinalizedLockBanner month={month} />}
             {/* Checklist + finalize-knop. Pas wanneer hier op "Definitief
                 afsluiten" wordt geklikt, gaan de Executive Overview-trends
                 voor deze maand op de werkelijke actuals i.p.v. LE/forecast. */}
@@ -1707,6 +1958,11 @@ export function MaandTab({ filter: _filter }: Props) {
                 actuals. Klik op een rij voor het volledige rapport per BV. */}
             <MaandLeHistory />
 
+            {/* fieldset wraps alle invul-onderdelen onderaan. Checklist + LE-
+                historie blijven editable (checklist heeft eigen finalized-guard).
+                De invul-tabel + onderbouwing-overzicht worden disabled wanneer
+                de maand definitief is. Heropen via de checklist → ⟲ Heropenen. */}
+            <fieldset disabled={afsluitingLocked} style={{ border: 'none', padding: 0, margin: 0, minInlineSize: 'auto', opacity: afsluitingLocked ? 0.55 : 1 }}>
             {/* Onderbouwing status */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: 'var(--t3)' }}>Onderbouwing {month}:</span>
@@ -1932,7 +2188,7 @@ export function MaandTab({ filter: _filter }: Props) {
                       </>, true
                     )}
 
-                    <tr style={{ background: 'var(--bg3)' }}>
+                    <tr id="kostenposten-section" style={{ background: 'var(--bg3)' }}>
                       <td colSpan={5} style={{ padding: '8px 12px', fontSize: 10, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', position: 'sticky', left: 0 }}>Kosten</td>
                     </tr>
 
@@ -2581,6 +2837,7 @@ export function MaandTab({ filter: _filter }: Props) {
                 Maandafsluiting {month} is gereed — alle controles geslaagd. Brutomarge {totMarginPct.toFixed(1)}% over netto-omzet {fmt(totNetRev)}.
               </div>
             )}
+            </fieldset>
           </>
         )}
       </div>
@@ -2597,7 +2854,7 @@ export function MaandTab({ filter: _filter }: Props) {
             updateTariffEntry(employeeId, { tarief })
             showToast(`IC tarief €${tarief} opgeslagen voor werknemer ${employeeId}`, 'g')
           }}
-          onAddEmployee={(rawIdentifier) => {
+          onAddEmployee={(rawIdentifier, tarief) => {
             // Formaat-heuristiek: kies het juiste veld op basis van de vorm
             //   - Pure cijfers (≥ 3 digits)       → id (werknemer-nummer)
             //   - Bevat komma                     → powerbiNaam ("Achternaam, Voornaam")
@@ -2611,7 +2868,7 @@ export function MaandTab({ filter: _filter }: Props) {
               powerbiNaam: '',
               powerbiNaam2: '',
               stroming: '',
-              tarief: 0,
+              tarief,
               fte: null,
               functie: '',
               leidingGevende: '',
@@ -2633,7 +2890,7 @@ export function MaandTab({ filter: _filter }: Props) {
             }
             addTariffEntry(draft)
             showToast(
-              `"${s.slice(0, 40)}" toegevoegd als Consultancy medewerker — vul het tarief aan in het IC Tarieven tabblad`,
+              `"${s.slice(0, 40)}" toegevoegd als Consultancy medewerker met IC-tarief €${tarief}/u — live berekening wordt automatisch bijgewerkt`,
               'g',
             )
           }}
@@ -2648,6 +2905,59 @@ export function MaandTab({ filter: _filter }: Props) {
           slotId={genericWizardState.slotId}
           onConfirm={handleGenericWizardConfirm}
           onCancel={() => setGenericWizardState(null)}
+        />
+      )}
+
+      {/* IC Facturatie wizard — vult IC verrekening in OHW Overzicht aan beide kanten */}
+      {icFactWizard && (
+        <IcFacturatieWizard
+          workbook={icFactWizard.workbook}
+          fileName={icFactWizard.fileName}
+          receiverBv={icFactWizard.receiverBv}
+          month={uploadMonth}
+          tariffEntries={tariffEntries}
+          onCancel={() => setIcFactWizard(null)}
+          onAddEmployee={(naam, providerBv, tarief) => {
+            // Stabiele id genereren — prefix "icf-" zodat duidelijk is dat dit
+            // via de IC Facturatie-wizard is toegevoegd (niet via SAP-export).
+            const id = `icf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+            addTariffEntry({
+              id, bedrijf: providerBv, naam, powerbiNaam: '',
+              stroming: '', tarief, fte: null, functie: '',
+              leidingGevende: '', manager: '', powerbiNaam2: '', team: '',
+            })
+            showToast(`✓ "${naam}" toegevoegd aan IC Tarieven (${providerBv}, €${tarief}/u)`, 'g')
+          }}
+          onSetTariff={(employeeId, tarief) => {
+            updateTariffEntry(employeeId, { tarief })
+            showToast(`✓ IC-tarief ingesteld op €${tarief}/u`, 'g')
+          }}
+          onConfirm={(result) => {
+            // Auto-fill IC verrekening in OHW Overzicht
+            const stats = upsertIcFacturatie('2026', icFactWizard.receiverBv, uploadMonth, result.rows)
+
+            // Per-BV totaal voor verificatie: laat de user expliciet zien
+            // wat er per BV gezet wordt. Convention: receiver-BV (= de BV van
+            // het bestand, die betaalt) krijgt MIN, andere BVs (leveranciers
+            // van de werknemer) krijgen PLUS. Helpt bij debug ALS user een
+            // ander teken in OHW Overzicht ziet dan hier in de toast.
+            const totalsBv: Record<string, number> = {}
+            for (const r of result.rows) {
+              if (!r.matched || r.fromBv !== icFactWizard.receiverBv) continue
+              totalsBv[r.fromBv] = (totalsBv[r.fromBv] ?? 0) - r.amount
+              totalsBv[r.toBv]   = (totalsBv[r.toBv]   ?? 0) + r.amount
+            }
+            const perBv = Object.entries(totalsBv)
+              .map(([bv, v]) => `${bv}: ${v >= 0 ? '+' : ''}${fmt(v)}`)
+              .join(' · ')
+            showToast(
+              `✓ IC Facturatie ${uploadMonth} verwerkt — ${stats.addedPairs} nieuw, ${stats.updatedPairs} bijgewerkt` +
+              (stats.removedPairs > 0 ? `, ${stats.removedPairs} verwijderd` : '') +
+              (perBv ? ` · ${perBv}` : ''),
+              'g',
+            )
+            setIcFactWizard(null)
+          }}
         />
       )}
 
