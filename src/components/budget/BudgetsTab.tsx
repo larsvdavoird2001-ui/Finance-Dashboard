@@ -10,6 +10,7 @@ import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useFteStore } from '../../store/useFteStore'
 import { useHoursStore } from '../../store/useHoursStore'
 import { useFinStore } from '../../store/useFinStore'
+import { useReflectionStore } from '../../store/useReflectionStore'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
@@ -174,6 +175,39 @@ export function BudgetsTab({ filter: _filter }: Props) {
   // van een nieuwe maand de vorige maand als lege actual wordt gerenderd
   // (waardoor de LE-lijnen onterecht zouden verdwijnen).
   const finalizedMonths = useFinStore(s => s.finalized)
+  // Reflectie-antwoorden uit de Maandafsluiting → LE-leerlus. One-off
+  // gemarkeerde afwijkingen worden uit de forecast-baseline gefilterd —
+  // zie getAdjustedActual hieronder. Mirror van useLatestEstimate zodat
+  // beide tabs op identieke LE-cijfers uitkomen.
+  const reflectionRecords = useReflectionStore(s => s.records)
+  // Same mapping als in useLatestEstimate — vraag-id → P&L sub-keys. De
+  // forecast itereert per SUB key (zie SUBS_OF), dus "netto_omzet" moet
+  // worden uitgesplitst naar zijn subposten, anders raakt geen enkele
+  // forecast-iteratie de adjustment.
+  const REV_SUBS = ['gefactureerde_omzet', 'omzet_periode_allocatie']
+  const DIR_COST_SUBS = ['directe_inkoopkosten', 'directe_personeelskosten', 'directe_overige_personeelskosten', 'directe_autokosten']
+  const OPEX_SUBS = ['indirecte_personeelskosten', 'overige_personeelskosten', 'huisvestingskosten', 'automatiseringskosten', 'indirecte_autokosten', 'verkoopkosten', 'algemene_kosten', 'doorbelaste_kosten']
+  const QUESTION_KEY_MAP: Record<string, readonly string[]> = {
+    'rev-vs-le':          REV_SUBS,
+    'rev-vs-budget':      REV_SUBS,
+    'seasonal':           REV_SUBS,
+    'declarability':      REV_SUBS,
+    'capacity-vs-budget': REV_SUBS,
+    'margin-shift':       REV_SUBS,
+    'direct-pers':        ['directe_personeelskosten'],
+    'direct-cost':        DIR_COST_SUBS,
+    'opex':               OPEX_SUBS,
+  }
+  const isOneOffForKey = (e: EntityName, month: string, key: string): boolean => {
+    const rec = reflectionRecords.find(r => r.month === month && r.bv === e)
+    if (!rec) return false
+    for (const ans of rec.answers) {
+      if (ans.scope !== 'one-off') continue
+      const keys = QUESTION_KEY_MAP[ans.questionId]
+      if (keys && keys.includes(key)) return true
+    }
+    return false
+  }
 
   const months = BUDGET_MONTHS_2026
   const activeEntities: EntityName[] = _lockedBv
@@ -290,9 +324,35 @@ export function BudgetsTab({ filter: _filter }: Props) {
   //
   // Ramp: nieuwe hires zijn niet direct 100% declarabel; ze bouwen productie
   // op over ~4 maanden. Cuts tellen wel direct 100% mee.
+  /** Reflectie-adjusted actual: vervang werkelijke actual voor (e, cm, k)
+   *  door de pre-close LE wanneer de gebruiker die maand/key als one-off
+   *  heeft gemarkeerd. priorClosed = maanden strikt vóór `cm` zodat we niet
+   *  zelf-referentieel worden. Recursie eindigt omdat priorClosed monotoon
+   *  kleiner wordt. */
+  const adjustedV2026 = (e: EntityName, cm: string, k: string): number => {
+    const raw = getActualsFor(e, cm)[k] ?? 0
+    if (!isOneOffForKey(e, cm, k)) return raw
+    const tIdx = BUDGET_MONTHS_2026.indexOf(cm)
+    const prior = closedMonths.filter(x => BUDGET_MONTHS_2026.indexOf(x) < tIdx)
+    if (prior.length === 0) return raw
+    const sm25 = monthlyActuals2025[e]?.[toPY(cm)]?.[k] ?? 0
+    let y26 = 0, y25 = 0
+    for (const pc of prior) {
+      y26 += adjustedV2026(e, pc, k)
+      y25 += monthlyActuals2025[e]?.[toPY(pc)]?.[k] ?? 0
+    }
+    const pm = y25 !== 0 ? y26 / y25 : 1
+    const last = adjustedV2026(e, prior[prior.length - 1], k)
+    const seasonal = sm25 * pm
+    if (seasonal === 0 && last === 0) return 0
+    if (seasonal === 0) return Math.round(last)
+    if (last === 0)     return Math.round(seasonal)
+    return Math.round(0.6 * seasonal + 0.4 * last)
+  }
+
   const getForecastFor = (e: EntityName, m: string, k: string): number => {
     const v2025 = (month26: string) => monthlyActuals2025[e]?.[toPY(month26)]?.[k] ?? 0
-    const v2026 = (month26: string) => getActualsFor(e, month26)[k] ?? 0
+    const v2026 = (month26: string) => adjustedV2026(e, month26, k)
     const sameMonth2025 = v2025(m)
     let ytd2026 = 0, ytd2025 = 0
     for (const cm of closedMonths) {

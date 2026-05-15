@@ -3,6 +3,7 @@ import { useBudgetStore, BUDGET_MONTHS_2026 } from '../store/useBudgetStore'
 import { useFteStore } from '../store/useFteStore'
 import { useHoursStore } from '../store/useHoursStore'
 import { useFinStore } from '../store/useFinStore'
+import { useReflectionStore } from '../store/useReflectionStore'
 import { monthlyActuals2025, MONTHS_2025_LABELS } from '../data/plData2025'
 import type { EntityName } from '../data/plData'
 import {
@@ -11,6 +12,29 @@ import {
 } from '../lib/plDerive'
 import type { BvId } from '../data/types'
 import { getFteLe } from '../lib/fteLe'
+
+/** Mapping van LE-leerlus-vraag-id (uit leReflection.generateAiQuestions)
+ *  naar de P&L sub-key(s) waarvoor de afwijking als one-off geldt. De
+ *  forecast-engine itereert over SUB keys (zie SUBS_OF in plDerive) — een
+ *  one-off vraag over "netto omzet" moet dus zowel `gefactureerde_omzet`
+ *  als `omzet_periode_allocatie` markeren, anders raakt geen enkele
+ *  sub-key de adjustment. Vragen zonder direct P&L-key-effect (fte-delta,
+ *  leave) staan expres niet in deze map: hun signaal zit al in
+ *  fteEntries/hoursEntries en wordt via fteAdj/leaveAdj meegenomen. */
+const REVENUE_SUBS = ['gefactureerde_omzet', 'omzet_periode_allocatie']
+const DIRECT_COST_SUBS = ['directe_inkoopkosten', 'directe_personeelskosten', 'directe_overige_personeelskosten', 'directe_autokosten']
+const OPEX_SUBS = ['indirecte_personeelskosten', 'overige_personeelskosten', 'huisvestingskosten', 'automatiseringskosten', 'indirecte_autokosten', 'verkoopkosten', 'algemene_kosten', 'doorbelaste_kosten']
+const QUESTION_KEY_MAP: Record<string, readonly string[]> = {
+  'rev-vs-le':          REVENUE_SUBS,
+  'rev-vs-budget':      REVENUE_SUBS,
+  'seasonal':           REVENUE_SUBS,
+  'declarability':      REVENUE_SUBS,
+  'capacity-vs-budget': REVENUE_SUBS,
+  'margin-shift':       REVENUE_SUBS,
+  'direct-pers':        ['directe_personeelskosten'],
+  'direct-cost':        DIRECT_COST_SUBS,
+  'opex':               OPEX_SUBS,
+}
 
 const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const ALL_BVS: EntityName[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
@@ -64,6 +88,9 @@ export function useLatestEstimate(currentDate?: Date) {
   const fteEntries  = useFteStore(s => s.entries)
   const hoursEntries = useHoursStore(s => s.entries)
   const finalizedMonths = useFinStore(s => s.finalized)
+  // Reflectie-antwoorden uit de Maandafsluiting → LE-leerlus. Bij elke save
+  // moet de forecast re-renderen, dus we subscriben hier op records.
+  const reflectionRecords = useReflectionStore(s => s.records)
 
   const now = currentDate ?? new Date()
   const nowMonthIdx = now.getMonth()
@@ -113,6 +140,22 @@ export function useLatestEstimate(currentDate?: Date) {
   const rawActual2025 = (bv: EntityName, m25: string, key: string): number =>
     monthlyActuals2025[bv]?.[m25]?.[key] ?? 0
 
+  /** Heeft de gebruiker voor (bv, maand) een vraag als one-off gemarkeerd
+   *  die invloed heeft op deze P&L sub-key? Zo ja → de werkelijke actual
+   *  voor deze maand/key wordt straks bij YTD- en run-rate-berekening
+   *  vervangen door de pre-close LE, zodat het eenmalige effect niet in
+   *  toekomstige forecasts meeloopt. */
+  const isOneOffForKey = (bv: EntityName, month: string, key: string): boolean => {
+    const rec = reflectionRecords.find(r => r.month === month && r.bv === bv)
+    if (!rec) return false
+    for (const ans of rec.answers) {
+      if (ans.scope !== 'one-off') continue
+      const keys = QUESTION_KEY_MAP[ans.questionId]
+      if (keys && keys.includes(key)) return true
+    }
+    return false
+  }
+
   /** FTE-getter zonder forward-fill. Alleen BV-totaal (geen vertical sub-buckets). */
   const getFteFor = (bv: BvId, month: string): number =>
     fteEntries.find(e => e.bv === bv && e.month === month && !e.vertical)?.fte ?? 0
@@ -147,6 +190,22 @@ export function useLatestEstimate(currentDate?: Date) {
   const getPlannedVakantie = (bv: BvId, month: string): number =>
     hoursEntries.find(e => e.bv === bv && e.month === month)?.vakantie ?? 0
 
+  /** "Adjusted" actual voor de forecast-pipeline. Identiek aan rawActual2026
+   *  TENZIJ de gebruiker in de LE-leerlus een vraag over deze (bv, maand)
+   *  als one-off heeft gemarkeerd die op `key` van toepassing is — dan
+   *  vervangen we de werkelijke actual door de pre-close LE voor diezelfde
+   *  cel. Effect: een eenmalige meevaller/tegenvaller in maand X telt niet
+   *  meer mee in de YTD- en run-rate-onderbouwing van de forecast voor X+1.
+   *
+   *  Forward reference naar forecastSubExcluding is veilig: deze functie
+   *  wordt pas vanuit forecastSub/forecastSubExcluding aangeroepen, en op
+   *  dat moment zijn beide closures al gedefinieerd. */
+  const getAdjustedActual = (bv: EntityName, month: string, key: string): number => {
+    const raw = rawActual2026(bv, month, key)
+    if (!isOneOffForKey(bv, month, key)) return raw
+    return forecastSubExcluding(bv, month, key)
+  }
+
   /** Forecast voor één sub-key in een open maand — exact dezelfde formule
    *  als BudgetsTab.getForecastFor:
    *    seasonalForecast = 2025-zelfde-maand × perfMult × fteAdj × leaveAdj
@@ -163,11 +222,17 @@ export function useLatestEstimate(currentDate?: Date) {
     const sameMonth2025 = rawActual2025(bv, toPY(month), key)
     let ytd2026 = 0, ytd2025 = 0
     for (const cm of closedMonths) {
-      ytd2026 += rawActual2026(bv, cm, key)
+      // Reflectie-adjusted: bij one-off antwoord wordt de actual voor (bv,
+      // cm, key) vervangen door de pre-close LE — zo telt het eenmalige
+      // effect niet mee in de YTD-baseline voor de volgende maand.
+      ytd2026 += getAdjustedActual(bv, cm, key)
       ytd2025 += rawActual2025(bv, toPY(cm), key)
     }
     const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
-    const lastActual = lastClosedMonth ? rawActual2026(bv, lastClosedMonth, key) : 0
+    // Run-rate: zelfde adjustment-rule — als de laatste closed-month als
+    // one-off is gemarkeerd voor deze key, pakken we de pre-close LE-waarde
+    // i.p.v. de actual, zodat de runRate-tak de afwijking niet doortrekt.
+    const lastActual = lastClosedMonth ? getAdjustedActual(bv, lastClosedMonth, key) : 0
 
     let fteAdj = 1
     if (bv !== 'Holdings' && lastClosedMonth) {
@@ -231,11 +296,16 @@ export function useLatestEstimate(currentDate?: Date) {
     const sameMonth2025 = rawActual2025(bv, toPY(month), key)
     let ytd2026 = 0, ytd2025 = 0
     for (const cm of priorClosed) {
-      ytd2026 += rawActual2026(bv, cm, key)
+      // Reflectie-adjusted YTD (zie getAdjustedActual). Veilig binnen
+      // forecastSubExcluding zelf: getAdjustedActual delegeert alleen terug
+      // voor maanden die als one-off zijn gemarkeerd, en gebruikt dan een
+      // priorClosed-set die strikt kleiner is dan de huidige — dus geen
+      // infinite recursion.
+      ytd2026 += getAdjustedActual(bv, cm, key)
       ytd2025 += rawActual2025(bv, toPY(cm), key)
     }
     const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
-    const lastActual = lastPrior ? rawActual2026(bv, lastPrior, key) : 0
+    const lastActual = lastPrior ? getAdjustedActual(bv, lastPrior, key) : 0
 
     let fteAdj = 1
     if (bv !== 'Holdings' && lastPrior) {
