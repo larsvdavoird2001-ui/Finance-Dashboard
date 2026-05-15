@@ -14,3 +14,24 @@ export function focusNextInColumn(current: HTMLInputElement) {
     }
   }
 }
+
+/** Focus de volgende (of vorige) input in dezelfde rij (Tab = naar rechts,
+ *  Shift+Tab = naar links). Returnt true als er gefocust is, anders false
+ *  (zodat de caller default browser-tab-gedrag kan laten doorgaan). */
+export function focusNextInRow(current: HTMLInputElement, reverse = false): boolean {
+  const row = current.dataset.navRow
+  const col = current.dataset.navCol
+  if (!row) return false
+  const all = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-nav-row]'))
+  const idx = all.indexOf(current)
+  if (idx < 0) return false
+  const step = reverse ? -1 : 1
+  for (let i = idx + step; i >= 0 && i < all.length; i += step) {
+    if (all[i].dataset.navRow === row && all[i].dataset.navCol !== col) {
+      all[i].focus()
+      all[i].select?.()
+      return true
+    }
+  }
+  return false
+}

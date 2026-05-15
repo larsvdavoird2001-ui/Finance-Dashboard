@@ -1,6 +1,6 @@
 import { memo, useState } from 'react'
 import { fmt, parseNL } from '../../lib/format'
-import { focusNextInColumn } from '../../lib/cellNav'
+import { focusNextInColumn, focusNextInRow } from '../../lib/cellNav'
 
 interface Props {
   value: number
@@ -27,7 +27,8 @@ interface Props {
  *     heen hoeft te tikken. Tekst wordt auto-geselecteerd bij focus.
  *  Keyboard:
  *   - Enter: commit + spring naar de volgende input in dezelfde kolom
- *   - Tab: default browser (rechts).
+ *   - Tab / Shift+Tab: commit + spring naar de volgende/vorige input in
+ *     dezelfde rij (slaat tussenliggende ¬-cel-buttons over).
  */
 export const OhwCellInput = memo(function OhwCellInput({ value, onCommit, style, navRow, navCol, title, readOnly }: Props) {
   const [editing, setEditing] = useState(false)
@@ -69,6 +70,14 @@ export const OhwCellInput = memo(function OhwCellInput({ value, onCommit, style,
           const target = e.currentTarget
           target.blur()
           setTimeout(() => focusNextInColumn(target), 0)
+        } else if (e.key === 'Tab') {
+          // Spring direct naar de volgende cel-input in dezelfde rij — slaat
+          // de comment-popover-button en andere niet-cel-elementen tussen
+          // cellen over. Shift+Tab = naar links. Bij geen volgende cel:
+          // valt terug op default browser-tab-gedrag. De blur van de huidige
+          // input committeert automatisch de getypte waarde.
+          const moved = focusNextInRow(e.currentTarget, e.shiftKey)
+          if (moved) e.preventDefault()
         }
       }}
     />

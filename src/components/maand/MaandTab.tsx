@@ -274,7 +274,19 @@ export function MaandTab({ filter: _filter }: Props) {
   // niveau `BVS_FULL` blijft de canonieke 4-BV lijst; binnen deze component
   // gebruiken we `BVS` (geshadowd) voor renders, totalen en validaties.
   const BVS: ClosingBv[] = lockedBv ? [lockedBv] : BVS_FULL
-  const [month, setMonth] = useState<string>('Mar-26')
+  // Default = laatste relevante maand. Bij elke tab-open kiezen we de
+  // hoogste CLOSING_MONTHS-maand die nog NIET definitief afgesloten is —
+  // dat is de maand waar de gebruiker nu mee bezig is (bv. April zodra
+  // Maart is afgesloten). Valt terug op de laatste maand als alles al
+  // afgesloten is. Lazy initializer zodat we de store-state één keer
+  // synchroon uitlezen bij mount.
+  const pickDefaultMonth = (): string => {
+    const finalized = useFinStore.getState().finalized
+    const open = CLOSING_MONTHS.filter(m => !finalized.some(f => f.month === m))
+    if (open.length > 0) return open[open.length - 1]
+    return CLOSING_MONTHS[CLOSING_MONTHS.length - 1]
+  }
+  const [month, setMonth] = useState<string>(pickDefaultMonth)
   const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'fte' | 'bijlagen' | 'ic_facturatie'>('afsluiting')
   const [expandedCosts, setExpandedCosts] = useState<Set<CostSectionId>>(new Set())
   const toggleCostSection = (id: CostSectionId) =>
@@ -283,7 +295,7 @@ export function MaandTab({ filter: _filter }: Props) {
   const [expandedSubCosts, setExpandedSubCosts] = useState<Set<string>>(new Set())
   const toggleSubCost = (key: string) =>
     setExpandedSubCosts(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s })
-  const [uploadMonth, setUploadMonth] = useState<string>('Mar-26')
+  const [uploadMonth, setUploadMonth] = useState<string>(pickDefaultMonth)
   const [uploadLoading, setUploadLoading] = useState<Record<string, boolean>>({})
   const [pendingRecord, setPendingRecord] = useState<ImportRecord | null>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
@@ -2021,12 +2033,13 @@ export function MaandTab({ filter: _filter }: Props) {
                           const backed = importRecords.some(r => r.month === month && ['factuurvolume','conceptfacturen'].includes(r.slotId) && r.status === 'approved')
                           return (
                             <td key={bv} className="r" style={{ padding: '4px 8px' }}>
-                              {e ? (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
-                                  {!backed && <span title="Geen upload onderbouwing" style={{ fontSize: 9, color: 'var(--amber)' }}>⚠</span>}
-                                  <NumInput value={e.factuurvolume} onChange={v => update(e.id, 'factuurvolume', v)} />
-                                </div>
-                              ) : '—'}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+                                {!backed && <span title="Geen upload onderbouwing" style={{ fontSize: 9, color: 'var(--amber)' }}>⚠</span>}
+                                <NumInput
+                                  value={e?.factuurvolume ?? 0}
+                                  onChange={v => update((e ?? ensureEntry(bv, month)).id, 'factuurvolume', v)}
+                                />
+                              </div>
                             </td>
                           )
                         })}
@@ -2040,7 +2053,10 @@ export function MaandTab({ filter: _filter }: Props) {
                           const e = entry(bv)
                           return (
                             <td key={bv} className="r" style={{ padding: '4px 8px' }}>
-                              {e ? <NumInput value={e.debiteuren} onChange={v => update(e.id, 'debiteuren', v)} /> : '—'}
+                              <NumInput
+                                value={e?.debiteuren ?? 0}
+                                onChange={v => update((e ?? ensureEntry(bv, month)).id, 'debiteuren', v)}
+                              />
                             </td>
                           )
                         })}
@@ -2156,7 +2172,10 @@ export function MaandTab({ filter: _filter }: Props) {
                           const e = entry(bv)
                           return (
                             <td key={bv} className="r" style={{ padding: '4px 8px' }}>
-                              {e ? <NumInput value={e.accruals} onChange={v => update(e.id, 'accruals', v)} /> : '—'}
+                              <NumInput
+                                value={e?.accruals ?? 0}
+                                onChange={v => update((e ?? ensureEntry(bv, month)).id, 'accruals', v)}
+                              />
                             </td>
                           )
                         })}
@@ -2168,9 +2187,14 @@ export function MaandTab({ filter: _filter }: Props) {
                       <>
                         {BVS.map(bv => {
                           const e = entry(bv)
+                          const hc = e?.handmatigeCorrectie ?? 0
                           return (
                             <td key={bv} className="r" style={{ padding: '4px 8px' }}>
-                              {e ? <NumInput value={e.handmatigeCorrectie} onChange={v => update(e.id, 'handmatigeCorrectie', v)} color={e.handmatigeCorrectie !== 0 ? 'var(--amber)' : undefined} /> : '—'}
+                              <NumInput
+                                value={hc}
+                                onChange={v => update((e ?? ensureEntry(bv, month)).id, 'handmatigeCorrectie', v)}
+                                color={hc !== 0 ? 'var(--amber)' : undefined}
+                              />
                             </td>
                           )
                         })}
@@ -2371,15 +2395,14 @@ export function MaandTab({ filter: _filter }: Props) {
                       <>
                         {BVS.map(bv => {
                           const e = entry(bv)
+                          const v = finResultaat(bv)
                           return (
                             <td key={bv} className="r" style={{ padding: '4px 8px' }}>
-                              {e ? (
-                                <NumInput
-                                  value={finResultaat(bv)}
-                                  onChange={v => update(e.id, 'financieelResultaat', v)}
-                                  color={finResultaat(bv) < 0 ? 'var(--red)' : undefined}
-                                />
-                              ) : '—'}
+                              <NumInput
+                                value={v}
+                                onChange={nv => update((e ?? ensureEntry(bv, month)).id, 'financieelResultaat', nv)}
+                                color={v < 0 ? 'var(--red)' : undefined}
+                              />
                             </td>
                           )
                         })}
@@ -2391,15 +2414,14 @@ export function MaandTab({ filter: _filter }: Props) {
                       <>
                         {BVS.map(bv => {
                           const e = entry(bv)
+                          const v = vpb(bv)
                           return (
                             <td key={bv} className="r" style={{ padding: '4px 8px' }}>
-                              {e ? (
-                                <NumInput
-                                  value={vpb(bv)}
-                                  onChange={v => update(e.id, 'vennootschapsbelasting', v)}
-                                  color={vpb(bv) < 0 ? 'var(--red)' : undefined}
-                                />
-                              ) : '—'}
+                              <NumInput
+                                value={v}
+                                onChange={nv => update((e ?? ensureEntry(bv, month)).id, 'vennootschapsbelasting', nv)}
+                                color={v < 0 ? 'var(--red)' : undefined}
+                              />
                             </td>
                           )
                         })}
