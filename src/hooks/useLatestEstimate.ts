@@ -88,24 +88,23 @@ const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'
 const SEASONAL_OVERLAY_WEIGHT = 0.8
 
 /** Drift-correction weight: hoe sterk de engine zich aanpast aan systematische
- *  LE-vs-Actual bias uit eerdere closed-maanden. Soft (0.6) zodat één maand
- *  met outlier-actuals het model niet overcompenseert maar consistente bias
- *  (bv. LE structureel 8% te laag over Q1) wel wordt bijgewerkt. Zonder cap
- *  zou een drift-ratio van 1.30 (engine schat 30% te laag) leiden tot een
- *  forecast die mogelijk overshoot. Met weight 0.6: correctie = 1 + (1.30−1)×0.6 = 1.18 */
-const DRIFT_CORRECTION_WEIGHT = 0.6
+ *  LE-vs-Actual bias uit eerdere closed-maanden. Conservatief gehouden (0.35)
+ *  zodat goede maanden niet leiden tot enthousiaste over-extrapolatie. Een
+ *  drift-ratio van 1.30 (engine schatte 30% te laag) geeft nu correctie =
+ *  1 + (1.30−1)×0.35 = 1.105 in plaats van 1.18. */
+const DRIFT_CORRECTION_WEIGHT = 0.35
 /** Max correctie per richting — beschermt tegen explosieve compounding op
  *  basis van 1-2 maanden historie. */
-const DRIFT_CORRECTION_CAP = 0.25
+const DRIFT_CORRECTION_CAP = 0.15
 
 /** MoM growth-trend weight: hoeveel van de recente maand-op-maand groei
- *  wordt geëxtrapoleerd naar toekomstige maanden. 0.3 = zachte trend — net
- *  genoeg om "Q1 groeide consistent +3%/mnd → Q2 ook" mee te nemen, niet
- *  zoveel dat één grote stijging exponentieel doorwerkt naar Dec. */
-const GROWTH_TREND_WEIGHT = 0.3
+ *  wordt geëxtrapoleerd naar toekomstige maanden. Soft (0.15) — net genoeg
+ *  om een echte trend door te laten werken, te weinig om een sterke recente
+ *  maand exponentieel naar Q4 te projecteren. */
+const GROWTH_TREND_WEIGHT = 0.15
 /** Cap per maand op de groei-component, om unrealistische compounding te
  *  voorkomen wanneer recente maanden uitschieters bevatten. */
-const GROWTH_TREND_CAP_PER_MONTH = 0.08
+const GROWTH_TREND_CAP_PER_MONTH = 0.05
 
 /** 2025-zelfde-maand → 2025-jaargemiddelde ratio. Wordt cached per (bv, key)
  *  in een Map binnen de hook zodat we niet bij elke forecast-call opnieuw

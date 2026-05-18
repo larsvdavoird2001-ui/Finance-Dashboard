@@ -17,7 +17,8 @@ import { useHoursStore } from '../../store/useHoursStore'
 import { useNavStore } from '../../store/useNavStore'
 import { derivePL } from '../../lib/plDerive'
 import { useLockedBv } from '../../lib/permissions'
-import { LeAccuracyCard } from './LeAccuracyCard'
+// LeAccuracyCard blijft beschikbaar in dezelfde map maar wordt nu niet
+// gemount — de drift-correction in useLatestEstimate werkt onafhankelijk.
 
 const MONTH_ORDER = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const monthSortKey = (m: string): number => {
@@ -1293,11 +1294,11 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
             />
           </div>
 
-          {/* LE-accuraatheid — laat zien hoe goed de pre-close LE-snapshots
-              aansluiten op de werkelijke actuals, en hoe de engine zichzelf
-              over tijd kalibreert. Verschijnt zodra de eerste maand mét
-              snapshot is afgesloten. */}
-          <LeAccuracyCard activeBvs={activeBvs} />
+          {/* LE-accuraatheid blijft draaien op de achtergrond (drift-
+              correction in useLatestEstimate leest direct uit
+              useFinStore.leSnapshot), maar de visuele card is bewust
+              verborgen om de Executive Overview compact te houden. Het
+              schakelaar terug zetten met <LeAccuracyCard activeBvs={...} />. */}
         </>
       )}
 
