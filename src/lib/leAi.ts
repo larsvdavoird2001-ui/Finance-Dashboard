@@ -146,15 +146,17 @@ export function parseLeAiResponse(text: string): LeAiResult {
   const suggestions: LeAiSuggestion[] = Array.isArray(parsed.suggestions)
     ? parsed.suggestions
         .filter((s: unknown): s is Record<string, unknown> => typeof s === 'object' && s != null)
-        .map(s => ({
-          questionId: String(s.questionId ?? ''),
-          suggestedScope:
-            s.suggestedScope === 'one-off' || s.suggestedScope === 'structural'
-              ? s.suggestedScope
-              : 'unknown',
-          confidence: typeof s.confidence === 'number' ? Math.max(0, Math.min(1, s.confidence)) : 0,
-          reasoning: String(s.reasoning ?? ''),
-        }))
+        .map((s): LeAiSuggestion => {
+          const raw = s.suggestedScope
+          const scope: LeAiSuggestion['suggestedScope'] =
+            raw === 'one-off' || raw === 'structural' ? raw : 'unknown'
+          return {
+            questionId: String(s.questionId ?? ''),
+            suggestedScope: scope,
+            confidence: typeof s.confidence === 'number' ? Math.max(0, Math.min(1, s.confidence)) : 0,
+            reasoning: String(s.reasoning ?? ''),
+          }
+        })
         .filter(s => s.questionId.length > 0)
     : []
 

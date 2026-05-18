@@ -9,7 +9,6 @@
 import { useMemo } from 'react'
 import type { EntityName } from '../../data/plData'
 import type { ClosingBv } from '../../data/types'
-import type { LeSnapshotByBv } from '../../lib/db'
 import { useFinStore } from '../../store/useFinStore'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import {
