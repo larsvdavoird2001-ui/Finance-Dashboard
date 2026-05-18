@@ -22,9 +22,11 @@ const items: { id: TabId; ic: string; label: string; group: string; adminOnly?: 
   // Maandafsluiting is alleen relevant voor users die data invullen/goedkeuren —
   // viewers (alleen-lezen) hebben er niets te zoeken.
   { id: 'maand', ic: '📅', label: 'Maandafsluiting',  group: 'Input', hideForViewer: true },
-  // Beheer (admin-only)
+  // Beheer (admin-only). Backups zijn volledig automatisch (start-van-de-dag
+  // + na elke wijziging) — er is daarom geen losse tab meer voor. Een admin
+  // kan via het kleine "↺ Backup herstellen" knopje in de sidebar-footer
+  // alsnog naar de restore-UI navigeren als een rollback nodig is.
   { id: 'users',   ic: '👥', label: 'Gebruikers', group: 'Beheer', adminOnly: true },
-  { id: 'backups', ic: '💾', label: 'Backups',    group: 'Beheer', adminOnly: true },
 ]
 
 export function Sidebar({ active, onNav, userEmail, isAdmin, userRole, onSignOut }: Props) {
@@ -87,6 +89,16 @@ export function Sidebar({ active, onNav, userEmail, isAdmin, userRole, onSignOut
               </div>
             </div>
           </div>
+        )}
+        {isAdmin && (
+          <button
+            className="btn sm ghost"
+            style={{ fontSize: 10, width: '100%', justifyContent: 'center', marginBottom: 4, color: 'var(--t2)' }}
+            onClick={() => onNav('backups')}
+            title="Bekijk en herstel automatische snapshots (start-van-de-dag + na elke wijziging)"
+          >
+            ↺ Backup herstellen
+          </button>
         )}
         {onSignOut && userEmail && (
           <button

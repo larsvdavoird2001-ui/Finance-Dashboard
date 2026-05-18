@@ -5,17 +5,15 @@ import { baseChartOptions } from '../../lib/chartSetup'
 import { PL_STRUCTURE, ytdActuals2025, ytdBudget2025 } from '../../data/plData'
 import type { EntityName } from '../../data/plData'
 import { useLockedBv } from '../../lib/permissions'
-import { monthlyActuals2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useFteStore } from '../../store/useFteStore'
-import { useHoursStore } from '../../store/useHoursStore'
 import { useFinStore } from '../../store/useFinStore'
-import { useReflectionStore } from '../../store/useReflectionStore'
+import { useHoursStore } from '../../store/useHoursStore'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
+import { useLatestEstimate } from '../../hooks/useLatestEstimate'
 import { fmt, parseNL } from '../../lib/format'
 import type { BvId, GlobalFilter } from '../../data/types'
 import { SUBS_OF, DERIVED_FORMULA, AGGREGATE_KEYS, DERIVED_KEYS, READONLY_KEYS } from '../../lib/plDerive'
-import { getFteLe } from '../../lib/fteLe'
 import { BudgetsFteSubtab } from './BudgetsFteSubtab'
 
 /**
@@ -153,70 +151,125 @@ function MonthTableColgroup({ hasMethodiek = false }: { hasMethodiek?: boolean }
   )
 }
 
-interface Props { filter: GlobalFilter }
+// ── BV-filterbalk bovenin de Budgetten-tab (verhuisd vanuit de Topbar) ──
+const BUDGETS_BV_COLORS: Record<string, string> = {
+  Consultancy: '#00a9e0',
+  Projects:    '#26c997',
+  Software:    '#8b5cf6',
+  Holdings:    '#8fa3c0',
+}
+const BUDGETS_BV_OPTIONS: Array<{ id: GlobalFilter['bv']; label: string; sub?: string }> = [
+  { id: 'all',         label: 'Alle BV\'s' },
+  { id: 'Consultancy', label: 'Consultancy' },
+  { id: 'Projects',    label: 'Projects' },
+  { id: 'Software',    label: 'Software' },
+  { id: 'Holdings',    label: 'Holdings', sub: 'kosten' },
+]
+function BudgetsFilterBar({
+  filter,
+  onFilterChange,
+}: {
+  filter: GlobalFilter
+  onFilterChange: (patch: Partial<GlobalFilter>) => void
+}) {
+  const lockedBv = useLockedBv()
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', marginBottom: 4 }}>
+      <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', marginRight: 2 }}>BV:</span>
+      {lockedBv ? (
+        <span
+          title={`Je account is gekoppeld aan ${lockedBv} — je ziet alleen data van deze BV.`}
+          style={{
+            padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+            border: `1px solid ${BUDGETS_BV_COLORS[lockedBv]}`,
+            background: BUDGETS_BV_COLORS[lockedBv] + '22',
+            color: BUDGETS_BV_COLORS[lockedBv],
+            display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font)',
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: BUDGETS_BV_COLORS[lockedBv], display: 'inline-block', flexShrink: 0 }} />
+          {lockedBv}
+          <span style={{ fontSize: 9, marginLeft: 2, opacity: 0.7 }}>🔒</span>
+        </span>
+      ) : (
+        <>
+          {BUDGETS_BV_OPTIONS.map(o => {
+            const isActive = filter.bv === o.id
+            const color = o.id !== 'all' ? BUDGETS_BV_COLORS[o.id] : undefined
+            return (
+              <button
+                key={o.id}
+                onClick={() => onFilterChange({ bv: o.id })}
+                style={{
+                  padding: '3px 10px', borderRadius: 5, fontSize: 11,
+                  fontWeight: isActive ? 600 : 500, cursor: 'pointer',
+                  border: '1px solid', fontFamily: 'var(--font)', transition: 'all .12s',
+                  borderColor: isActive ? (color ?? 'rgba(255,255,255,0.25)') : 'var(--bd2)',
+                  background: isActive ? (color ? color + '22' : 'var(--bg4)') : 'transparent',
+                  color: isActive ? (color ?? 'var(--t1)') : 'var(--t3)',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                {color && (
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: isActive ? color : 'var(--t3)', display: 'inline-block', flexShrink: 0 }} />
+                )}
+                {o.label}
+                {o.sub && (
+                  <span style={{ fontSize: 9, color: isActive ? color : 'var(--t3)', opacity: 0.75, marginLeft: 2 }}>({o.sub})</span>
+                )}
+              </button>
+            )
+          })}
+          {filter.bv !== 'all' && (
+            <button
+              style={{
+                padding: '3px 7px', borderRadius: 5, fontSize: 10, cursor: 'pointer',
+                border: '1px solid var(--bd2)', background: 'transparent',
+                color: 'var(--t3)', fontFamily: 'var(--font)', marginLeft: 2,
+              }}
+              onClick={() => onFilterChange({ bv: 'all' })}
+              title="Reset BV-filter"
+            >✕ Reset</button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
 
-export function BudgetsTab({ filter: _filter }: Props) {
+interface Props {
+  filter: GlobalFilter
+  onFilterChange?: (patch: Partial<GlobalFilter>) => void
+}
+
+export function BudgetsTab({ filter, onFilterChange }: Props) {
   // BV-locked users zien alleen hun eigen BV in de Budgetten-matrix.
   // Voor admins: alle entiteiten.
   const _lockedBv = useLockedBv()
   const store = useBudgetStore()
   const fteGetEntry = useFteStore(s => s.getEntry)
   const fteUpsert   = useFteStore(s => s.upsertEntry)
-  // Re-render bij FTE wijzigingen + bron voor de gedeelde getFteLe-helper.
-  const fteEntriesArr = useFteStore(s => s.entries)
   const { getMonthly } = useAdjustedActuals()
-  // Hours-store voor geplande vakantie/ziekte in toekomstige maanden.
-  const hoursEntries = useHoursStore(s => s.entries)
-  const getHoursEntry = (bv: BvId, m: string) =>
-    hoursEntries.find(e => e.bv === bv && e.month === m)
   // Maandafsluiting-status: een maand telt pas als 'closed' zodra hij
-  // óf definitief is afgesloten in de Maandafsluiting-tab, óf er voor
-  // minstens één BV meaningful data voor staat. Voorkomt dat op de 1e
-  // van een nieuwe maand de vorige maand als lege actual wordt gerenderd
-  // (waardoor de LE-lijnen onterecht zouden verdwijnen).
+  // definitief is afgesloten in de Maandafsluiting-tab.
   const finalizedMonths = useFinStore(s => s.finalized)
-  // Reflectie-antwoorden uit de Maandafsluiting → LE-leerlus. One-off
-  // gemarkeerde afwijkingen worden uit de forecast-baseline gefilterd —
-  // zie getAdjustedActual hieronder. Mirror van useLatestEstimate zodat
-  // beide tabs op identieke LE-cijfers uitkomen.
-  const reflectionRecords = useReflectionStore(s => s.records)
-  // Same mapping als in useLatestEstimate — vraag-id → P&L sub-keys. De
-  // forecast itereert per SUB key (zie SUBS_OF), dus "netto_omzet" moet
-  // worden uitgesplitst naar zijn subposten, anders raakt geen enkele
-  // forecast-iteratie de adjustment.
-  const REV_SUBS = ['gefactureerde_omzet', 'omzet_periode_allocatie']
-  const DIR_COST_SUBS = ['directe_inkoopkosten', 'directe_personeelskosten', 'directe_overige_personeelskosten', 'directe_autokosten']
-  const OPEX_SUBS = ['indirecte_personeelskosten', 'overige_personeelskosten', 'huisvestingskosten', 'automatiseringskosten', 'indirecte_autokosten', 'verkoopkosten', 'algemene_kosten', 'doorbelaste_kosten']
-  const QUESTION_KEY_MAP: Record<string, readonly string[]> = {
-    'rev-vs-le':          REV_SUBS,
-    'rev-vs-budget':      REV_SUBS,
-    'seasonal':           REV_SUBS,
-    'declarability':      REV_SUBS,
-    'capacity-vs-budget': REV_SUBS,
-    'margin-shift':       REV_SUBS,
-    'direct-pers':        ['directe_personeelskosten'],
-    'direct-cost':        DIR_COST_SUBS,
-    'opex':               OPEX_SUBS,
-  }
-  const isOneOffForKey = (e: EntityName, month: string, key: string): boolean => {
-    const rec = reflectionRecords.find(r => r.month === month && r.bv === e)
-    if (!rec) return false
-    for (const ans of rec.answers) {
-      if (ans.scope !== 'one-off') continue
-      const keys = QUESTION_KEY_MAP[ans.questionId]
-      if (keys && keys.includes(key)) return true
-    }
-    return false
-  }
+  // Driver-based LE-engine — vervangt alle eigen forecast-helpers die hier
+  // voorheen woonden. `le.getLE` is de single source of truth voor LE-cijfers
+  // (driver-based rolling forecast met variance-bridge en reflectie-overlay).
+  const le = useLatestEstimate()
 
   const months = BUDGET_MONTHS_2026
+  // BV-scope: hard-locked door user-profiel wint, anders gebruikt het tab-
+  // filter (zelfde knoppen die voorheen in de Topbar stonden).
   const activeEntities: EntityName[] = _lockedBv
     ? (ENTITIES.includes(_lockedBv as EntityName) ? [_lockedBv as EntityName] : [])
-    : ENTITIES
-  // Toon "Totaal alle BVs"-aggregaten alleen voor users zonder BV-restrictie.
-  // Een Projects-only viewer ziet dus geen Totaal-knop, geen Totaal-accordion
-  // en geen totaal-rij in de header.
-  const showTotalScope = !_lockedBv
+    : (filter.bv === 'all'
+        ? ENTITIES
+        : (ENTITIES.includes(filter.bv as EntityName) ? [filter.bv as EntityName] : ENTITIES))
+  // Toon "Totaal alle BVs"-aggregaten alleen voor users zonder BV-restrictie
+  // en alleen wanneer de filter daadwerkelijk alle BVs toont. Op een
+  // single-BV-selectie heeft Totaal geen toegevoegde waarde.
+  const showTotalScope = !_lockedBv && filter.bv === 'all'
 
   // Subtab: financieel (P&L budget+LE) vs FTE & Headcount (FTE-budget + capaciteit
   // per BV per vertical). De FTE-subtab leeft in een eigen component zodat de
@@ -231,12 +284,6 @@ export function BudgetsTab({ filter: _filter }: Props) {
   const [showBudget,   setShowBudget]   = useState<boolean>(true)
   const [showLe,       setShowLe]       = useState<boolean>(true)
   const [showTotal,    setShowTotal]    = useState<boolean>(false)
-
-  // Map Apr-26 → Apr-25 (voor seizoenspatroon vanuit vorig jaar)
-  const toPY = (m: string): string => {
-    const idx = BUDGET_MONTHS_2026.indexOf(m)
-    return idx >= 0 ? MONTHS_2025_LABELS[idx] : m
-  }
 
   // ── Closed-detectie: STRIKT alleen wanneer Maandafsluiting definitief is ──
   // Imports/handmatige actuals voor April promoveren de maand NIET naar
@@ -276,196 +323,26 @@ export function BudgetsTab({ filter: _filter }: Props) {
     return getMonthly(e as BvId, m)
   }
 
-  // ── Geplande FTE voor toekomstige maand ──
-  // Gebruikt de gedeelde FTE-LE-logica (`getFteLe`): manuele .fte > (fteBudget +
-  // last-known shift) > forward-fill van laatste actual. Hierdoor schuift het
-  // FTE-tekort vs budget door naar de omzet-/kosten-LE: als je structureel
-  // onderbezet bent, blijft die delta in de prognose zitten ook al klimt het
-  // FTE-budget over het jaar — en omgekeerd bij overbezetting.
-  const getPlannedFte = (e: BvId, target: string): { fte: number; firstIdx: number; lastClosedIdx: number } => {
-    const tIdx = BUDGET_MONTHS_2026.indexOf(target)
-    const cIdx = lastClosedMonth ? BUDGET_MONTHS_2026.indexOf(lastClosedMonth) : -1
-    const fteLast = lastClosedMonth ? (fteGetEntry(e, lastClosedMonth)?.fte ?? 0) : 0
-    // Zoek binnen (closed-idx, target-idx] naar de FTE-LE per maand.
-    // De eerste maand waarop de FTE-LE van fteLast afwijkt is onze "hire-datum"
-    // (of "krimp-datum") voor de ramp-up.
-    let firstChangeIdx = -1
-    let plannedFte = fteLast
-    for (let i = cIdx + 1; i <= tIdx && i >= 0; i++) {
-      const mm = BUDGET_MONTHS_2026[i]
-      const f = getFteLe({ entries: fteEntriesArr, bv: e, month: mm, isFinalized: isClosedMonth })
-      if (f != null && f > 0) {
-        plannedFte = f
-        if (firstChangeIdx < 0 && f !== fteLast) firstChangeIdx = i
-      }
-    }
-    return { fte: plannedFte, firstIdx: firstChangeIdx, lastClosedIdx: cIdx }
-  }
+  // FTE-helpers (getPlannedFte / rampFactor) zijn verhuisd naar de centrale
+  // driver-engine in src/lib/leDrivers.ts en src/lib/fteLe.ts. BudgetsTab
+  // consumeert de uitkomst rechtstreeks via `le.getLE` — geen lokale forecast-
+  // berekeningen meer.
 
-  /** Ramp-factor voor nieuwe hires: realistischer inwerkschema, want in de
-   *  praktijk zijn hires binnen ~2 maanden goed declarabel (niet nul).
-   *    Maand 0 (instap): 70%
-   *    Maand 1:          90%
-   *    Maand 2+:        100%
-   *  Voor bestaande FTE (fteDelta ≤ 0) geldt ramp = 1 (volle impact van
-   *  ontslag / besparing — capaciteit valt meteen weg). */
-  const rampFactor = (monthsSinceFirstHire: number): number => {
-    if (monthsSinceFirstHire < 0) return 0
-    if (monthsSinceFirstHire === 0) return 0.7
-    if (monthsSinceFirstHire === 1) return 0.9
-    return 1.0
-  }
-
-  // ── Forecast voor toekomstige maanden ──
-  // Model:
-  //   baselineRev = blend(0.6 * 2025-seizoen × perf_YTD, 0.4 * run-rate Mar-26)
-  //   fte-adj     = (fteLast + fteDelta × ramp(monthsSinceHire)) / fteLast
-  //   forecast    = baselineRev × fte-adj
-  //
-  // Ramp: nieuwe hires zijn niet direct 100% declarabel; ze bouwen productie
-  // op over ~4 maanden. Cuts tellen wel direct 100% mee.
-  /** Reflectie-adjusted actual: vervang werkelijke actual voor (e, cm, k)
-   *  door de pre-close LE wanneer de gebruiker die maand/key als one-off
-   *  heeft gemarkeerd. priorClosed = maanden strikt vóór `cm` zodat we niet
-   *  zelf-referentieel worden. Recursie eindigt omdat priorClosed monotoon
-   *  kleiner wordt. */
-  const adjustedV2026 = (e: EntityName, cm: string, k: string): number => {
-    const raw = getActualsFor(e, cm)[k] ?? 0
-    if (!isOneOffForKey(e, cm, k)) return raw
-    const tIdx = BUDGET_MONTHS_2026.indexOf(cm)
-    const prior = closedMonths.filter(x => BUDGET_MONTHS_2026.indexOf(x) < tIdx)
-    if (prior.length === 0) return raw
-    const sm25 = monthlyActuals2025[e]?.[toPY(cm)]?.[k] ?? 0
-    let y26 = 0, y25 = 0
-    for (const pc of prior) {
-      y26 += adjustedV2026(e, pc, k)
-      y25 += monthlyActuals2025[e]?.[toPY(pc)]?.[k] ?? 0
-    }
-    const pm = y25 !== 0 ? y26 / y25 : 1
-    const last = adjustedV2026(e, prior[prior.length - 1], k)
-    const seasonal = sm25 * pm
-    if (seasonal === 0 && last === 0) return 0
-    if (seasonal === 0) return Math.round(last)
-    if (last === 0)     return Math.round(seasonal)
-    return Math.round(0.6 * seasonal + 0.4 * last)
-  }
-
-  const getForecastFor = (e: EntityName, m: string, k: string): number => {
-    const v2025 = (month26: string) => monthlyActuals2025[e]?.[toPY(month26)]?.[k] ?? 0
-    const v2026 = (month26: string) => adjustedV2026(e, month26, k)
-    const sameMonth2025 = v2025(m)
-    let ytd2026 = 0, ytd2025 = 0
-    for (const cm of closedMonths) {
-      ytd2026 += v2026(cm)
-      ytd2025 += v2025(cm)
-    }
-    const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
-    const lastActual = lastClosedMonth ? v2026(lastClosedMonth) : 0
-
-    let fteAdj = 1
-    if (e !== 'Holdings' && lastClosedMonth) {
-      const fteLast = fteGetEntry(e as BvId, lastClosedMonth)?.fte ?? 0
-      if (fteLast > 0) {
-        const planned = getPlannedFte(e as BvId, m)
-        const fteDelta = planned.fte - fteLast
-        if (fteDelta <= 0) {
-          // Ontslag / krimp: volle impact direct (fteFuture / fteLast).
-          fteAdj = planned.fte / fteLast
-        } else {
-          // Nieuwe hires: ramp-up vanaf firstChangeIdx.
-          const tIdx = BUDGET_MONTHS_2026.indexOf(m)
-          const monthsSinceHire = planned.firstIdx >= 0 ? tIdx - planned.firstIdx : 0
-          const ramp = rampFactor(monthsSinceHire)
-          const effectiveFte = fteLast + fteDelta * ramp
-          fteAdj = effectiveFte / fteLast
-        }
-      }
-    }
-
-    // ── Availability-adjustment o.b.v. geplande vakantie/verlof ─────────
-    // De SAP-timesheet upload bevat ook toekomstige vakantie-inleveringen
-    // (bv. Jul-26 Consultancy Vakantie 352u). Die vakantie is capaciteit die
-    // NIET beschikbaar is voor declarabel werk. We berekenen de ratio van
-    // geplande verlof (vakantie + ziekte is zelden gepland, dus primair
-    // vakantie) t.o.v. een baseline van werkuren in recente gesloten maanden.
-    // Dampening is alleen op omzetgerelateerde keys.
-    let leaveAdj = 1
-    const isRevenueKey = k === 'netto_omzet' || k === 'gefactureerde_omzet'
-    if (e !== 'Holdings' && lastClosedMonth && isRevenueKey) {
-      const hoursThisMonth = getHoursEntry(e as BvId, m)
-      // Plande vakantie (voor toekomst typisch alleen Vakantie gevuld)
-      const plannedVakantie = hoursThisMonth?.vakantie ?? 0
-      if (plannedVakantie > 0) {
-        // Baseline werkuren: gemiddelde van recente gesloten maanden
-        let baselineWork = 0, baselineCount = 0
-        for (const cm of closedMonths) {
-          const he = getHoursEntry(e as BvId, cm)
-          if (he) {
-            baselineWork += he.declarable + he.internal
-            baselineCount++
-          }
-        }
-        const avgWork = baselineCount > 0 ? baselineWork / baselineCount : 0
-        if (avgWork > 0) {
-          // Vakantie als ratio van normale werkcapaciteit (cap op 50% dempen).
-          const leaveRatio = Math.min(plannedVakantie / avgWork, 0.5)
-          leaveAdj = 1 - leaveRatio
-        }
-      }
-    }
-
-    const combinedAdj = fteAdj * leaveAdj
-    const seasonalForecast = sameMonth2025 * perfMult * combinedAdj
-    const runRateForecast  = lastActual * combinedAdj
-    if (seasonalForecast === 0 && runRateForecast === 0) return 0
-    if (seasonalForecast === 0) return Math.round(runRateForecast)
-    if (runRateForecast === 0)  return Math.round(seasonalForecast)
-    return Math.round(0.6 * seasonalForecast + 0.4 * runRateForecast)
-  }
-
-  // ── LE-waarde ──
-  // Voor toekomstige maanden: forecast op basis van 2025-seizoen × performance.
-  // Als forecast = 0 (geen 2025-signaal en geen run-rate, bv. nieuwe sub-keys
-  // of BV/regel zonder historie), valt LE terug op het ingevulde budget.
-  // Anders zou LE leeg blijven in maanden waar de gebruiker wél een budget
-  // heeft ingegeven maar er geen historische data voor bestaat.
-  const rawLeVal = (e: EntityName, m: string, k: string): number => {
-    const ov = store.getLeOverride(e, m, k)
-    if (ov != null) return ov
-    if (isClosedMonth(m)) return getActualsFor(e, m)[k] ?? 0
-    const forecast = getForecastFor(e, m, k)
-    if (forecast !== 0) return forecast
-    return rawBudget(e, m, k)
-  }
-  const getLeVal = (e: EntityName, m: string, k: string): number => {
-    // Voor CLOSED maanden gebruiken we de werkelijke aggregaat-waarde
-    // uit useAdjustedActuals.getMonthly i.p.v. sum-of-subs / derived-
-    // formula. Reden: netto_omzet bevat behalve sub-keys ook
-    // IC-verrekening, accruals, handmatige correctie en mutatie
-    // vooruitgefactureerd — die zijn géén sub-keys maar wel onderdeel
-    // van de echte aggregaat-waarde. Hierdoor klopt brutomarge% in
-    // de Budgetten-tab nu één-op-één met de BV-overzichtstabel.
-    if (isClosedMonth(m) && (AGGREGATE_KEYS.has(k) || DERIVED_KEYS.has(k))) {
-      const ov = store.getLeOverride(e, m, k)
-      if (ov != null) return ov
-      return getActualsFor(e, m)[k] ?? 0
-    }
-    if (AGGREGATE_KEYS.has(k)) {
-      return SUBS_OF[k].reduce((s, sk) => s + rawLeVal(e, m, sk), 0)
-    }
-    if (DERIVED_KEYS.has(k)) {
-      return DERIVED_FORMULA[k](sk => getLeVal(e, m, sk))
-    }
-    return rawLeVal(e, m, k)
-  }
+  // ── LE-waarde (delegeert naar driver-engine in useLatestEstimate) ──
+  // Single source of truth voor zowel BudgetsTab (deze) als DashboardTab,
+  // BudgetTab en MaandChecklist. Geen lokale forecast-berekeningen meer.
+  const getLeVal = (e: EntityName, m: string, k: string): number =>
+    le.getLE(e, m, k)
   const getLeSource = (e: EntityName, m: string, k: string): 'override' | 'actual' | 'forecast' | 'derived' | 'budget' => {
-    if (READONLY_KEYS.has(k)) return 'derived'
-    if (store.getLeOverride(e, m, k) != null) return 'override'
-    if (isClosedMonth(m)) return 'actual'
-    // Als forecast leeg is maar er staat budget → labelen we de cel als 'budget'
-    const forecast = getForecastFor(e, m, k)
-    if (forecast === 0 && rawBudget(e, m, k) !== 0) return 'budget'
-    return 'forecast'
+    const src = le.getLeSource(e, m, k)
+    // Compat: BudgetsTab kende ook een 'budget'-state (forecast=0 én budget≠0).
+    // De driver-engine valt sowieso terug op budget wanneer er geen
+    // historische basis is, dus we hoeven hier alleen het verschil te tonen
+    // tussen "echte forecast" en "geen signaal — toon budget" als visuele cue.
+    if (src === 'forecast' && rawBudget(e, m, k) !== 0 && le.getLE(e, m, k) === rawBudget(e, m, k)) {
+      return 'budget'
+    }
+    return src
   }
 
   // FTE-budget en capaciteit-% bewerken gebeurt nu in de subtab
@@ -583,7 +460,7 @@ export function BudgetsTab({ filter: _filter }: Props) {
     }
     return { labels: months, datasets }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartMetric, chartBvs, showBudget, showLe, showTotal, store.overrides, store.leOverrides])
+  }, [chartMetric, chartBvs, showBudget, showLe, showTotal, store.overrides, store.leOverrides, finalizedMonths, useFteStore(s => s.entries), useHoursStore(s => s.entries)])
 
   // ── Budget cell: altijd-aan input voor subs, read-only span voor
   // aggregaten/derived (brutomarge, EBITDA, etc.)
@@ -643,8 +520,8 @@ export function BudgetsTab({ filter: _filter }: Props) {
           src === 'derived'  ? 'Auto-afgeleid van subposten' :
           src === 'actual'   ? 'Werkelijk (uit Maandafsluiting/OHW)' :
           src === 'override' ? 'Handmatige override uit eerder (read-only)' :
-          src === 'budget'   ? 'Geen forecast-signaal — terugval op ingevoerd budget' :
-                               'Forecast — 60% seizoen × performance × FTE + 40% run-rate × FTE'
+          src === 'budget'   ? 'Geen historische driver-basis — terugval op ingegeven budget' :
+                               'Driver-based forecast — FTE × werkdagen × declarability × €/uur (omzet) / run-rate per FTE (kosten) / budget (OpEx & A&A)'
         }
       >
         {val === 0 ? '—' : fmt(val)}
@@ -744,6 +621,12 @@ export function BudgetsTab({ filter: _filter }: Props) {
 
   return (
     <div className="page">
+      {/* Tab-scope filter (verhuisd vanuit Topbar). Year staat hier niet
+          omdat de Budgetten-matrix 2026-only is. */}
+      {onFilterChange && (
+        <BudgetsFilterBar filter={filter} onFilterChange={onFilterChange} />
+      )}
+
       {/* Subtab switcher: Financieel | FTE */}
       <div className="card" style={{ overflow: 'visible' }}>
         <div style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

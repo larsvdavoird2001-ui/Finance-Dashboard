@@ -12,6 +12,7 @@ import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
 import { useFinStore } from '../../store/useFinStore'
 import { fmt } from '../../lib/format'
 import { getFteLe as sharedGetFteLe } from '../../lib/fteLe'
+import { useLockedBv } from '../../lib/permissions'
 
 // ── Capaciteit-budget keys ─ gespiegeld met BudgetsTab ─────────────────────
 // Productief / Verlof / Improductief / Ziek per BV per maand worden in
@@ -118,9 +119,124 @@ const baseOpts = {
   },
 }
 
-interface Props { filter: GlobalFilter }
+// ── Filter-balk bovenin de tab (jaar + BV) ──────────────────────────────────
+// Verhuisd vanuit de Topbar: de globale filterknoppen woonden eerst
+// app-breed, maar staan nu per relevante tab zelf — minder visuele ruis op
+// tabs waar het filter geen rol speelt.
+const HOURS_BV_COLORS: Record<string, string> = {
+  Consultancy: '#00a9e0',
+  Projects:    '#26c997',
+  Software:    '#8b5cf6',
+  Holdings:    '#8fa3c0',
+}
+const HOURS_BV_OPTIONS: Array<{ id: GlobalFilter['bv']; label: string; sub?: string }> = [
+  { id: 'all',         label: 'Alle BV\'s' },
+  { id: 'Consultancy', label: 'Consultancy' },
+  { id: 'Projects',    label: 'Projects' },
+  { id: 'Software',    label: 'Software' },
+  { id: 'Holdings',    label: 'Holdings', sub: 'kosten' },
+]
+const HOURS_YEAR_OPTIONS: Array<{ id: GlobalFilter['year']; label: string }> = [
+  { id: '2026', label: '2026' },
+  { id: '2025', label: '2025' },
+  { id: 'all',  label: 'Alle jaren' },
+]
 
-export function HoursTab({ filter }: Props) {
+function HoursFilterBar({
+  filter,
+  onFilterChange,
+}: {
+  filter: GlobalFilter
+  onFilterChange: (patch: Partial<GlobalFilter>) => void
+}) {
+  const lockedBv = useLockedBv()
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', marginBottom: 4 }}>
+      <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', marginRight: 2 }}>Jaar:</span>
+      {HOURS_YEAR_OPTIONS.map(o => (
+        <button
+          key={o.id}
+          onClick={() => onFilterChange({ year: o.id })}
+          style={{
+            padding: '3px 8px', borderRadius: 5, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+            border: '1px solid', fontFamily: 'var(--font)', transition: 'all .12s',
+            borderColor: filter.year === o.id ? 'rgba(255,255,255,0.25)' : 'var(--bd2)',
+            background: filter.year === o.id ? 'var(--bg4)' : 'transparent',
+            color: filter.year === o.id ? 'var(--t1)' : 'var(--t3)',
+          }}
+        >{o.label}</button>
+      ))}
+
+      <div style={{ width: 1, height: 18, background: 'var(--bd2)', margin: '0 6px' }} />
+
+      <span style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', marginRight: 2 }}>BV:</span>
+      {lockedBv ? (
+        <span
+          title={`Je account is gekoppeld aan ${lockedBv} — je ziet alleen data van deze BV.`}
+          style={{
+            padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+            border: `1px solid ${HOURS_BV_COLORS[lockedBv]}`,
+            background: HOURS_BV_COLORS[lockedBv] + '22',
+            color: HOURS_BV_COLORS[lockedBv],
+            display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font)',
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: HOURS_BV_COLORS[lockedBv], display: 'inline-block', flexShrink: 0 }} />
+          {lockedBv}
+          <span style={{ fontSize: 9, marginLeft: 2, opacity: 0.7 }}>🔒</span>
+        </span>
+      ) : (
+        <>
+          {HOURS_BV_OPTIONS.map(o => {
+            const isActive = filter.bv === o.id
+            const color = o.id !== 'all' ? HOURS_BV_COLORS[o.id] : undefined
+            return (
+              <button
+                key={o.id}
+                onClick={() => onFilterChange({ bv: o.id })}
+                style={{
+                  padding: '3px 10px', borderRadius: 5, fontSize: 11,
+                  fontWeight: isActive ? 600 : 500, cursor: 'pointer',
+                  border: '1px solid', fontFamily: 'var(--font)', transition: 'all .12s',
+                  borderColor: isActive ? (color ?? 'rgba(255,255,255,0.25)') : 'var(--bd2)',
+                  background: isActive ? (color ? color + '22' : 'var(--bg4)') : 'transparent',
+                  color: isActive ? (color ?? 'var(--t1)') : 'var(--t3)',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                {color && (
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: isActive ? color : 'var(--t3)', display: 'inline-block', flexShrink: 0 }} />
+                )}
+                {o.label}
+                {o.sub && (
+                  <span style={{ fontSize: 9, color: isActive ? color : 'var(--t3)', opacity: 0.75, marginLeft: 2 }}>({o.sub})</span>
+                )}
+              </button>
+            )
+          })}
+          {(filter.bv !== 'all' || filter.year !== '2026') && (
+            <button
+              style={{
+                padding: '3px 7px', borderRadius: 5, fontSize: 10, cursor: 'pointer',
+                border: '1px solid var(--bd2)', background: 'transparent',
+                color: 'var(--t3)', fontFamily: 'var(--font)', marginLeft: 2,
+              }}
+              onClick={() => onFilterChange({ bv: 'all', year: '2026' })}
+              title="Reset filters"
+            >✕ Reset</button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+interface Props {
+  filter: GlobalFilter
+  onFilterChange?: (patch: Partial<GlobalFilter>) => void
+}
+
+export function HoursTab({ filter, onFilterChange }: Props) {
   const [view, setView] = useState<'monthly' | 'bv'>('monthly')
   const [metric, setMetric] = useState<'written' | 'declarable' | 'util'>('written')
   const [showForecast, setShowForecast] = useState(true)
@@ -583,6 +699,11 @@ export function HoursTab({ filter }: Props) {
 
   return (
     <div className="page">
+      {/* Tab-scope filters: jaar + BV (verhuisd vanuit de Topbar) */}
+      {onFilterChange && (
+        <HoursFilterBar filter={filter} onFilterChange={onFilterChange} />
+      )}
+
       {/* Controls */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexWrap: 'wrap', alignItems: 'center' }}>
         <button className={`btn sm${view === 'monthly' ? ' primary' : ' ghost'}`} onClick={() => setView('monthly')}>Maandtrend</button>

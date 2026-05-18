@@ -53,7 +53,12 @@ export function getFteLe(args: {
   // Manueel ingevoerde .fte voor toekomst wint (bewuste plan-override).
   if (cur?.fte != null) return cur.fte
   const b = cur?.fteBudget
-  if (b != null) {
+  // fteBudget moet > 0 zijn om als budget te tellen — een expliciete 0 (of
+  // null) betekent "niet gebudgetteerd"; in dat geval valt de forecast terug
+  // op de forward-fill van de laatste bekende actual. Voorheen retourneerde
+  // de engine 0 wanneer fteBudget op 0 stond, waardoor omzet- en kosten-LE
+  // vanaf die maand naar nul zakte — meestal niet wat de gebruiker bedoelt.
+  if (b != null && b > 0) {
     return Math.max(0, b + getFteLeShift(entries, bv))
   }
   // Fallback: meest recente eerdere actual (forward-fill).

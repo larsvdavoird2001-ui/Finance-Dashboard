@@ -26,6 +26,9 @@ import { useReflectionStore, type ReflectionAnswer } from '../../store/useReflec
 import { useNavStore } from '../../store/useNavStore'
 import { useCanApprove } from '../../lib/permissions'
 import { derivePL } from '../../lib/plDerive'
+import { useLatestEstimate } from '../../hooks/useLatestEstimate'
+import { useLeAiStore } from '../../store/useLeAiStore'
+import type { LeAiSuggestion } from '../../lib/leAi'
 
 const BV_COLORS: Record<ClosingBv, string> = {
   Consultancy: '#00a9e0',
@@ -57,9 +60,12 @@ interface Props {
 interface QuestionRowProps {
   question: AiQuestion
   existing?: ReflectionAnswer
+  /** AI-suggestie voor deze vraag (uit useLeAiStore). undefined = nog niet
+   *  opgehaald of geen relevante suggestie. */
+  aiSuggestion?: LeAiSuggestion
   onSave: (answer: string, scope: ReflectionAnswer['scope']) => void
 }
-function QuestionRow({ question, existing, onSave }: QuestionRowProps) {
+function QuestionRow({ question, existing, aiSuggestion, onSave }: QuestionRowProps) {
   const [text, setText] = useState(existing?.answer ?? '')
   const [scope, setScope] = useState<ReflectionAnswer['scope']>(existing?.scope ?? 'unknown')
   const [dirty, setDirty] = useState(false)
@@ -107,6 +113,38 @@ function QuestionRow({ question, existing, onSave }: QuestionRowProps) {
           resize: 'vertical', minHeight: 32,
         }}
       />
+      {aiSuggestion && aiSuggestion.suggestedScope !== 'unknown' && (
+        <div style={{
+          fontSize: 9.5, color: 'var(--t2)', lineHeight: 1.4,
+          padding: '4px 6px', borderRadius: 4,
+          background: 'rgba(139, 92, 246, 0.07)',
+          border: '1px solid rgba(139, 92, 246, 0.25)',
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+        }}>
+          <span style={{ fontSize: 11 }}>🤖</span>
+          <span style={{ fontWeight: 700, color: '#a78bfa' }}>AI</span>
+          <span>denkt:</span>
+          <strong style={{ color: 'var(--t1)' }}>
+            {aiSuggestion.suggestedScope === 'one-off' ? 'Eenmalig' : 'Structureel'}
+          </strong>
+          <span style={{ fontSize: 9, color: 'var(--t3)' }}>
+            ({Math.round(aiSuggestion.confidence * 100)}%)
+          </span>
+          <button
+            onClick={() => { setScope(aiSuggestion.suggestedScope); setDirty(true) }}
+            className="btn sm ghost"
+            style={{ fontSize: 9, padding: '1px 6px', marginLeft: 'auto' }}
+            title="Neem deze classificatie over"
+          >
+            Overnemen
+          </button>
+          {aiSuggestion.reasoning && (
+            <div style={{ flexBasis: '100%', fontSize: 9, color: 'var(--t3)', fontStyle: 'italic', marginTop: 2 }}>
+              {aiSuggestion.reasoning}
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 9.5, color: 'var(--t3)' }}>Effect:</span>
         {(['one-off', 'structural', 'unknown'] as const).map(s => (
@@ -148,18 +186,42 @@ function BvReflectionBlock({ ctx, bv, month, currentUserEmail }: BvBlockProps) {
   const saveAnswer = useReflectionStore(s => s.saveAnswer)
   const getAnswer = useReflectionStore(s => s.getAnswer)
   // Subscribe op records voor live re-render bij saveAnswer.
-  useReflectionStore(s => s.records)
+  const reflectionRecords = useReflectionStore(s => s.records)
+
+  // ── AI-overlay: vraag een classificatie per vraag + maand-commentary aan
+  // Claude op basis van de huidige variance-context. Cache wint zolang
+  // (bv, maand, vragenset) niet wijzigt; refresh-knop forceert opnieuw. ──
+  const aiCache = useLeAiStore(s => s.cache[`${month}::${bv}`])
+  const aiDisabled = useLeAiStore(s => s.disabled)
+  const fetchAi = useLeAiStore(s => s.fetchSuggestions)
+  const resetAi = useLeAiStore(s => s.reset)
+
+  // Trigger AI-call zodra de context er is. Userreflections (al ingevulde
+  // antwoorden) gaan mee zodat Claude rekening houdt met wat de gebruiker al
+  // heeft geclassificeerd.
+  useEffect(() => {
+    if (aiDisabled) return
+    if (questions.length === 0) return
+    const existing = reflectionRecords.find(r => r.month === month && r.bv === bv)?.answers ?? []
+    fetchAi(month, bv, ctx, questions, existing)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [month, bv, questions.length, aiDisabled])
+
+  const aiSuggestionMap = useMemo(() => {
+    const m = new Map<string, LeAiSuggestion>()
+    if (aiCache?.result?.suggestions) {
+      for (const s of aiCache.result.suggestions) m.set(s.questionId, s)
+    }
+    return m
+  }, [aiCache])
 
   const unanswered = questions.filter(q => !getAnswer(month, bv, q.id)).length
   const allAnswered = questions.length > 0 && unanswered === 0
-  // Default-state: open als er nog vragen openstaan, dicht als alles klaar is
-  // — zo blijft het overzicht compact zodra de gebruiker klaar is.
   const [expanded, setExpanded] = useState<boolean>(unanswered > 0)
   useEffect(() => { setExpanded(unanswered > 0)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, bv])
 
-  // Geen vragen: BV-blok overslaan (anders krijg je een lege oranje-rand box).
   if (questions.length === 0) return null
 
   return (
@@ -213,6 +275,59 @@ function BvReflectionBlock({ ctx, bv, month, currentUserEmail }: BvBlockProps) {
 
       {expanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* AI-commentary card — getoond bovenaan zodra Claude heeft geantwoord. */}
+          {aiCache?.status === 'loading' && (
+            <div style={{
+              padding: '6px 8px', fontSize: 10.5, color: 'var(--t2)',
+              background: 'rgba(139, 92, 246, 0.06)',
+              border: '1px solid rgba(139, 92, 246, 0.2)', borderRadius: 4,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span>🤖</span>
+              <span>AI analyseert de variances…</span>
+            </div>
+          )}
+          {aiCache?.status === 'error' && (
+            <div style={{
+              padding: '6px 8px', fontSize: 10, color: 'var(--amber)',
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid var(--amber)', borderRadius: 4,
+            }}>
+              ⚠ AI-overlay niet beschikbaar — {aiCache.error?.slice(0, 100) ?? 'onbekende fout'}.
+              {' '}
+              <button
+                onClick={() => { resetAi(month, bv) }}
+                className="btn sm ghost"
+                style={{ fontSize: 9, padding: '0 6px' }}
+              >Opnieuw proberen</button>
+            </div>
+          )}
+          {aiCache?.status === 'success' && aiCache.result?.commentary && (
+            <div style={{
+              padding: '8px 10px',
+              background: 'rgba(139, 92, 246, 0.07)',
+              border: '1px solid rgba(139, 92, 246, 0.25)',
+              borderRadius: 5,
+              display: 'flex', flexDirection: 'column', gap: 5,
+            }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '.07em', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 11 }}>🤖</span> AI-duiding
+                <button
+                  onClick={() => {
+                    const existing = reflectionRecords.find(r => r.month === month && r.bv === bv)?.answers ?? []
+                    fetchAi(month, bv, ctx, questions, existing, true)
+                  }}
+                  className="btn sm ghost"
+                  style={{ fontSize: 9, padding: '0 6px', marginLeft: 'auto' }}
+                  title="Haal een vers AI-antwoord op"
+                >↻ Vernieuwen</button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--t1)', lineHeight: 1.5 }}>
+                {aiCache.result.commentary}
+              </div>
+            </div>
+          )}
+
           {questions.map(q => {
             const existing = getAnswer(month, bv, q.id)
             return (
@@ -220,6 +335,7 @@ function BvReflectionBlock({ ctx, bv, month, currentUserEmail }: BvBlockProps) {
                 key={q.id}
                 question={q}
                 existing={existing}
+                aiSuggestion={aiSuggestionMap.get(q.id)}
                 onSave={(answer, scope) => saveAnswer(month, bv, q.id, q.question, answer, scope, currentUserEmail ?? undefined)}
               />
             )
@@ -239,6 +355,10 @@ export function LeReflectionPanel({ filter, targetMonth, currentUserEmail }: Pro
   const { getMonthly } = useAdjustedActuals()
   const fteEntries = useFteStore(s => s.entries)
   const hoursEntries = useHoursStore(s => s.entries)
+  // Driver-based pre-close LE — injected into buildReflectionContext zodat
+  // de "vs LE"-variances in de vragen op het nieuwe rekenmodel rusten i.p.v.
+  // de oude seasonal/run-rate simulatie.
+  const le = useLatestEstimate()
   // Voor de pre-close LE: als targetMonth een opgeslagen LE-snapshot heeft
   // (vastgelegd op het moment van Definitief afsluiten), gebruiken we die
   // exacte waardes — zo komen de getallen 1-op-1 overeen met de popup die
@@ -313,6 +433,10 @@ export function LeReflectionPanel({ filter, targetMonth, currentUserEmail }: Pro
         // Snapshot per BV uit de Maandafsluiting — undefined → fallback op
         // live forecast-simulatie binnen buildReflectionContext.
         preCloseLeOverride: targetSnapshot?.[bv],
+        // Driver-engine levert de live pre-close LE wanneer er geen snapshot
+        // is. Hierdoor matchen de "vs LE"-cijfers in de vragen 1-op-1 met
+        // wat BudgetsTab en DashboardTab tonen.
+        getPreCloseLE: (e, m, k) => le.getPreCloseLE(e, m, k),
       }),
     }))
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,15 +1,20 @@
 /** localStorage backup-mechanisme voor TPG Finance.
  *
- *  Eens per app-start nemen we een snapshot van alle tpg-* keys en
- *  bewaren die in een tpg-backup-<timestamp> namespace. We bewaren de
- *  laatste 5 snapshots. Zo kunnen we — als data ooit weer 'verdwijnt' —
- *  altijd terug naar een eerdere staat zonder een Supabase-backup of
- *  externe opslag nodig te hebben.
+ *  Twee soorten automatische snapshots:
+ *    1. start-van-de-dag — bij de eerste app-load van een kalenderdag
+ *       maken we 1 snapshot zodat er altijd minstens 1 "verse" backup
+ *       per dag is, ook als de gebruiker niets bewerkt.
+ *    2. na-elke-wijziging — zodra een Supabase-save afgerond is wordt
+ *       een (debounced) snapshot weggeschreven, zodat een rollback
+ *       van per ongeluk verwijderde / overschreven data altijd binnen
+ *       handbereik is.
+ *  We bewaren de laatste KEEP_BACKUPS (20) snapshots — genoeg voor een
+ *  paar dagen actieve bewerkingen plus een handvol fallback-dagen.
  */
 
 const BACKUP_PREFIX = 'tpg-backup-'
 const DATA_PREFIX   = 'tpg-'
-const KEEP_BACKUPS  = 5
+const KEEP_BACKUPS  = 20
 // Niet meeloggen in de backup
 const IGNORE_KEYS   = new Set(['tpg-last-user'])
 
@@ -40,6 +45,23 @@ export function snapshotLocalStorage(user: string | null): void {
     console.info(`[localBackup] snapshot ${newKey} (${Object.keys(snap.keys).length} keys)`)
   } catch (e) {
     console.warn('[localBackup] snapshot failed:', e)
+  }
+}
+
+/** Maak maximaal één snapshot per kalenderdag. Gebruikt voor de "start van
+ *  de dag"-backup zodat we elke dag een vers ankerpunt hebben, ongeacht
+ *  hoeveel keer de app gestart wordt. */
+export function dailySnapshotIfNeeded(user: string | null): boolean {
+  try {
+    const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+    const all = listBackups()
+    const alreadyToday = all.some(b => new Date(b.ts).toISOString().slice(0, 10) === today)
+    if (alreadyToday) return false
+    snapshotLocalStorage(user)
+    return true
+  } catch (e) {
+    console.warn('[localBackup] dailySnapshotIfNeeded failed:', e)
+    return false
   }
 }
 

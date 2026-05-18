@@ -221,8 +221,13 @@ export function buildReflectionContext(args: {
    *  netto_omzet / brutomarge / ebitda zitten in de snapshot — andere keys
    *  vallen terug op de live simulatie. */
   preCloseLeOverride?: LeSnapshotByBv
+  /** Optionele injectie van de driver-based pre-close LE-functie (uit
+   *  useLatestEstimate). Wanneer geleverd wordt deze als primaire bron
+   *  gebruikt — anders valt de context terug op de oude forecastForKey-
+   *  simulatie (legacy compat). */
+  getPreCloseLE?: (bv: EntityName, m: string, key: string) => number
 }): ReflectionContext {
-  const { bv, targetMonth, closedMonthsIncl, getMonthly, getBudget, fteEntries, hoursEntries, getCapacityBudgetPct, preCloseLeOverride } = args
+  const { bv, targetMonth, closedMonthsIncl, getMonthly, getBudget, fteEntries, hoursEntries, getCapacityBudgetPct, preCloseLeOverride, getPreCloseLE } = args
   const priorClosed = closedMonthsIncl.filter(m => monthIdx(m) < monthIdx(targetMonth))
   const prevMonth = priorClosed.length > 0 ? priorClosed[priorClosed.length - 1] : null
 
@@ -254,6 +259,11 @@ export function buildReflectionContext(args: {
       if (key === 'brutomarge'  && preCloseLeOverride.brutomarge  != null) return preCloseLeOverride.brutomarge
       if (key === 'ebitda'      && preCloseLeOverride.ebitda      != null) return preCloseLeOverride.ebitda
     }
+    // Driver-engine wint wanneer beschikbaar — anders fallback op de oude
+    // seasonal/run-rate simulatie. forecastForKey blijft staan voor unit-
+    // tests en als safety-net, maar in de live UI levert useLatestEstimate
+    // de pre-close LE.
+    if (getPreCloseLE) return getPreCloseLE(bv, targetMonth, key)
     return forecastForKey({
       bv, month: targetMonth, key,
       priorClosed, getMonthly, getFte, getHours,
@@ -370,162 +380,44 @@ export function buildReflectionContext(args: {
   }
 }
 
-/** Index-based variant-keuze — vermijdt hash-collisions bij modulo-kleine
- *  arrays. Door monthIdx en bvIdx als priem-vermenigvuldigers te combineren
- *  garanderen we dat opeenvolgende maanden (en opeenvolgende BV's) altijd
- *  een ander phrasing-template krijgen, zelfs voor dezelfde vraag-id. */
-const BV_ORDER = ['Consultancy', 'Projects', 'Software', 'Holdings'] as const
-function variantIdx(arrLen: number, month: string, bv: string, qId: string): number {
-  const mi = BUDGET_MONTHS_2026.indexOf(month)              // 0..11
-  const bi = (BV_ORDER as readonly string[]).indexOf(bv)    // 0..3
-  // qSalt = som van charcodes — geeft elke vraag-id zijn eigen "startoffset".
-  let qSalt = 0
-  for (let i = 0; i < qId.length; i++) qSalt += qId.charCodeAt(i)
-  // Priem-multiplikatoren maken (mi, bi)-paren goed gespreid.
-  const raw = mi * 7 + bi * 13 + qSalt
-  return ((raw % arrLen) + arrLen) % arrLen
-}
-function pick<T>(arr: T[], month: string, bv: string, qId: string): T {
-  return arr[variantIdx(arr.length, month, bv, qId)]
-}
-
-/** Genereer max 3 controle-vragen op basis van de grootste afwijkingen.
- *  Compact gehouden: alleen de top-3 op weight overleeft de slice, en de
- *  fallback-vragen (EBITDA / seasonal) komen pas in beeld als er ruimte
- *  is na de hoofd-drijvers.
- *
- *  Voor iedere trigger zijn meerdere phrasings beschikbaar — we kiezen er
- *  één deterministisch op basis van (month, bv, id). Hierdoor krijgt elke
- *  combinatie een eigen formulering, voelen Jan/Feb/Mar niet als kopieën
- *  van elkaar, en blijft dezelfde combinatie stabiel bij refresh. */
+// ── 5 driver-vragen voor de LE-leerlus ──────────────────────────────────────
+// Mapping op de variance-componenten van de driver-engine:
+//   volume-shift       → Δ FTE / Δ capaciteit
+//   rate-shift         → Δ effectief €/uur (price)
+//   utilization-shift  → Δ declarability % (mix)
+//   one-off-month      → eenmalige posten in deze maand (timing)
+//   cost-step-change   → structurele wijziging in een kostenpost
+//
+// Triggers zijn deterministisch o.b.v. variances vs pre-close LE. Bij meer
+// dan vijf signalen sorteren we op weight en pakken de top 5; in de praktijk
+// zullen er per maand zelden meer dan 2-3 vragen tegelijk verschijnen.
 export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
-  const out: AiQuestion[] = []
-  const { month, bv, variances, fteDelta, fteCurrent, ftePrev, fteBudget, fteVsBudget, declarability, declarabilityPrevAvg, capacityActual, capacityBudget, vakantie, ziekte, prevMonthRevenue, sameMonth2025Revenue } = ctx
+  const { month, bv, variances, fteDelta, fteCurrent, ftePrev, fteBudget, fteVsBudget, declarability, declarabilityPrevAvg } = ctx
 
-  const rev = variances.find(v => v.key === 'netto_omzet')
-  const margin = variances.find(v => v.key === 'brutomarge')
-  const dirCost = variances.find(v => v.key === 'directe_kosten')
-  const dirPers = variances.find(v => v.key === 'directe_personeelskosten')
-  const opex = variances.find(v => v.key === 'operationele_kosten')
+  const rev    = variances.find(v => v.key === 'netto_omzet')
+  const dirCst = variances.find(v => v.key === 'directe_kosten')
+  const opex   = variances.find(v => v.key === 'operationele_kosten')
   const ebitda = variances.find(v => v.key === 'ebitda')
 
-  // Helper voor het kiezen van een variant — passeert (month, bv) zodat
-  // opeenvolgende maanden en BVs verschillende phrasings krijgen.
-  const v = <T,>(arr: T[], qId: string): T => pick(arr, month, bv, qId)
+  const out: AiQuestion[] = []
 
-  // ── Omzet vs LE ────────────────────────────────────────────────────────
-  if (rev && Math.abs(rev.vsLePct) > 3 && Math.abs(rev.vsLe) > 5000) {
-    const dir = rev.vsLe >= 0 ? 'hoger' : 'lager'
-    const meevaller = rev.vsLe >= 0 ? 'meevaller' : 'tegenvaller'
-    const phrasings = [
-      `${bv} ${month}: netto omzet ${fmtEur(rev.actual)} kwam ${fmtEur(Math.abs(rev.vsLe))} (${rev.vsLePct >= 0 ? '+' : ''}${rev.vsLePct.toFixed(1)}%) ${dir} uit dan de Latest Estimate van ${fmtEur(rev.preCloseLe)}. Welke factor verklaart dit verschil?`,
-      `${bv} ${month}: de LE rekende op ${fmtEur(rev.preCloseLe)}, maar de actuals tikten af op ${fmtEur(rev.actual)} (${rev.vsLePct >= 0 ? '+' : ''}${rev.vsLePct.toFixed(1)}%). Waar zit deze ${meevaller} concreet in?`,
-      `Onze prognose voor ${bv} in ${month} zat ${rev.vsLePct >= 0 ? '+' : ''}${rev.vsLePct.toFixed(1)}% ernaast (LE ${fmtEur(rev.preCloseLe)} → actual ${fmtEur(rev.actual)}). Welk project, klant of contractmoment maakt het verschil?`,
-      `${bv} ${month}: actual ${fmtEur(rev.actual)} ligt ${fmtEur(Math.abs(rev.vsLe))} ${dir} dan voorspeld. Wat heeft de pre-close LE niet kunnen voorzien?`,
-    ]
-    const hints = [
-      'Project-mix shift, vertraagde/vooruitgefactureerde projecten, missing hours, prijsindexatie, uitloop, vroege oplevering, ...',
-      'Eenmalige oplevering of milestone? Nieuwe klant gestart? Tarief-aanpassing?',
-      'Verschuiving in conceptfacturen, NTF-uren, OHW-mutatie of D-lijst?',
-    ]
-    out.push({
-      id: 'rev-vs-le',
-      question: v(phrasings, 'rev-vs-le'),
-      hint: v(hints, 'rev-vs-le-h'),
-      category: 'revenue',
-      weight: Math.abs(rev.vsLe),
-    })
-  }
-
-  // ── Omzet vs budget (alleen als richting verschilt van LE) ─────────────
-  if (rev && Math.abs(rev.vsBudgetPct) > 5 && Math.abs(rev.vsBudget) > 10000 &&
-      (rev.vsBudget >= 0) !== (rev.vsLe >= 0)) {
-    const phrasings = [
-      `${bv} ${month}: omzet ${rev.vsBudgetPct >= 0 ? '+' : ''}${rev.vsBudgetPct.toFixed(1)}% vs budget (${fmtEur(rev.actual)} vs ${fmtEur(rev.budget)}). Waarop was het oorspronkelijke budget gebaseerd dat we nu moeten herzien?`,
-      `Het ${bv}-budget voor ${month} (${fmtEur(rev.budget)}) wijkt nu duidelijk af van actual ${fmtEur(rev.actual)}. Welke aanname uit de budget-ronde klopt niet meer?`,
-      `${bv} ${month}: ${rev.vsBudgetPct >= 0 ? '+' : ''}${rev.vsBudgetPct.toFixed(1)}% vs budget. Pipeline anders dan verwacht, of klant-mix verschoven sinds de budget-cycle?`,
-    ]
-    const hints = [
-      'Budget-aannames die zijn achterhaald — pipeline, contracten, tarief, capaciteit',
-      'Welke klant of project zat hier wel/niet in dat de budget-aannames omzet?',
-      'Volume-effect (FTE/uren) of prijs-effect (tarief)?',
-    ]
-    out.push({
-      id: 'rev-vs-budget',
-      question: v(phrasings, 'rev-vs-budget'),
-      hint: v(hints, 'rev-vs-budget-h'),
-      category: 'revenue',
-      weight: Math.abs(rev.vsBudget) * 0.6,
-    })
-  }
-
-  // ── FTE-vraag (mutatie + vs-budget gecombineerd) ──────────────────────
-  // Eén FTE-vraag per BV/maand om dubbeling te voorkomen. Trigger:
-  //   - significante mutatie t.o.v. vorige maand (|delta| ≥ 1.0), OF
-  //   - significante afwijking t.o.v. budget (|vs-budget| ≥ 0.5)
-  // De vraag toont beide signalen wanneer ze bestaan, met budget-context
-  // erin verwerkt zodat je niet twee keer hoeft te lezen.
+  // ── 1. VOLUME-SHIFT: FTE-verandering ──
+  // Trigger: |Δ FTE MoM| ≥ 1.0 OF |Δ FTE vs budget| ≥ 0.5
   const hasMomDelta    = fteDelta != null && Math.abs(fteDelta) >= 1
   const hasBudgetDelta = fteBudget != null && fteVsBudget != null && Math.abs(fteVsBudget) >= 0.5
   if (hasMomDelta || hasBudgetDelta) {
-    // Bouw een kop-zin die beide signalen meeneemt indien aanwezig.
     const parts: string[] = []
     if (hasMomDelta) {
-      const sign = fteDelta! >= 0 ? '+' : ''
-      const dir  = fteDelta! > 0 ? 'gestegen' : 'gedaald'
-      parts.push(`MoM ${sign}${fteDelta!.toFixed(1)} (${ftePrev?.toFixed(1) ?? '?'} → ${fteCurrent.toFixed(1)}, ${dir})`)
+      parts.push(`${fteDelta! >= 0 ? '+' : ''}${fteDelta!.toFixed(1)} MoM (${ftePrev?.toFixed(1) ?? '?'} → ${fteCurrent.toFixed(1)})`)
     }
     if (hasBudgetDelta) {
-      const sign = fteVsBudget! >= 0 ? '+' : ''
-      parts.push(`vs budget ${sign}${fteVsBudget!.toFixed(1)} (actual ${fteCurrent.toFixed(1)} · budget ${fteBudget!.toFixed(1)})`)
+      parts.push(`${fteVsBudget! >= 0 ? '+' : ''}${fteVsBudget!.toFixed(1)} vs budget (actual ${fteCurrent.toFixed(1)} · budget ${fteBudget!.toFixed(1)})`)
     }
-    const ctx = parts.join(' · ')
-
-    // Phrasings: kies set op basis van wat het sterkste signaal is.
-    const dominantBudget = hasBudgetDelta && (!hasMomDelta || Math.abs(fteVsBudget!) * 1.5 > Math.abs(fteDelta ?? 0))
-    const phrasings = dominantBudget
-      ? [
-          `${bv} ${month}: FTE wijkt af van budget — ${ctx}. Wat verklaart de afwijking en moet het FTE-budget voor de komende maanden bijgesteld?`,
-          `${bv} ${month}: bezetting ${fteVsBudget! > 0 ? 'hoger' : 'lager'} dan begroot (${ctx}). ${fteVsBudget! > 0 ? 'Vroege hire of extra inhuur?' : 'Hire-plan vertraagd, contract-uitloop?'}`,
-          `${bv} ${month}: FTE-budget loopt uit de pas (${ctx}). Pijplijn-vertraging, vacature-status, of versnelde groei?`,
-        ]
-      : (fteDelta! > 0
-        ? [
-            `${bv} ${month}: FTE ${ctx}. Welke rollen zijn ingestapt, en hoeveel productiviteit verwacht je in de eerste 1-3 maanden?`,
-            `${bv}: hire-update ${month} (${ctx}). Consultants, ondersteuning of leiderschap — en is de pijplijn er klaar voor?`,
-            `${bv} ${month}: bezetting groeit (${ctx}). Houdt deze groei aan of stabiliseert het hier?`,
-          ]
-        : [
-            `${bv} ${month}: FTE-krimp (${ctx}). Vertrek, contract-einde of intern-doorschuiven? Wordt er vervangen?`,
-            `${bv}: bezetting daalt (${ctx}). Wat betekent dit voor declarable capaciteit volgende maand?`,
-            `${bv} ${month}: ${ctx}. Plan om weer aan te vullen of structureel slankere bezetting?`,
-          ])
-    const hints = dominantBudget
-      ? [
-          'Hire-vertraging, contract-einde, freelance-buffer, vroege start nieuwe rol',
-          'Aanpassen FTE-budget komende maanden of voorzie je dit in te halen?',
-          'Heeft dit gevolgen voor de capaciteit-% verdeling (productief/verlof/improductief/ziek)?',
-        ]
-      : (fteDelta! > 0
-        ? [
-            'Nieuwe hires (rol, instap-datum?), contract-uitbreiding, terug van verlof',
-            'Junior of medior? Verwachte ramp-up tot vol declarabel?',
-            'Direct op een specifiek project of bench-tijd?',
-          ]
-        : [
-            'Vertrek (eind contract, opzegging), uitstroom, uitval, end-of-project',
-            'Project-impact — wordt overuren of freelance ingezet als overbrugging?',
-            'Vacature open of bewuste afslanking?',
-          ])
-    // Eén vraag-id zodat dezelfde reden niet dubbel wordt opgeslagen.
-    const id = dominantBudget ? 'fte-vs-budget' : 'fte-delta'
     out.push({
-      id,
-      question: v(phrasings, id),
-      hint: v(hints, `${id}-h`),
+      id: 'volume-shift',
+      question: `${bv} ${month}: FTE-verandering — ${parts.join(' · ')}. Is dit een structurele aanpassing van de bezetting voor de rest van het jaar, of een tijdelijke afwijking?`,
+      hint: 'Hires, vertrek, ouderschapsverlof, vacature, freelance-buffer. "Structureel" → driver-engine schaalt omzet en directe personeelskosten mee voor de rest van het jaar. "Eenmalig" → alleen deze maand getroffen.',
       category: 'fte',
-      // Combineer signaal-zwaartes; budget-afwijking weegt iets zwaarder
-      // omdat die direct LE/forecast-aannames raakt.
       weight: Math.max(
         hasMomDelta    ? Math.abs(fteDelta!)    * 50000 : 0,
         hasBudgetDelta ? Math.abs(fteVsBudget!) * 75000 : 0,
@@ -533,285 +425,66 @@ export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
     })
   }
 
-  // ── Capaciteits-% vs budget (productief/verlof/improductief/ziek) ─────
-  // Trigger: budget % ingegeven én absolute afwijking ≥ 3pp. Per categorie
-  // één vraag (de belangrijkste — hoogste afwijking — wordt gepickt).
-  if (capacityActual && capacityBudget) {
-    type CapKey = 'productive' | 'leave' | 'nonproductive' | 'sick'
-    const labels: Record<CapKey, string> = { productive: 'Productief', leave: 'Verlof', nonproductive: 'Improductief', sick: 'Ziek' }
-    const cands: Array<{ k: CapKey; actual: number; budget: number; diff: number }> = []
-    for (const k of ['productive', 'leave', 'nonproductive', 'sick'] as CapKey[]) {
-      const b = capacityBudget[k]
-      const a = capacityActual[k]
-      if (b == null) continue
-      const diff = a - b
-      if (Math.abs(diff) >= 3) cands.push({ k, actual: a, budget: b, diff })
-    }
-    if (cands.length > 0) {
-      // Pak de zwaarste afwijking voor de vraag (max 1 capaciteit-vraag per BV
-      // om het panel compact te houden).
-      cands.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
-      const top = cands[0]
-      const dir = top.diff > 0 ? 'hoger' : 'lager'
-      const sign = top.diff >= 0 ? '+' : ''
-      const phrasings = [
-        `${bv} ${month}: ${labels[top.k]} ${top.actual.toFixed(1)}% vs budget ${top.budget.toFixed(1)}% (${sign}${top.diff.toFixed(1)}pp). Welke factor verschuift het uren-mix t.o.v. plan?`,
-        `${bv}: capaciteits-mix in ${month} wijkt af — ${labels[top.k]} ${dir} dan begroot (${sign}${top.diff.toFixed(1)}pp). Bench-tijd, project-pijplijn of vakantie-piek?`,
-        `${bv} ${month}: ${labels[top.k]}-percentage ${sign}${top.diff.toFixed(1)}pp t.o.v. capaciteit-budget. Wordt dit structureel of betreft het deze maand?`,
-      ]
-      const hints = [
-        'Project-pijplijn, onboarding nieuwe hires, opleidingsweken, sales-uren, vakantie-spreiding',
-        'Past het in de seizoens-pattern of bouwt het iets nieuws op?',
-        'Heeft deze afwijking impact op de declarabiliteits-forecast voor de rest van het jaar?',
-      ]
-      out.push({
-        id: 'capacity-vs-budget',
-        question: v(phrasings, 'capacity-vs-budget'),
-        hint: v(hints, 'capacity-vs-budget-h'),
-        category: top.k === 'leave' || top.k === 'sick' ? 'leave' : 'declarability',
-        // Weight ~ pp afwijking × FTE-equivalent zodat het naast omzet/marge
-        // afwijkingen op nuttige plek in de top-3 valt
-        weight: Math.abs(top.diff) * 12000,
-      })
-    }
+  // ── 2. RATE-SHIFT: omzet-afwijking die NIET (geheel) door FTE komt ──
+  // Trigger: |vs LE| ≥ 3% & €5k; rate-component is "wat overblijft na volume".
+  if (rev && Math.abs(rev.vsLePct) > 3 && Math.abs(rev.vsLe) > 5000) {
+    const dir = rev.vsLe >= 0 ? 'hoger' : 'lager'
+    out.push({
+      id: 'rate-shift',
+      question: `${bv} ${month}: omzet ${fmtEur(rev.actual)} kwam ${fmtEur(Math.abs(rev.vsLe))} (${rev.vsLePct >= 0 ? '+' : ''}${rev.vsLePct.toFixed(1)}%) ${dir} uit dan de Latest Estimate van ${fmtEur(rev.preCloseLe)}. Is dit toe te schrijven aan een verandering in het effectieve uurtarief — tariefverhoging, klant-mix met andere bandbreedte, of contract-onderhandeling?`,
+      hint: 'Effectief tarief = revenue / declarabele uren. "Structureel" → engine gebruikt het nieuwe niveau voor de ROY-omzet. Voor volume-effecten (FTE/uren) gebruik de FTE-vraag hierboven.',
+      category: 'revenue',
+      weight: Math.abs(rev.vsLe),
+    })
   }
 
-  // ── Declarabiliteit-mutatie ────────────────────────────────────────────
-  if (declarabilityPrevAvg > 0 && Math.abs(declarability - declarabilityPrevAvg) >= 3) {
-    const dir = declarability > declarabilityPrevAvg ? 'hoger' : 'lager'
-    const diffPp = Math.abs(declarability - declarabilityPrevAvg).toFixed(1)
-    const phrasings = [
-      `${bv}: declarabiliteit ${declarability.toFixed(0)}% in ${month} ligt ${diffPp}pp ${dir} dan het Q-gemiddelde van ${declarabilityPrevAvg.toFixed(0)}%. Welke oorzaak — en is dit een trend of een uitschieter?`,
-      `${bv} ${month}: declarabel-ratio ${dir} dan gemiddeld (${declarability.toFixed(0)}% vs ${declarabilityPrevAvg.toFixed(0)}%). Bench-tijd, onboarding-druk of project-pijplijn?`,
-      `${bv}: ${diffPp}pp ${dir === 'hoger' ? 'beter' : 'slechter'} declarabel deze maand. Wat is hier voor goed/slecht gegaan en herhaalt het zich?`,
-      `${bv} ${month}: declarabiliteit ${declarability.toFixed(0)}%. Het kwartaal-gemiddelde was ${declarabilityPrevAvg.toFixed(0)}% — verklaart de project-mix dit volledig?`,
-    ]
-    const hints = [
-      'Bench tijd, opleidingen/onboarding, project-pijplijn, vakanties, sales-uren, intern-projecten',
-      'Eenmalig opleidings-blok, of bredere shift in interne uren?',
-      'Wisseling van klant-portfolio? Meer kortlopend werk?',
-    ]
+  // ── 3. UTILIZATION-SHIFT: declarability% verschuift ──
+  // Trigger: |Δ declarability vs gemiddelde eerdere maanden| ≥ 3 pp.
+  if (declarability > 0 && declarabilityPrevAvg > 0 && Math.abs(declarability - declarabilityPrevAvg) >= 3) {
+    const diff = declarability - declarabilityPrevAvg
     out.push({
-      id: 'declarability',
-      question: v(phrasings, 'declarability'),
-      hint: v(hints, 'declarability-h'),
+      id: 'utilization-shift',
+      question: `${bv} ${month}: declarability ${declarability.toFixed(1)}% (${diff >= 0 ? '+' : ''}${diff.toFixed(1)} pp t.o.v. gemiddelde ${declarabilityPrevAvg.toFixed(1)}%). Pipeline-shift, einde of start van een groot project, of seizoenseffect?`,
+      hint: 'Declarability = declarabele uren / werkbare uren. "Structureel" → engine gebruikt het nieuwe niveau voor de ROY-omzet (dempt of versterkt het omzet-pad). "Eenmalig" → deze maand wordt uitgesloten uit de baseline.',
       category: 'declarability',
-      weight: Math.abs(declarability - declarabilityPrevAvg) * 8000,
+      weight: Math.abs(diff) * 8000,
     })
   }
 
-  // ── Vakantie/ziekte ────────────────────────────────────────────────────
-  // Toont actual % naast budget % zodat duidelijk is of dit binnen plan is.
-  // Trigger niet meer simpelweg op uren > 0, maar op afwijking: ofwel
-  // afwezigheid is significant (>15% van capaciteit) ofwel er zit ≥3pp
-  // afwijking t.o.v. capaciteit-budget. Hiermee verdwijnt deze vraag voor
-  // weken waar verlof/ziekte volledig in lijn met budget liggen.
-  if (vakantie + ziekte > 0 && prevMonthRevenue > 0) {
-    const leaveActPct = capacityActual?.leave ?? null
-    const sickActPct  = capacityActual?.sick  ?? null
-    const leaveBudPct = capacityBudget?.leave ?? null
-    const sickBudPct  = capacityBudget?.sick  ?? null
-    const leavePp = leaveActPct != null && leaveBudPct != null ? leaveActPct - leaveBudPct : null
-    const sickPp  = sickActPct  != null && sickBudPct  != null ? sickActPct  - sickBudPct  : null
-    const totalSharePct = (leaveActPct ?? 0) + (sickActPct ?? 0)
-    // Skip als budget bestaat en zowel verlof/ziekte ≤ 1pp afwijking
-    // én niet onnatuurlijk hoog (<15% gecombineerd). Anders altijd vraag.
-    const significantAbsence = totalSharePct >= 15
-    const significantDelta =
-      (leavePp != null && Math.abs(leavePp) >= 3) ||
-      (sickPp  != null && Math.abs(sickPp)  >= 3)
-    const noBudgetCtx = leaveBudPct == null && sickBudPct == null
-    if (significantAbsence || significantDelta || noBudgetCtx) {
-      const fmtPp = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}pp`
-      const budCtx = (leaveBudPct != null || sickBudPct != null)
-        ? ` (budget: ${leaveBudPct != null ? `verlof ${leaveBudPct.toFixed(1)}%` : 'verlof —'} · ${sickBudPct != null ? `ziekte ${sickBudPct.toFixed(1)}%` : 'ziekte —'})`
-        : ''
-      const actCtx = leaveActPct != null && sickActPct != null
-        ? ` — actual: verlof ${leaveActPct.toFixed(1)}%, ziekte ${sickActPct.toFixed(1)}%${budCtx}`
-        : budCtx
-      const deltaParts: string[] = []
-      if (leavePp != null) deltaParts.push(`verlof ${fmtPp(leavePp)}`)
-      if (sickPp  != null) deltaParts.push(`ziekte ${fmtPp(sickPp)}`)
-      const deltaCtx = deltaParts.length > 0 ? ` · Δ vs budget: ${deltaParts.join(', ')}` : ''
-
-      const phrasings = [
-        `${bv} ${month}: ${vakantie} u vakantie + ${ziekte} u ziekte${actCtx}${deltaCtx}. Is dit eenmalig of zet de afwijking richting komende maanden door?`,
-        `${bv}: in ${month} ${vakantie + ziekte} u niet-werkbaar${actCtx}${deltaCtx}. Welke verklaring — sabbatical, langdurig verzuim, naderende collectieve vakantie?`,
-        `${bv} ${month}: verlof + ziekte${actCtx}${deltaCtx}. Heeft dit gevolgen voor project-deadlines of declarable-capaciteit komende maanden?`,
-      ]
-      const hints = [
-        'Vergelijk met capaciteit-budget (Budgetten-tab) — moet de LE voor komende maanden bijgesteld worden?',
-        'Open-eind ziekte, re-integratie, naderende vakantieperiode — eenmalig of structureel?',
-        'Vervanging via freelance overwegen of accepteren?',
-      ]
-      out.push({
-        id: 'leave',
-        question: v(phrasings, 'leave'),
-        hint: v(hints, 'leave-h'),
-        category: 'leave',
-        weight: (vakantie + ziekte) * 80
-              + (leavePp != null ? Math.abs(leavePp) * 5000 : 0)
-              + (sickPp  != null ? Math.abs(sickPp)  * 5000 : 0),
-      })
-    }
-  }
-
-  // ── Directe personeelskosten ────────────────────────────────────────────
-  if (dirPers && Math.abs(dirPers.vsLePct) > 4 && Math.abs(dirPers.vsLe) > 10000) {
-    const dir = dirPers.vsLe < 0 ? 'lager' : 'hoger'
-    const phrasings = [
-      `${bv}: directe personeelskosten ${fmtEur(dirPers.actual)} in ${month}, ${fmtEur(Math.abs(dirPers.vsLe))} ${dir} dan voorspeld. Bonus, freelance-inhuur, secondering of iets anders dat we volgende maand opnieuw kunnen verwachten?`,
-      `${bv} ${month}: ${dir === 'hoger' ? 'overschrijding' : 'besparing'} op personeelskosten van ${fmtEur(Math.abs(dirPers.vsLe))} t.o.v. LE. Loonindexatie, freelance-piek, of doorbelasting?`,
-      `${bv}: pers. kosten ${fmtEur(dirPers.actual)} (${dir === 'hoger' ? '+' : '-'}${fmtEur(Math.abs(dirPers.vsLe))} vs LE). Welke posten zaten hier in en zijn die maandelijks of incidenteel?`,
-      `${bv} ${month}: directe personeelskosten ${fmtEur(Math.abs(dirPers.vsLe))} ${dir}. Tijdelijke schaarste-inhuur, of structureel gewijzigd salarispatroon?`,
-    ]
-    const hints = [
-      'Bonusperiode, freelance-piek, doorbelasting van/naar andere BV',
-      'Vakantiegeld, eindejaarsbonus, 13e maand, indexatie?',
-      'Verschuiving freelance ↔ vast — wat is de verwachting komende maanden?',
-    ]
+  // ── 4. ONE-OFF-MONTH: EBITDA wijkt fors af van LE ──
+  // Trigger: |vs LE| ≥ 10% & €20k. Bedoeld voor restitutties, settlements,
+  // boekings-correcties en andere posten die NIET door mogen werken.
+  if (ebitda && Math.abs(ebitda.vsLePct) > 10 && Math.abs(ebitda.vsLe) > 20000) {
     out.push({
-      id: 'direct-pers',
-      question: v(phrasings, 'direct-pers'),
-      hint: v(hints, 'direct-pers-h'),
-      category: 'cost',
-      weight: Math.abs(dirPers.vsLe),
-    })
-  }
-
-  // ── Brutomarge shift ───────────────────────────────────────────────────
-  if (margin && rev && rev.actual > 0 && margin.actual !== 0) {
-    const marginPct = margin.actual / rev.actual * 100
-    const lePct = rev.preCloseLe > 0 ? margin.preCloseLe / rev.preCloseLe * 100 : marginPct
-    if (Math.abs(marginPct - lePct) > 2) {
-      const dir = marginPct < lePct ? 'lager' : 'hoger'
-      const diffPp = Math.abs(marginPct - lePct).toFixed(1)
-      const phrasings = [
-        `${bv}: brutomarge ${marginPct.toFixed(1)}% in ${month} ligt ${diffPp}pp ${dir} dan de LE-verwachting van ${lePct.toFixed(1)}%. Is dit project-mix, tariefdruk of kosten-shift — en zet de trend door?`,
-        `${bv} ${month}: marge ${dir === 'hoger' ? 'verbetert' : 'erodeert'} met ${diffPp}pp t.o.v. LE (${marginPct.toFixed(1)}% vs ${lePct.toFixed(1)}%). Volume of mix?`,
-        `${bv}: brutomarge ${marginPct.toFixed(1)}% (${diffPp}pp ${dir} dan voorspeld). Welke projecten of contracten drijven dit?`,
-        `${bv} ${month}: marge ${dir === 'hoger' ? 'mee' : 'tegen'} (${marginPct.toFixed(1)}% vs LE ${lePct.toFixed(1)}%). Eenmalige meevaller of strategische pricing-verandering?`,
-      ]
-      const hints = [
-        'Mix tussen Cons/Proj/Soft, freelance-tarieven, prijsindexatie, korting',
-        'Hoog-marge contracten erbij of juist eraf? Onderhandelingsrondes geweest?',
-        'Subcontracting-verschuiving of inhuur tegen marktprijs?',
-      ]
-      out.push({
-        id: 'margin-shift',
-        question: v(phrasings, 'margin-shift'),
-        hint: v(hints, 'margin-shift-h'),
-        category: 'margin',
-        weight: Math.abs(marginPct - lePct) * 20000,
-      })
-    }
-  }
-
-  // ── Directe kosten (overige posten) ────────────────────────────────────
-  if (dirCost && Math.abs(dirCost.vsLePct) > 5 && Math.abs(dirCost.vsLe) > 15000 &&
-      !out.some(q => q.id === 'direct-pers')) {
-    const dir = dirCost.vsLe < 0 ? 'lager' : 'hoger'
-    const phrasings = [
-      `${bv}: directe kosten ${fmtEur(dirCost.actual)} kwamen ${fmtEur(Math.abs(dirCost.vsLe))} ${dir} uit dan voorspeld in ${month}. Welke kostenpost was dit (inkoop, freelance, auto, overig) en gaat het structureel zo blijven?`,
-      `${bv} ${month}: ${dir === 'hoger' ? 'extra' : 'minder'} directe kosten ${fmtEur(Math.abs(dirCost.vsLe))} t.o.v. LE. Inkoop, sub-contractors of mobiliteit?`,
-      `${bv}: directe kostenlijn ${dir === 'hoger' ? 'overschreden' : 'onderbenut'} met ${fmtEur(Math.abs(dirCost.vsLe))} in ${month}. Welke specifieke post was de driver?`,
-    ]
-    const hints = [
-      'Materiaal-inkoop, sub-contractors, auto-leasing, reiskosten',
-      'Verbruiksmateriaal voor één project, of doorlopende stijging?',
-      'Lease-contract verlengd? Brandstof-kosten? Nieuwe toolset?',
-    ]
-    out.push({
-      id: 'direct-cost',
-      question: v(phrasings, 'direct-cost'),
-      hint: v(hints, 'direct-cost-h'),
-      category: 'cost',
-      weight: Math.abs(dirCost.vsLe),
-    })
-  }
-
-  // ── Operationele kosten ────────────────────────────────────────────────
-  if (opex && Math.abs(opex.vsLePct) > 6 && Math.abs(opex.vsLe) > 8000) {
-    const dir = opex.vsLe < 0 ? 'lager' : 'hoger'
-    const phrasings = [
-      `${bv}: operationele kosten ${fmtEur(opex.actual)} in ${month}, ${fmtEur(Math.abs(opex.vsLe))} ${dir} dan voorspeld. Eénmalige post (audit, legal, software-jaarkosten) of iets dat terugkeert?`,
-      `${bv} ${month}: opex ${dir === 'hoger' ? '+' : '-'}${fmtEur(Math.abs(opex.vsLe))} t.o.v. LE. Welke overhead-categorie pieken we — IT, huisvesting, marketing?`,
-      `${bv}: operationele kostenlijn loopt ${dir} dan verwacht (${fmtEur(opex.actual)} vs ${fmtEur(opex.preCloseLe)} LE). Jaarcontract, reorganisatie of normale fluctuatie?`,
-      `${bv} ${month}: ${dir === 'hoger' ? 'extra' : 'minder'} overhead ${fmtEur(Math.abs(opex.vsLe))}. Verandert dit het run-rate dat we hanteren in volgende prognoses?`,
-    ]
-    const hints = [
-      'Jaarlijkse SaaS, audit, legal, marketing-piek, IT-investering',
-      'Verzekering, accountantsdiensten, training-budget?',
-      'Office-investering of huur-aanpassing?',
-    ]
-    out.push({
-      id: 'opex',
-      question: v(phrasings, 'opex'),
-      hint: v(hints, 'opex-h'),
-      category: 'cost',
-      weight: Math.abs(opex.vsLe),
-    })
-  }
-
-  // ── EBITDA-vangnet — alleen als er nog ruimte is binnen de top-3.
-  if (ebitda && Math.abs(ebitda.vsLePct) > 10 && Math.abs(ebitda.vsLe) > 20000 && out.length < 2) {
-    const dir = ebitda.vsLe >= 0 ? 'hoger' : 'lager'
-    const next = nextMonthCode(month)
-    const phrasings = [
-      `${bv}: EBITDA ${fmtEur(ebitda.actual)} kwam ${fmtEur(Math.abs(ebitda.vsLe))} ${dir} uit dan voorspeld. Welke onverwachte factor (positief of negatief) zou je toevoegen aan de aannames voor ${next}?`,
-      `${bv} ${month}: EBITDA-afwijking van ${fmtEur(Math.abs(ebitda.vsLe))}. Welke aanname moet de LE-engine voor ${next} aanpassen?`,
-      `${bv}: EBITDA ${dir === 'hoger' ? '+' : '-'}${fmtEur(Math.abs(ebitda.vsLe))} t.o.v. LE in ${month}. Wat moeten we leren voor de volgende prognose?`,
-    ]
-    const hints = [
-      'Welke meevaller of tegenvaller hoort structureel in volgende prognoses?',
-      'One-shot effect of structurele wijziging in productiviteit?',
-      'Welke parameter wil je in de LE-engine bijstellen?',
-    ]
-    out.push({
-      id: 'ebitda',
-      question: v(phrasings, 'ebitda'),
-      hint: v(hints, 'ebitda-h'),
+      id: 'one-off-month',
+      question: `${bv} ${month}: EBITDA ${fmtEur(ebitda.actual)} wijkt ${fmtEur(Math.abs(ebitda.vsLe))} (${ebitda.vsLePct >= 0 ? '+' : ''}${ebitda.vsLePct.toFixed(1)}%) af van LE ${fmtEur(ebitda.preCloseLe)}. Zit er een eenmalige post in deze maand die NIET door moet werken naar volgende maanden — bv. een settlement, restitutie, accrual-correctie of project-afsluiting?`,
+      hint: '"Eenmalig" → engine excludeert deze maand volledig uit de baseline voor toekomstige forecasts. "Structureel" → het nieuwe niveau wordt het ankerpunt voor ROY.',
       category: 'general',
       weight: Math.abs(ebitda.vsLe) * 0.4,
     })
   }
 
-  // ── Seasonal sanity (YoY) ──────────────────────────────────────────────
-  if (rev && sameMonth2025Revenue > 0 && rev.actual > 0) {
-    const yoyPct = (rev.actual / sameMonth2025Revenue - 1) * 100
-    if (Math.abs(yoyPct) > 15 && out.length < 3) {
-      const sign = yoyPct >= 0 ? '+' : ''
-      const py = month.replace('-26', '-25')
-      const phrasings = [
-        `${bv} ${month}: ${sign}${yoyPct.toFixed(1)}% vs zelfde maand 2025 (${fmtEur(rev.actual)} vs ${fmtEur(sameMonth2025Revenue)}). Volg je dit als nieuwe seizoens-baseline of was het een eenmalig effect?`,
-        `${bv}: ${month} laat ${sign}${yoyPct.toFixed(1)}% YoY zien (${py}: ${fmtEur(sameMonth2025Revenue)}). Trendbreuk of incidenteel?`,
-        `${bv} ${month}: omzet ${sign}${yoyPct.toFixed(1)}% boven/onder ${py}. Welke nieuwe klanten of contractwijzigingen verklaren dit?`,
-        `${bv}: ${month}-vs-${py} loopt ${Math.abs(yoyPct).toFixed(1)}pp uit elkaar. Past het in de groeicurve die je elders ziet?`,
-      ]
-      const hints = [
-        'Klant-mix verandering, contract-uitbreiding, eenmalige projectoplevering',
-        'Macro-effect op portfolio, of klant-specifieke groei/krimp?',
-        'Past dit bij de markttrend in jouw segment?',
-      ]
-      out.push({
-        id: 'seasonal',
-        question: v(phrasings, 'seasonal'),
-        hint: v(hints, 'seasonal-h'),
-        category: 'general',
-        weight: Math.abs(yoyPct) * 1500,
-      })
-    }
+  // ── 5. COST-STEP-CHANGE: structurele kosten-shift ──
+  // Trigger: directe kosten |vs LE| ≥ 6% & €15k, of OpEx ≥ 8% & €10k.
+  const costCands: Array<{ label: string; v: VarianceMetric }> = []
+  if (dirCst && Math.abs(dirCst.vsLePct) > 6 && Math.abs(dirCst.vsLe) > 15000) {
+    costCands.push({ label: 'Directe kosten', v: dirCst })
+  }
+  if (opex && Math.abs(opex.vsLePct) > 8 && Math.abs(opex.vsLe) > 10000) {
+    costCands.push({ label: 'Operationele kosten', v: opex })
+  }
+  if (costCands.length > 0) {
+    const c = costCands.sort((a, b) => Math.abs(b.v.vsLe) - Math.abs(a.v.vsLe))[0]
+    out.push({
+      id: 'cost-step-change',
+      question: `${bv} ${month}: ${c.label} ${fmtEur(c.v.actual)} wijkt ${fmtEur(Math.abs(c.v.vsLe))} (${c.v.vsLePct >= 0 ? '+' : ''}${c.v.vsLePct.toFixed(1)}%) af van LE. Is dit een structurele kosten-shift (huur-indexatie, nieuwe leverancier, contract-aanpassing, payroll-verhoging) of een eenmalige boeking?`,
+      hint: '"Structureel" → engine ankert het nieuwe kostenniveau voor de rest van het jaar. "Eenmalig" → de maand wordt uitgesloten uit de baseline-window.',
+      category: 'cost',
+      weight: Math.abs(c.v.vsLe),
+    })
   }
 
-  // Top-3 op weight — alleen de drijvers met de grootste afwijking overleven
-  // zodat het overzicht compact blijft. Bij minder dan 3 triggers krijg je er
-  // dus minder; meer dan 3 wordt afgekapt op de zwaarste.
-  return out.sort((a, b) => b.weight - a.weight).slice(0, 3)
-}
-
-/** Helper: volgende maand-code. 'Mar-26' → 'Apr-26'. */
-function nextMonthCode(m: string): string {
-  const idx = BUDGET_MONTHS_2026.indexOf(m)
-  if (idx >= 0 && idx + 1 < BUDGET_MONTHS_2026.length) return BUDGET_MONTHS_2026[idx + 1]
-  return m
+  // Sorteer op weight en cap op 5 — in de praktijk komen er zelden meer dan 3
+  // tegelijk in beeld omdat de triggers materieel gekozen zijn.
+  return out.sort((a, b) => b.weight - a.weight).slice(0, 5)
 }

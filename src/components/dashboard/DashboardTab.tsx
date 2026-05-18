@@ -17,6 +17,7 @@ import { useHoursStore } from '../../store/useHoursStore'
 import { useNavStore } from '../../store/useNavStore'
 import { derivePL } from '../../lib/plDerive'
 import { useLockedBv } from '../../lib/permissions'
+import { LeAccuracyCard } from './LeAccuracyCard'
 
 const MONTH_ORDER = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const monthSortKey = (m: string): number => {
@@ -151,6 +152,11 @@ type LeNarrative = {
   bv: ClosingBv
   /** Hoofd-prognose ("Verwachting Apr-26") — groot weergegeven boven de rest. */
   headline: NarrativeBullet | null
+  /** Secundaire prognose-metric naast de hoofd-headline. Voor productie-BV's
+   *  zetten we hier de EBITDA-LE neer, zodat de gebruiker omzet- én bottom-
+   *  line-verwachting tegelijk ziet. Holdings (geen omzet) gebruikt alleen de
+   *  primaire headline. */
+  headlineSecondary?: NarrativeBullet
   /** Drijvers achter de prognose: FTE, declarabiliteit, omzet/FTE, marge,
    *  YoY-trend, FY-LE. Compact getoond. */
   drivers: NarrativeBullet[]
@@ -412,7 +418,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
     }
     return { labels: BUDGET_MONTHS_2026, datasets }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is2025, JSON.stringify(activeBvs), period, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths])
+  }, [is2025, JSON.stringify(activeBvs), period, useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths, useFteStore(s => s.entries), useHoursStore(s => s.entries)])
 
   // ── Cumulative omzet vs budget ──────────────────────────────────────────
   const cumulativeChart = useMemo(() => {
@@ -475,7 +481,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       ],
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths])
+  }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths, useFteStore(s => s.entries), useHoursStore(s => s.entries)])
 
   // ── Brutomarge% per BV trend ─────────────────────────────────────────────
   const marginTrendChart = useMemo(() => {
@@ -548,7 +554,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
     }
     return { labels: BUDGET_MONTHS_2026, datasets }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths])
+  }, [is2025, JSON.stringify(activeBvs), useBudgetStore(s => s.leOverrides), useBudgetStore(s => s.overrides), finalizedMonths, useFteStore(s => s.entries), useHoursStore(s => s.entries)])
 
   // ── EBITDA per BV (LE vs Budget) FY ──────────────────────────────────────
   const ebitdaCompareChart = {
@@ -1012,16 +1018,32 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       const fyGap = fyBud > 0 ? ((fyLE / fyBud - 1) * 100) : 0
 
       // Headline: de eerstvolgende prognose-maand groot weergegeven.
+      let headlineSecondary: NarrativeBullet | undefined
       if (nextMonth && nextLE > 0) {
         const diff = nextBudget > 0 ? ((nextLE / nextBudget - 1) * 100) : 0
         const subParts: string[] = []
         if (nextBudget > 0) subParts.push(`${diff >= 0 ? '+' : ''}${diff.toFixed(0)}% vs budget`)
         if (nextMarginPct > 0) subParts.push(`marge ${nextMarginPct.toFixed(1)}%`)
         headline = {
-          label: `Verwachting ${nextMonth}`,
+          label: `Verwachting ${nextMonth} — omzet`,
           value: fmt(nextLE),
           sub: subParts.join(' · '),
           emphasis: nextBudget === 0 ? undefined : (diff >= 0 ? 'good' : 'warn'),
+        }
+        // Secundair: EBITDA-LE voor dezelfde maand — bottom-line verwachting.
+        const nextEbitdaLe = le.getLE(bv as EntityName, nextMonth, 'ebitda')
+        const nextEbitdaBud = budget2026(bv, nextMonth, 'ebitda')
+        const ebitdaDiff = nextEbitdaBud !== 0
+          ? ((nextEbitdaLe - nextEbitdaBud) / Math.abs(nextEbitdaBud) * 100)
+          : 0
+        const ebitdaSubParts: string[] = []
+        if (nextEbitdaBud !== 0) ebitdaSubParts.push(`${ebitdaDiff >= 0 ? '+' : ''}${ebitdaDiff.toFixed(0)}% vs budget`)
+        if (nextLE > 0) ebitdaSubParts.push(`${(nextEbitdaLe / nextLE * 100).toFixed(1)}% marge`)
+        headlineSecondary = {
+          label: `EBITDA`,
+          value: fmt(nextEbitdaLe),
+          sub: ebitdaSubParts.join(' · '),
+          emphasis: nextEbitdaLe >= 0 ? 'good' : 'warn',
         }
       } else if (nextMonth) {
         headline = { label: `Verwachting ${nextMonth}`, value: 'n.v.t.', sub: 'vul Q1-data aan' }
@@ -1086,7 +1108,7 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
       if (corrections.length > 0) expParts.push(`incl. ${corrections.join(' + ')}`)
       const explanation = expParts.join('; ') + '.'
 
-      return { bv, headline, drivers, explanation }
+      return { bv, headline, headlineSecondary, drivers, explanation }
     }
 
     return activeBvs.map(buildForBv)
@@ -1098,37 +1120,64 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
 
   return (
     <div className="page">
-      {/* Eigen BV-filter rij — duidelijker dan alleen de Topbar; ondersteunt
-          ook Holdings (overhead/kosten-only) als aparte view.
-          Voor BV-locked gebruikers verbergen we deze rij volledig. */}
-      {onFilterChange && !lockedBv && (
+      {/* Eigen jaar + BV-filter rij. Dashboard kent alleen 2025-vs-2026 als
+          binaire view (geen "Alle jaren"-aggregaat), dus tonen we hier twee
+          jaartal-chips. Voor BV-locked gebruikers verbergen we de BV-sectie
+          maar laten we het jaar-filter wel staan — anders kan de gebruiker
+          niet terug naar het lopende jaar als hij op de Budget vs Actuals
+          tab eerder naar 2025 was gegaan. */}
+      {onFilterChange && (
         <div className="card" style={{ padding: '10px 14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em', marginRight: 4 }}>
-              BV-filter
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em', marginRight: 2 }}>
+              Jaar
             </span>
-            <BvFilterPill
-              active={filter.bv === 'all'}
-              label="Alle BV's"
-              sub="Cons + Proj + Soft"
-              onClick={() => onFilterChange({ bv: 'all' })}
-            />
-            {(['Consultancy', 'Projects', 'Software'] as ClosingBv[]).map(bv => (
-              <BvFilterPill
-                key={bv}
-                active={filter.bv === bv}
-                color={BV_COLORS[bv]}
-                label={bv}
-                onClick={() => onFilterChange({ bv })}
-              />
+            {(['2026', '2025'] as const).map(y => (
+              <button
+                key={y}
+                onClick={() => onFilterChange({ year: y })}
+                style={{
+                  padding: '4px 12px', borderRadius: 5, fontSize: 11,
+                  fontWeight: filter.year === y ? 700 : 500, cursor: 'pointer',
+                  border: '1px solid',
+                  borderColor: filter.year === y ? 'rgba(255,255,255,0.25)' : 'var(--bd2)',
+                  background: filter.year === y ? 'var(--bg4)' : 'transparent',
+                  color: filter.year === y ? 'var(--t1)' : 'var(--t3)',
+                  fontFamily: 'var(--font)',
+                  transition: 'all .12s',
+                }}
+              >{y}</button>
             ))}
-            <BvFilterPill
-              active={filter.bv === 'Holdings'}
-              color={BV_COLORS.Holdings}
-              label="Holdings"
-              sub="alleen kosten / overhead"
-              onClick={() => onFilterChange({ bv: 'Holdings' })}
-            />
+            {!lockedBv && (
+              <>
+                <div style={{ width: 1, height: 20, background: 'var(--bd2)', margin: '0 4px' }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.1em', marginRight: 2 }}>
+                  BV-filter
+                </span>
+                <BvFilterPill
+                  active={filter.bv === 'all'}
+                  label="Alle BV's"
+                  sub="Cons + Proj + Soft"
+                  onClick={() => onFilterChange({ bv: 'all' })}
+                />
+                {(['Consultancy', 'Projects', 'Software'] as ClosingBv[]).map(bv => (
+                  <BvFilterPill
+                    key={bv}
+                    active={filter.bv === bv}
+                    color={BV_COLORS[bv]}
+                    label={bv}
+                    onClick={() => onFilterChange({ bv })}
+                  />
+                ))}
+                <BvFilterPill
+                  active={filter.bv === 'Holdings'}
+                  color={BV_COLORS.Holdings}
+                  label="Holdings"
+                  sub="alleen kosten / overhead"
+                  onClick={() => onFilterChange({ bv: 'Holdings' })}
+                />
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1243,6 +1292,12 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
               sub={`${BUDGET_MONTHS_2026.length - ACTUAL_PERIODS_2026_DYNAMIC.length} maanden te gaan`}
             />
           </div>
+
+          {/* LE-accuraatheid — laat zien hoe goed de pre-close LE-snapshots
+              aansluiten op de werkelijke actuals, en hoe de engine zichzelf
+              over tijd kalibreert. Verschijnt zodra de eerste maand mét
+              snapshot is afgesloten. */}
+          <LeAccuracyCard activeBvs={activeBvs} />
         </>
       )}
 
@@ -1293,11 +1348,15 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
             gridTemplateColumns: `repeat(${Math.min(leNarratives.length, 4)}, minmax(0, 1fr))`,
             gap: 8,
           }}>
-            {leNarratives.map(({ bv, headline, drivers, explanation }) => {
+            {leNarratives.map(({ bv, headline, headlineSecondary, drivers, explanation }) => {
               const headlineColor =
                 headline?.emphasis === 'good' ? 'var(--green)' :
                 headline?.emphasis === 'warn' ? 'var(--amber)' :
                 BV_COLORS[bv as ClosingBv]
+              const secondaryColor =
+                headlineSecondary?.emphasis === 'good' ? 'var(--green)' :
+                headlineSecondary?.emphasis === 'warn' ? 'var(--amber)' :
+                'var(--t1)'
               return (
                 <div
                   key={bv as string}
@@ -1324,18 +1383,37 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
                     </span>
                   </div>
 
-                  {/* Headline: groot weergegeven, eerste-aandacht. */}
+                  {/* Headline: groot weergegeven, eerste-aandacht. Voor
+                      productie-BV's tonen we omzet (primair) en EBITDA
+                      (secundair) als twee aangrenzende blokken. */}
                   {headline && (
-                    <div>
-                      <div style={{ fontSize: 9.5, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 1 }}>
-                        {headline.label}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div>
+                        <div style={{ fontSize: 9.5, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 1 }}>
+                          {headline.label}
+                        </div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: headlineColor, lineHeight: 1.1, letterSpacing: '-0.01em' }}>
+                          {headline.value}
+                        </div>
+                        {headline.sub && (
+                          <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 1 }}>
+                            {headline.sub}
+                          </div>
+                        )}
                       </div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: headlineColor, lineHeight: 1.1, letterSpacing: '-0.01em' }}>
-                        {headline.value}
-                      </div>
-                      {headline.sub && (
-                        <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 1 }}>
-                          {headline.sub}
+                      {headlineSecondary && (
+                        <div style={{ paddingTop: 4, borderTop: '1px dashed var(--bd2)' }}>
+                          <div style={{ fontSize: 9.5, fontWeight: 600, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 1 }}>
+                            {headlineSecondary.label}
+                          </div>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: secondaryColor, lineHeight: 1.1, letterSpacing: '-0.01em' }}>
+                            {headlineSecondary.value}
+                          </div>
+                          {headlineSecondary.sub && (
+                            <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 1 }}>
+                              {headlineSecondary.sub}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

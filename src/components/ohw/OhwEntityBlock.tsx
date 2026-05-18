@@ -134,20 +134,6 @@ export const OhwEntityBlock = memo(function OhwEntityBlock({
       <div className={`ohw-hdr${open ? ' open' : ''}`} style={{ borderRadius: open ? 'var(--r2) var(--r2) 0 0' : 'var(--r2)' }} onClick={() => setOpen(o => !o)}>
         <span className="tog">▶</span>
         <span style={{ fontWeight: 700, fontSize: 13.5 }}>{entity.entity}</span>
-        <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--t3)', display: 'flex', gap: 12 }}>
-          {displayMonths.slice(0, 2).map(m => (
-            <span key={m}>
-              {m}: <strong style={{ color: 'var(--t1)' }}>{fmt(gv(entity.totaalOnderhanden, m))}</strong>
-            </span>
-          ))}
-          {nc > 2 && (
-            <span>
-              {displayMonths[nc - 1]}: <strong style={{ color: gv(entity.totaalOnderhanden, displayMonths[nc - 1]) > 0 ? 'var(--amber)' : 'var(--t1)' }}>
-                {fmt(gv(entity.totaalOnderhanden, displayMonths[nc - 1]))}
-              </strong>
-            </span>
-          )}
-        </span>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t3)' }}>
           Δ YTD: <strong style={{ color: lastActualTot - firstTot >= 0 ? 'var(--amber)' : 'var(--green)' }}>
             {lastActualTot - firstTot >= 0 ? '+' : ''}{fmt(lastActualTot - firstTot)}

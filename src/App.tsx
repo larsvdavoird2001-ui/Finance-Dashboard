@@ -24,7 +24,8 @@ import { useAuth, profileNeedsPassword } from './lib/auth'
 import { PermissionsContext, rolePermissions } from './lib/permissions'
 import { notifyMaandStart } from './store/useNotificationStore'
 import { onDbEvent } from './lib/dbEvents'
-import { snapshotLocalStorage } from './lib/localBackup'
+import { snapshotLocalStorage, dailySnapshotIfNeeded } from './lib/localBackup'
+import { useSaveStatus } from './lib/saveStatus'
 import { BackupsTab } from './components/common/BackupsTab'
 
 const DEFAULT_FILTER: GlobalFilter = { year: '2026', bv: 'all' }
@@ -54,13 +55,51 @@ export default function App() {
   const navPending = useNavStore(s => s.pending)
   const userEmailKey = user?.email ?? null
 
-  // Eénmalige snapshot van localStorage op app-start — voor het geval data
-  // verdwijnt door bugs of cache-clears. listBackups() in BackupPanel toont
-  // de laatste 5 snapshots zodat de admin er altijd op terug kan vallen.
+  // Backup-strategie (automatisch — er is geen losse Backups-tab meer in de
+  // sidebar). Twee onafhankelijke triggers:
+  //
+  //   1. Start-van-de-dag: bij de eerste app-load van een kalenderdag maken
+  //      we precies 1 snapshot. Garandeert dat er altijd een verse backup is,
+  //      ook als de gebruiker die dag niets bewerkt.
+  //   2. Na-elke-wijziging: zodra Supabase een save heeft afgerond
+  //      (useSaveStatus.lastSyncedAt verandert) wordt een (debounced)
+  //      snapshot weggeschreven. Hierdoor is een rollback van
+  //      per-ongeluk-overschreven data altijd binnen handbereik.
+  //
+  // Een admin kan via de "↺ Backup herstellen"-knop in de sidebar-foot de
+  // BackupsTab openen voor inspectie en restore.
   useEffect(() => {
-    snapshotLocalStorage(userEmailKey)
+    dailySnapshotIfNeeded(userEmailKey)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    let lastSnap = 0
+    let pending: ReturnType<typeof setTimeout> | null = null
+    const MIN_INTERVAL_MS = 60_000 // niet vaker dan 1×/minuut
+    const unsub = useSaveStatus.subscribe((s, prev) => {
+      // Reageer alleen op een nieuwe geslaagde sync (lastSyncedAt-bump).
+      if (s.lastSyncedAt && s.lastSyncedAt !== prev?.lastSyncedAt) {
+        const now = Date.now()
+        const sinceLast = now - lastSnap
+        if (sinceLast >= MIN_INTERVAL_MS) {
+          snapshotLocalStorage(userEmailKey)
+          lastSnap = now
+        } else if (!pending) {
+          // Snel-na-elkaar saves: één snapshot aan het eind van het venster.
+          pending = setTimeout(() => {
+            snapshotLocalStorage(userEmailKey)
+            lastSnap = Date.now()
+            pending = null
+          }, MIN_INTERVAL_MS - sinceLast)
+        }
+      }
+    })
+    return () => {
+      unsub()
+      if (pending) clearTimeout(pending)
+    }
+  }, [userEmailKey])
 
   // Realtime sync — actief zodra een user is ingelogd. Bij elke wijziging in
   // de gedeelde tabellen worden de stores opnieuw geladen.
@@ -285,10 +324,10 @@ export default function App() {
             </button>
           </div>
         )}
-        <Topbar tab={tab} filter={filter} onFilterChange={onLockedFilterChange} userEmail={userEmailKey} />
+        <Topbar tab={tab} userEmail={userEmailKey} />
 
         {tab === 'dashboard'  && <DashboardTab filter={filter} onFilterChange={onLockedFilterChange} onNav={(t) => setTab(t)} />}
-        {tab === 'hours'      && <HoursTab filter={filter} />}
+        {tab === 'hours'      && <HoursTab filter={filter} onFilterChange={onLockedFilterChange} />}
         {tab === 'ohw' && (
           <OhwTab
             data2025={data2025}
@@ -298,7 +337,7 @@ export default function App() {
           />
         )}
         {tab === 'budget'  && <BudgetTab filter={filter} onFilterChange={onLockedFilterChange} />}
-        {tab === 'budgets' && <BudgetsTab filter={filter} />}
+        {tab === 'budgets' && <BudgetsTab filter={filter} onFilterChange={onLockedFilterChange} />}
         {tab === 'maand'   && <MaandTab filter={filter} />}
         {tab === 'users'   && isAdmin && (
           <UsersTab

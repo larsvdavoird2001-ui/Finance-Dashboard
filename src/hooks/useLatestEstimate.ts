@@ -11,95 +11,148 @@ import {
   SUBS_OF, DERIVED_FORMULA,
 } from '../lib/plDerive'
 import type { BvId } from '../data/types'
-import { getFteLe } from '../lib/fteLe'
+import {
+  workdaysInMonth, HOURS_PER_FTE_PER_DAY,
+  recentClosedWindow, revenueSubSplit, plannedFte,
+} from '../lib/leDrivers'
 
-/** Mapping van LE-leerlus-vraag-id (uit leReflection.generateAiQuestions)
- *  naar de P&L sub-key(s) waarvoor de afwijking als one-off geldt. De
- *  forecast-engine itereert over SUB keys (zie SUBS_OF in plDerive) — een
- *  one-off vraag over "netto omzet" moet dus zowel `gefactureerde_omzet`
- *  als `omzet_periode_allocatie` markeren, anders raakt geen enkele
- *  sub-key de adjustment. Vragen zonder direct P&L-key-effect (fte-delta,
- *  leave) staan expres niet in deze map: hun signaal zit al in
- *  fteEntries/hoursEntries en wordt via fteAdj/leaveAdj meegenomen. */
+/**
+ * Latest Estimate — driver-based rolling forecast met variance bridge support.
+ *
+ * Methodiek (FP&A-standaard, vervangt de vorige seasonal/run-rate blend):
+ *
+ *   LE_year = YTD_actuals + Σ ROY_month
+ *
+ *   ROY_month per P&L-sub-key:
+ *     - Omzet:        FTE_le × werkdagen × 8u × declarability × €/uur × (1−verlofratio)
+ *     - Directe pers: avg(€/FTE laatste 3 closed) × FTE_le
+ *     - Directe rest: avg-per-maand laatste 3 closed × revenue-ratio adjustment
+ *     - OpEx (8):     ingegeven budget (bewust gebudgetteerd; geen run-rate)
+ *     - A&A / fin:    ingegeven budget (vaste posten)
+ *
+ *   Aggregaten (netto_omzet, directe_kosten, …) = som van subs.
+ *   Derived (brutomarge, ebitda, ebit, netto_resultaat) = via DERIVED_FORMULA.
+ *
+ * Reflectie-loop integratie:
+ *   - "one-off"-gemarkeerde (bv, maand, key) → de actual voor die cel wordt
+ *     uitgesloten uit de baseline-window. Bij wildcard ('one-off-month') geldt
+ *     dat voor ALLE keys van die maand.
+ *   - "structural"-gemarkeerde maand → géén speciale multiplicator nodig,
+ *     omdat een driver-engine sowieso op de recente actuals anchored. De
+ *     baseline-window pakt de structurele shift natuurlijk op.
+ *
+ * Hiërarchie per (bv, maand, key):
+ *   1. Handmatige LE-override (useBudgetStore.leOverrides) → wint.
+ *   2. Maand is finalized → werkelijke actual via useAdjustedActuals.
+ *   3. Anders → driver-forecast (zie boven).
+ */
+
+// ── Reflectie-vraag → P&L-keys mapping ───────────────────────────────────────
+// 5 driver-vragen (zie LeReflectionPanel) plus legacy IDs voor compatibility
+// met reeds opgeslagen reflectie-records uit het oude vragenmodel.
 const REVENUE_SUBS = ['gefactureerde_omzet', 'omzet_periode_allocatie']
-const DIRECT_COST_SUBS = ['directe_inkoopkosten', 'directe_personeelskosten', 'directe_overige_personeelskosten', 'directe_autokosten']
+const DIRECT_PERS_SUBS = ['directe_personeelskosten']
+const DIRECT_OTHER_SUBS = ['directe_inkoopkosten', 'directe_overige_personeelskosten', 'directe_autokosten']
 const OPEX_SUBS = ['indirecte_personeelskosten', 'overige_personeelskosten', 'huisvestingskosten', 'automatiseringskosten', 'indirecte_autokosten', 'verkoopkosten', 'algemene_kosten', 'doorbelaste_kosten']
-const QUESTION_KEY_MAP: Record<string, readonly string[]> = {
+const ALL_COST_SUBS = [...DIRECT_PERS_SUBS, ...DIRECT_OTHER_SUBS, ...OPEX_SUBS]
+
+const QUESTION_KEY_MAP: Record<string, readonly string[] | '*'> = {
+  // ── Nieuwe driver-vragen ──
+  'volume-shift':       [...REVENUE_SUBS, ...DIRECT_PERS_SUBS],
+  'rate-shift':         REVENUE_SUBS,
+  'utilization-shift':  REVENUE_SUBS,
+  'one-off-month':      '*',
+  'cost-step-change':   ALL_COST_SUBS,
+  // ── Legacy IDs (oude antwoorden blijven werken) ──
   'rev-vs-le':          REVENUE_SUBS,
   'rev-vs-budget':      REVENUE_SUBS,
   'seasonal':           REVENUE_SUBS,
   'declarability':      REVENUE_SUBS,
   'capacity-vs-budget': REVENUE_SUBS,
   'margin-shift':       REVENUE_SUBS,
-  'direct-pers':        ['directe_personeelskosten'],
-  'direct-cost':        DIRECT_COST_SUBS,
+  'direct-pers':        DIRECT_PERS_SUBS,
+  'direct-cost':        [...DIRECT_PERS_SUBS, ...DIRECT_OTHER_SUBS],
   'opex':               OPEX_SUBS,
 }
 
+const RECENCY_WINDOW = 3  // laatste 3 closed-maanden voor alle baseline-aggregaties
 const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const ALL_BVS: EntityName[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 
-/**
- * Latest Estimate per BV per maand voor de Executive Overview.
- *
- * MIRRORS BudgetsTab één-op-één — zo komen Apr-26 (en alle andere forecast-
- * maanden) op identieke cijfers uit in beide tabs. Hiërarchie per (bv, maand,
- * key):
- *   1. Handmatige LE-override (uit useBudgetStore.leOverrides) → die waarde.
- *   2. Closed-with-data maand → werkelijke actual via useAdjustedActuals.getMonthly
- *      (incl. IC-verrekening, accruals, handmatige correctie, mutatie
- *      vooruitgefactureerd, kosten-overrides, breakdowns).
- *   3. Anders → forecast = blend(seizoens-2025 × YTD-perfMult,
- *      run-rate van laatste closed-month) × FTE-adj × leave-adj.
- *
- * "Closed" wordt sinds deze versie STRIKT bepaald door {finalized in
- * Maandafsluiting}, niet meer door kalender of door has-data. Reden: ook als
- * er voor April al imports zijn binnengekomen, blijft de maand op LE-forecast
- * totdat de gebruiker in de Maandafsluiting-tab op "Definitief afsluiten"
- * heeft geklikt. Pas dan worden de werkelijke actuals — incl. de imports —
- * gepubliceerd in de Executive Overview, charts en AI-prognose. Voor maanden
- * met initial-load actuals (Jan-26, Feb-26) auto-seedt useFinStore eenmalig
- * een finalized-record, zodat de Q1-historie niet plotseling als forecast
- * wordt gerenderd.
- *
- * Voor aggregaat-keys (netto_omzet, directe_kosten, …):
- *   - closed: rechtstreeks getMonthly[key] (zo tellen non-SUBS-velden zoals
- *     IC-verrekening en accruals mee in de actual-aggregaat).
- *   - toekomstig: som van sub-key forecasts (zelfde als BudgetsTab).
- * Voor derived keys (brutomarge, ebitda, ebit): formule recursief.
- */
+/** Hoeveel zwaar 2025-seizoenspatroon meeschuift in de driver-forecast.
+ *  0 = puur driver-based (vlakke uitkomst per maand), 1 = volledig 2025-shape.
+ *  0.8 betekent: een maand die in 2025 60% van de avg deed (zoals zomer-
+ *  bouwvak of december-zakking) wordt voor 2026 met factor
+ *  1 + (0.6−1)×0.8 = 0.68 gecorrigeerd — bijna volledig respecteren we de
+ *  bouw-seizoen-trend. Hogere weight voor TPG omdat de bouwvak en winter-
+ *  pauzes structureel doorwerken in de declarabele uren. */
+const SEASONAL_OVERLAY_WEIGHT = 0.8
 
-/** Ramp-up factor voor nieuwe FTE — match BudgetsTab.rampFactor één-op-één. */
-function rampFactor(monthsSinceFirstHire: number): number {
-  if (monthsSinceFirstHire < 0) return 0
-  if (monthsSinceFirstHire === 0) return 0.7
-  if (monthsSinceFirstHire === 1) return 0.9
-  return 1.0
+/** Drift-correction weight: hoe sterk de engine zich aanpast aan systematische
+ *  LE-vs-Actual bias uit eerdere closed-maanden. Soft (0.6) zodat één maand
+ *  met outlier-actuals het model niet overcompenseert maar consistente bias
+ *  (bv. LE structureel 8% te laag over Q1) wel wordt bijgewerkt. Zonder cap
+ *  zou een drift-ratio van 1.30 (engine schat 30% te laag) leiden tot een
+ *  forecast die mogelijk overshoot. Met weight 0.6: correctie = 1 + (1.30−1)×0.6 = 1.18 */
+const DRIFT_CORRECTION_WEIGHT = 0.6
+/** Max correctie per richting — beschermt tegen explosieve compounding op
+ *  basis van 1-2 maanden historie. */
+const DRIFT_CORRECTION_CAP = 0.25
+
+/** MoM growth-trend weight: hoeveel van de recente maand-op-maand groei
+ *  wordt geëxtrapoleerd naar toekomstige maanden. 0.3 = zachte trend — net
+ *  genoeg om "Q1 groeide consistent +3%/mnd → Q2 ook" mee te nemen, niet
+ *  zoveel dat één grote stijging exponentieel doorwerkt naar Dec. */
+const GROWTH_TREND_WEIGHT = 0.3
+/** Cap per maand op de groei-component, om unrealistische compounding te
+ *  voorkomen wanneer recente maanden uitschieters bevatten. */
+const GROWTH_TREND_CAP_PER_MONTH = 0.08
+
+/** 2025-zelfde-maand → 2025-jaargemiddelde ratio. Wordt cached per (bv, key)
+ *  in een Map binnen de hook zodat we niet bij elke forecast-call opnieuw
+ *  itereren over alle 12 maanden. */
+function seasonalFactor(bv: EntityName, monthCode26: string, key: string): number {
+  const monthIdx = BUDGET_MONTHS_2026.indexOf(monthCode26)
+  if (monthIdx < 0) return 1
+  const month25 = MONTHS_2025_LABELS[monthIdx]
+  const valueThisMonth = monthlyActuals2025[bv]?.[month25]?.[key] ?? 0
+  if (valueThisMonth === 0) return 1
+  // Jaargemiddelde over 2025 voor dezelfde key.
+  let sum = 0, n = 0
+  for (const m of MONTHS_2025_LABELS) {
+    const v = monthlyActuals2025[bv]?.[m]?.[key] ?? 0
+    if (v !== 0) { sum += v; n++ }
+  }
+  const avg = n > 0 ? sum / n : 0
+  if (avg === 0) return 1
+  const raw = valueThisMonth / avg
+  // Soft-overlay: 1 + (raw−1) × weight. Kleinere afwijking dan ruw 2025-shape.
+  return 1 + (raw - 1) * SEASONAL_OVERLAY_WEIGHT
 }
 
 export function useLatestEstimate(currentDate?: Date) {
   const { getMonthly } = useAdjustedActuals()
   const getLeOverride = useBudgetStore(s => s.getLeOverride)
-  // Trigger re-render bij overrides / leOverrides wijziging — deze worden
-  // niet direct gelezen maar bepalen wel de uitkomst van getLeOverride en
-  // BudgetsTab-equivalente paden.
+  const getBudgetMonth = useBudgetStore(s => s.getMonth)
+  // Trigger re-render bij overrides / leOverrides wijziging.
   useBudgetStore(s => s.overrides)
   useBudgetStore(s => s.leOverrides)
   const fteEntries  = useFteStore(s => s.entries)
   const hoursEntries = useHoursStore(s => s.entries)
   const finalizedMonths = useFinStore(s => s.finalized)
-  // Reflectie-antwoorden uit de Maandafsluiting → LE-leerlus. Bij elke save
-  // moet de forecast re-renderen, dus we subscriben hier op records.
   const reflectionRecords = useReflectionStore(s => s.records)
 
   const now = currentDate ?? new Date()
   const nowMonthIdx = now.getMonth()
   const nowYear     = now.getFullYear()
 
-  /** Pure kalender-check; behouden voor de zeldzame UI-callers die echt op de
-   *  kalender willen filteren (bv. "deze maand is in het verleden") los van
-   *  de actual/finalize-status. Het centrale closed-begrip in deze hook is
-   *  echter isAnyActual hieronder. */
+  // ── Closed-detectie ─────────────────────────────────────────────────────
+  const finalizedSet = new Set(finalizedMonths.map(f => f.month))
+  const isFinalized = (month: string): boolean => finalizedSet.has(month)
+  const isAnyActual = (month: string): boolean => isFinalized(month)
+  const closedMonths = BUDGET_MONTHS_2026.filter(isAnyActual)
+  const isClosedWithData = (_bv: EntityName, month: string): boolean =>
+    isFinalized(month)
+
   const isCalendarPast = (month: string): boolean => {
     const [mmm, yy] = month.split('-')
     const y = 2000 + Number(yy)
@@ -109,274 +162,488 @@ export function useLatestEstimate(currentDate?: Date) {
     return mi < nowMonthIdx
   }
 
-  const finalizedSet = new Set(finalizedMonths.map(f => f.month))
-  const isFinalized = (month: string): boolean => finalizedSet.has(month)
-
-  /** Globaal closed: STRIKT alleen finalized maanden. Imports voor April
-   *  veranderen April nog niet in 'actual' — pas wanneer de Maandafsluiting
-   *  voor die maand is afgerond. Dit garandeert dat LE-trends en AI-prognose
-   *  zichtbaar blijven tot de gebruiker bewust afsluit. */
-  const isAnyActual = (month: string): boolean => isFinalized(month)
-  const closedMonths = BUDGET_MONTHS_2026.filter(isAnyActual)
-  const lastClosedMonth: string | null = closedMonths.length > 0
-    ? closedMonths[closedMonths.length - 1]
-    : null
-
-  /** Per-BV closed: ook hier strikt finalized — zelfde rede als isAnyActual.
-   *  De imports voor April staan wel in getMonthly maar worden pas zichtbaar
-   *  in de chart-actual-lijn nadat April definitief is afgesloten. */
-  const isClosedWithData = (_bv: EntityName, month: string): boolean =>
-    isFinalized(month)
-  void ALL_BVS  // bewust aangehouden voor toekomstige per-BV-detectie
-
-  const toPY = (m: string): string => {
-    const idx = BUDGET_MONTHS_2026.indexOf(m)
-    return idx >= 0 ? MONTHS_2025_LABELS[idx] : m.replace('-26', '-25')
-  }
-
-  /** Werkelijke 2026-waarde voor (bv, maand, key) — incl. Maandafsluiting. */
-  const rawActual2026 = (bv: EntityName, month: string, key: string): number =>
-    getMonthly(bv as BvId, month)[key] ?? 0
-  const rawActual2025 = (bv: EntityName, m25: string, key: string): number =>
-    monthlyActuals2025[bv]?.[m25]?.[key] ?? 0
-
-  /** Heeft de gebruiker voor (bv, maand) een vraag als one-off gemarkeerd
-   *  die invloed heeft op deze P&L sub-key? Zo ja → de werkelijke actual
-   *  voor deze maand/key wordt straks bij YTD- en run-rate-berekening
-   *  vervangen door de pre-close LE, zodat het eenmalige effect niet in
-   *  toekomstige forecasts meeloopt. */
-  const isOneOffForKey = (bv: EntityName, month: string, key: string): boolean => {
+  // ── Reflectie-helpers ───────────────────────────────────────────────────
+  /** Heeft de gebruiker voor (bv, maand) een vraag beantwoord met deze scope
+   *  die effect heeft op `key`? Wildcard 'one-off-month' raakt ALLE keys. */
+  const hasReflectionFlag = (
+    bv: EntityName, month: string, key: string,
+    scope: 'one-off' | 'structural',
+  ): boolean => {
     const rec = reflectionRecords.find(r => r.month === month && r.bv === bv)
     if (!rec) return false
     for (const ans of rec.answers) {
-      if (ans.scope !== 'one-off') continue
-      const keys = QUESTION_KEY_MAP[ans.questionId]
-      if (keys && keys.includes(key)) return true
+      if (ans.scope !== scope) continue
+      const target = QUESTION_KEY_MAP[ans.questionId]
+      if (!target) continue
+      if (target === '*') return true
+      if (target.includes(key)) return true
     }
     return false
   }
+  // ── Raw lookups ─────────────────────────────────────────────────────────
+  const rawActual = (bv: EntityName, month: string, key: string): number =>
+    getMonthly(bv as BvId, month)[key] ?? 0
 
-  /** FTE-getter zonder forward-fill. Alleen BV-totaal (geen vertical sub-buckets). */
-  const getFteFor = (bv: BvId, month: string): number =>
-    fteEntries.find(e => e.bv === bv && e.month === month && !e.vertical)?.fte ?? 0
+  const rawBudget = (bv: EntityName, month: string, key: string): number => {
+    const m = getBudgetMonth(bv, month)
+    return m[key] ?? 0
+  }
 
-  /** Geplande FTE voor toekomstige maand. Gebruikt de gedeelde FTE-LE-logica
-   *  (`getFteLe`): manuele .fte > (fteBudget + last-known shift) > forward-fill.
-   *  Hierdoor schuift het FTE-tekort vs budget door naar de omzet-/kosten-LE,
-   *  niet alleen naar de FTE-rij in HoursTab.
-   *
-   *  firstChangeIdx wordt gezet op de eerste maand waarin de FTE-LE afwijkt
-   *  van fteLast — dat is het ankerpunt voor de hire-ramp (70/90/100%). */
-  const getPlannedFteInfo = (bv: EntityName, target: string, lastActual: string | null) => {
-    const tIdx = BUDGET_MONTHS_2026.indexOf(target)
-    const cIdx = lastActual ? BUDGET_MONTHS_2026.indexOf(lastActual) : -1
-    const fteLast = lastActual && bv !== 'Holdings' ? getFteFor(bv as BvId, lastActual) : 0
-    let firstChangeIdx = -1
-    let plannedFte = fteLast
-    if (bv !== 'Holdings') {
-      for (let i = cIdx + 1; i <= tIdx && i >= 0; i++) {
-        const mm = BUDGET_MONTHS_2026[i]
-        const f = getFteLe({ entries: fteEntries, bv: bv as BvId, month: mm, isFinalized })
-        if (f != null && f > 0) {
-          plannedFte = f
-          if (firstChangeIdx < 0 && f !== fteLast) firstChangeIdx = i
-        }
+  /** Revenue voor een gesloten maand zoals netto_omzet (sum van subs). */
+  const rawActualRevenue = (bv: BvId, month: string): number => {
+    const d = getMonthly(bv, month)
+    return (d['gefactureerde_omzet'] ?? 0) + (d['omzet_periode_allocatie'] ?? 0)
+  }
+
+  // FTE-helper voor avg-per-fte berekeningen — gebruikt actuals voor closed
+  // maanden (echte bezetting), via getFteLe wordt forward-fill/plan toegepast.
+  const fteOfBv = (bv: BvId, month: string): number =>
+    plannedFte({ bv, month, fteEntries, isFinalized })
+
+  // ── Categorisatie van P&L-keys ──────────────────────────────────────────
+  const isRevenueSub = (key: string): boolean => REVENUE_SUBS.includes(key)
+  // Cost-sub classificatie wordt nu via aggregateKeyForSub gedaan; geen
+  // aparte helpers meer nodig.
+
+  // ── Engine self-correction: drift-factor uit historische LE-vs-Actual ──
+  // Voor elke afgesloten maand met een leSnapshot vergelijken we de pre-close
+  // LE met de werkelijke actual. Het mediaan van die ratios is de
+  // systematische bias van de engine. Bij positieve bias (LE > Actual) → de
+  // engine schat structureel te hoog en moeten we toekomstige forecasts naar
+  // beneden bijstellen. Soft toegepast met DRIFT_CORRECTION_WEIGHT + cap.
+  //
+  // leSnapshot heeft alleen netto_omzet / brutomarge / ebitda — voor andere
+  // keys geldt drift = 1 (geen correctie).
+  const driftCorrection = (bv: EntityName, key: string): number => {
+    if (key !== 'netto_omzet' && key !== 'brutomarge' && key !== 'ebitda' &&
+        key !== 'gefactureerde_omzet' && key !== 'omzet_periode_allocatie') {
+      return 1
+    }
+    // Voor revenue-subs: koppel aan netto_omzet drift (ze schalen samen).
+    const snapKey: 'netto_omzet' | 'brutomarge' | 'ebitda' =
+      (key === 'brutomarge' || key === 'ebitda') ? key : 'netto_omzet'
+    const ratios: number[] = []
+    for (const f of finalizedMonths) {
+      const snap = f.leSnapshot?.[bv]?.[snapKey]
+      if (snap == null || snap === 0) continue
+      const actual = rawActual(bv, f.month, snapKey)
+      if (actual === 0) continue
+      // Zelfde-teken vereist — anders is de ratio betekenisloos
+      if (Math.sign(snap) !== Math.sign(actual)) continue
+      ratios.push(actual / snap)
+    }
+    if (ratios.length === 0) return 1
+    // Mediaan beschermt tegen één outlier maand
+    ratios.sort((a, b) => a - b)
+    const median = ratios[Math.floor(ratios.length / 2)]
+    const corrected = 1 + (median - 1) * DRIFT_CORRECTION_WEIGHT
+    // Cap om explosieve compounding te voorkomen
+    return Math.max(1 - DRIFT_CORRECTION_CAP, Math.min(1 + DRIFT_CORRECTION_CAP, corrected))
+  }
+
+  // ── Engine self-correction: MoM growth-trend extrapolatie ──
+  // Berekent de gemiddelde maand-op-maand groei van revenue over de closed
+  // maanden, en past die met soft-weight toe op de afstand-tussen-target-en-
+  // laatste-closed. Cap per maand voorkomt dat uitschieters exponentieel
+  // doorwerken naar Q4. Toegepast op revenue-keys; cost-keys schalen al via
+  // FTE-trend.
+  const growthTrendFactor = (bv: EntityName, month: string): number => {
+    if (bv === 'Holdings') return 1  // Geen omzet → geen trend
+    if (closedMonths.length < 2) return 1
+    const bvId = bv as BvId
+    let growthSum = 0, n = 0
+    for (let i = 1; i < closedMonths.length; i++) {
+      const prev = rawActualRevenue(bvId, closedMonths[i - 1])
+      const cur = rawActualRevenue(bvId, closedMonths[i])
+      if (prev > 0 && cur > 0) {
+        growthSum += cur / prev
+        n++
       }
     }
-    return { fte: plannedFte, firstIdx: firstChangeIdx, fteLast }
+    if (n === 0) return 1
+    const avgGrowth = growthSum / n
+    // Cap per-maand groei zodat een sterke recente sprong niet onbedoeld
+    // exponentieel doorgaat
+    const capped = Math.max(1 - GROWTH_TREND_CAP_PER_MONTH, Math.min(1 + GROWTH_TREND_CAP_PER_MONTH, avgGrowth))
+    const lastClosed = closedMonths[closedMonths.length - 1]
+    const lastIdx = BUDGET_MONTHS_2026.indexOf(lastClosed)
+    const targetIdx = BUDGET_MONTHS_2026.indexOf(month)
+    const distance = targetIdx - lastIdx
+    if (distance <= 0) return 1
+    // Compound growth met soft weight
+    return Math.pow(capped, distance * GROWTH_TREND_WEIGHT)
   }
 
-  /** Geplande verlof (vakantie) uit useHoursStore voor (bv, maand). */
-  const getPlannedVakantie = (bv: BvId, month: string): number =>
-    hoursEntries.find(e => e.bv === bv && e.month === month)?.vakantie ?? 0
+  // ── Driver-forecasts ────────────────────────────────────────────────────
 
-  /** "Adjusted" actual voor de forecast-pipeline. Identiek aan rawActual2026
-   *  TENZIJ de gebruiker in de LE-leerlus een vraag over deze (bv, maand)
-   *  als one-off heeft gemarkeerd die op `key` van toepassing is — dan
-   *  vervangen we de werkelijke actual door de pre-close LE voor diezelfde
-   *  cel. Effect: een eenmalige meevaller/tegenvaller in maand X telt niet
-   *  meer mee in de YTD- en run-rate-onderbouwing van de forecast voor X+1.
+  /** Totale revenue-LE voor een toekomstige maand op basis van drivers.
    *
-   *  Forward reference naar forecastSubExcluding is veilig: deze functie
-   *  wordt pas vanuit forecastSub/forecastSubExcluding aangeroepen, en op
-   *  dat moment zijn beide closures al gedefinieerd. */
-  const getAdjustedActual = (bv: EntityName, month: string, key: string): number => {
-    const raw = rawActual2026(bv, month, key)
-    if (!isOneOffForKey(bv, month, key)) return raw
-    return forecastSubExcluding(bv, month, key)
+   *  Primair model: revenue per FTE per maand uit de recente window. Dit is
+   *  het CFO-mentale model ("60 FTE × €9.5k/maand → €570k") en robuust voor
+   *  zowel time-and-material als project-/fixed-fee-business. Het oude model
+   *  (FTE × werkdagen × declarability × €/uur) liep mis voor BV's waar omzet
+   *  niet volledig aan declarabele uren te koppelen is (vaste projecten,
+   *  milestones, prepayments) — dan overschat €/uur omdat álle omzet door
+   *  declarabele uren wordt gedeeld.
+   *
+   *  Adjustments:
+   *    - 2025-seizoen-overlay (zomer-dip, december-zakking) als soft factor
+   *    - Excess-leave-adjustment: alleen de geplande vakantie die boven het
+   *      baseline-niveau uitsteekt drukt de forecast verder. Reden: het
+   *      baseline rev/FTE bevat al een normaal vakantiepatroon.
+   */
+  const forecastRevenueTotal = (bv: EntityName, month: string): number => {
+    if (bv === 'Holdings') return 0  // Holdings = overhead, geen omzet
+    const bvId = bv as BvId
+    const window = recentClosedWindow(closedMonths, month, RECENCY_WINDOW)
+
+    // Verzamel rev/FTE/maand baseline over de window.
+    let revSum = 0
+    let revMonths = 0  // hoeveel maanden hadden meaningful revenue
+    let fteSum = 0
+    let leaveSum = 0
+    for (const m of window) {
+      if (hasReflectionFlag(bv, m, 'gefactureerde_omzet', 'one-off')) continue
+      const rev = rawActualRevenue(bvId, m)
+      if (rev > 0) { revSum += rev; revMonths++ }
+      const f = fteOfBv(bvId, m)
+      if (f > 0 && rev > 0) {
+        fteSum += f
+        const h = hoursEntries.find(e => e.bv === bvId && e.month === m)
+        leaveSum += h ? (h.vakantie ?? 0) + (h.ziekte ?? 0) : 0
+      }
+    }
+
+    // Geen historische revenue → 2025-zelfde-maand pattern of budget als
+    // laatste vangnet. Voorkomt dat het LE-lijntje vanaf May naar 0 zakt
+    // wanneer de FTE-historie nog niet volledig in de stores zit.
+    if (revSum <= 0) {
+      const py = monthlyActuals2025[bv]?.[MONTHS_2025_LABELS[BUDGET_MONTHS_2026.indexOf(month)] ?? '']
+      const pyRev = (py?.['gefactureerde_omzet'] ?? 0) + (py?.['omzet_periode_allocatie'] ?? 0)
+      if (pyRev > 0) return Math.round(pyRev)
+      return rawBudget(bv, month, 'gefactureerde_omzet') + rawBudget(bv, month, 'omzet_periode_allocatie')
+    }
+
+    // FTE voor de forecast-maand (forward-fill via getFteLe).
+    const fteForecast = fteOfBv(bvId, month)
+    const seasonal = seasonalFactor(bv, month, 'gefactureerde_omzet')
+    // Engine self-correction: drift uit historie + growth-trend extrapolatie.
+    // Beide multiplicatief, met soft weights en caps in de helpers zelf.
+    const drift = driftCorrection(bv, 'netto_omzet')
+    const growth = growthTrendFactor(bv, month)
+    const correction = drift * growth
+
+    // Pad 1 — FTE-aware: rev/FTE/maand × FTE_le × seasonal × leaveAdj × correction.
+    if (fteSum > 0 && fteForecast > 0) {
+      const revPerFteMonth = revSum / fteSum
+      const baselineLeavePerFte = leaveSum / fteSum
+      let leaveAdj = 1
+      const h = hoursEntries.find(e => e.bv === bvId && e.month === month)
+      const plannedLeave = h ? (h.vakantie ?? 0) + (h.ziekte ?? 0) : 0
+      if (plannedLeave > 0) {
+        const plannedLeavePerFte = plannedLeave / fteForecast
+        const excessLeavePerFte = Math.max(0, plannedLeavePerFte - baselineLeavePerFte)
+        const capacityPerFte = workdaysInMonth(month) * HOURS_PER_FTE_PER_DAY
+        if (capacityPerFte > 0) {
+          leaveAdj = 1 - Math.min(excessLeavePerFte / capacityPerFte, 0.5)
+        }
+      }
+      return Math.round(fteForecast * revPerFteMonth * seasonal * leaveAdj * correction)
+    }
+
+    // Pad 2 — geen FTE-koppeling beschikbaar: avg revenue per maand × seasonal.
+    const avgPerMonthRev = revSum / Math.max(1, revMonths)
+    return Math.round(avgPerMonthRev * seasonal * correction)
   }
 
-  /** Forecast voor één sub-key in een open maand — exact dezelfde formule
-   *  als BudgetsTab.getForecastFor:
-   *    seasonalForecast = 2025-zelfde-maand × perfMult × fteAdj × leaveAdj
-   *    runRateForecast  = lastActual × fteAdj × leaveAdj
-   *    final            = 0.6 × seasonal + 0.4 × runRate
-   *  Met:
-   *    perfMult  = YTD-2026 / YTD-2025 over closedMonths (calendar-based)
-   *    fteAdj    = (fteLast + fteDelta × ramp) / fteLast — voor groei/krimp
-   *    leaveAdj  = 1 − min(plannedVakantie / avgWork, 0.5) — alleen op
-   *                 omzet-keys; dempt impact van zomerverlof.
-   *  closedMonths/lastClosedMonth zijn calendar-based en GELIJK voor alle
-   *  BVs — zo komt Apr-LE in beide tabs op exact hetzelfde bedrag uit. */
+  /** Forecast voor een revenue-sub (gefactureerd vs allocatie) — totaal × split. */
+  const forecastRevenueSub = (bv: EntityName, month: string, key: string): number => {
+    if (bv === 'Holdings') return 0
+    const total = forecastRevenueTotal(bv, month)
+    if (total === 0) return 0
+    const window = recentClosedWindow(closedMonths, month, RECENCY_WINDOW)
+    const split = revenueSubSplit({ bv: bv as BvId, window, getMonthly })
+    if (key === 'gefactureerde_omzet') return Math.round(total * split.gefactureerd)
+    if (key === 'omzet_periode_allocatie') return Math.round(total * split.allocatie)
+    return 0
+  }
+
+  /** Sub → aggregate-parent lookup. Voor cost-subs hangen ze onder
+   *  directe_kosten of operationele_kosten; voor A&A onder amortisatie_
+   *  afschrijvingen. Voor "los staande" keys (financieel_resultaat, VPB)
+   *  returnt deze null en valt de forecast terug op budget. */
+  const aggregateKeyForSub = (subKey: string): string | null => {
+    for (const [aggKey, subs] of Object.entries(SUBS_OF)) {
+      if (subs.includes(subKey)) return aggKey
+    }
+    return null
+  }
+
+  /** Default-verdeling per aggregaat voor het geval een sub historisch geen
+   *  bijdrage heeft (bv. de gebruiker vult alleen op aggregaat-niveau in).
+   *  Bedragen sommen tot 1 per aggregaat. Cijfers gebaseerd op TPG-typische
+   *  consultancy-mix: personeel domineert, inkoop is passthrough, etc. */
+  const DEFAULT_SHARES: Record<string, Record<string, number>> = {
+    directe_kosten: {
+      directe_personeelskosten: 0.70,
+      directe_inkoopkosten: 0.15,
+      directe_overige_personeelskosten: 0.10,
+      directe_autokosten: 0.05,
+    },
+    operationele_kosten: {
+      indirecte_personeelskosten: 0.30,
+      overige_personeelskosten: 0.10,
+      huisvestingskosten: 0.18,
+      automatiseringskosten: 0.15,
+      indirecte_autokosten: 0.05,
+      verkoopkosten: 0.07,
+      algemene_kosten: 0.10,
+      doorbelaste_kosten: 0.05,
+    },
+    amortisatie_afschrijvingen: {
+      amortisatie_goodwill: 0.40,
+      amortisatie_software: 0.30,
+      afschrijvingen: 0.30,
+    },
+  }
+
+  /** Historische share van een sub in zijn aggregaat over het window. Als
+   *  aggrSum 0 is (geen historie), gebruikt de default-verdeling. Als de sub
+   *  zelf 0 had in historie maar de aggregaat-totalen ≠ 0, retourneert 0 —
+   *  m.a.w. die sub krijgt geen toewijzing tenzij default-mode triggert. */
+  const historicalSubShare = (
+    bv: EntityName, subKey: string, aggrKey: string, window: string[],
+  ): number => {
+    let subSum = 0, aggrSum = 0
+    for (const m of window) {
+      subSum += rawActual(bv, m, subKey)
+      aggrSum += rawActual(bv, m, aggrKey)
+    }
+    if (aggrSum === 0) {
+      return DEFAULT_SHARES[aggrKey]?.[subKey] ?? 0
+    }
+    return subSum / aggrSum
+  }
+
+  /** Forecast op aggregaat-niveau. Methodiek hangt af van de aggregaat-key:
+   *
+   *  - directe_kosten: cost-to-revenue ratio × revenue-forecast.
+   *    Directe kosten (personeel/inkoop/overige/auto) zijn voor TPG sterk
+   *    revenue-gekoppeld — méér declarabele uren = meer kostprijs. Een
+   *    historische ratio (kost / omzet over het window) × de nieuwe revenue-
+   *    forecast houdt brutomarge%-stabiel door de seizoenscyclus heen. Voor
+   *    Holdings (geen omzet) valt deze terug op de FTE-aware pad.
+   *
+   *  - operationele_kosten: FTE-based × seasonal × EBITDA-drift.
+   *    OpEx (huur, IT, verkoop, doorbelaste) is grotendeels overhead — schaalt
+   *    met headcount, niet met directe revenue-pieken.
+   *
+   *  - amortisatie_afschrijvingen: avg per maand × seasonal.
+   *    Vaste afschrijvingsbedragen; geen FTE- of revenue-koppeling.
+   */
+  const forecastAggregateCost = (
+    bv: EntityName, month: string, aggrKey: string, window: string[],
+  ): number => {
+    if (window.length === 0) {
+      // Geen historie — som van budgets per sub
+      const subs = SUBS_OF[aggrKey] ?? []
+      return subs.reduce((s, sk) => s + rawBudget(bv, month, sk), 0)
+    }
+
+    // ── Directe kosten: cost-to-revenue ratio (margin-anchored) ──
+    // Deze aanpak elimineert de brutomarge-spike die ontstaat wanneer revenue
+    // sterk seizoens-geschaald is en costs vlak blijven: door costs als een
+    // ratio van revenue te modelleren scaleren ze automatisch mee met de
+    // forecast.
+    if (aggrKey === 'directe_kosten' && bv !== 'Holdings') {
+      const bvId = bv as BvId
+      let revSum = 0, costSum = 0
+      for (const m of window) {
+        const r = rawActualRevenue(bvId, m)
+        const c = rawActual(bv, m, 'directe_kosten')
+        if (r > 0 && c !== 0) {
+          revSum += r
+          costSum += c
+        }
+      }
+      if (revSum > 0) {
+        // Cost-to-revenue ratio is typisch negatief (costs zijn negatief).
+        const ratio = costSum / revSum
+        const revForecast = forecastRevenueTotal(bv, month)
+        return Math.round(revForecast * ratio)
+      }
+      // Geen revenue-historie — val door naar FTE-pad
+    }
+
+    // ── OpEx en A&A: FTE-based of avg-per-maand × seasonal × drift ──
+    let aggrSum = 0, fteSum = 0, n = 0
+    for (const m of window) {
+      const v = rawActual(bv, m, aggrKey)
+      if (v === 0) continue
+      const f = fteOfBv(bv as BvId, m)
+      if (f > 0) { fteSum += f; aggrSum += v; n++ }
+      else { aggrSum += v; n++ }
+    }
+    if (n === 0) {
+      const subs = SUBS_OF[aggrKey] ?? []
+      return subs.reduce((s, sk) => s + rawBudget(bv, month, sk), 0)
+    }
+    const seasonal = seasonalFactor(bv, month, aggrKey)
+    // EBITDA-drift alleen op operationele_kosten — directe_kosten heeft al
+    // de margin-stabilisering via de revenue-ratio.
+    let costDrift = 1
+    if (aggrKey === 'operationele_kosten') {
+      const ebitdaDrift = driftCorrection(bv, 'ebitda')
+      costDrift = 1 + (1 - ebitdaDrift) * 0.5
+      costDrift = Math.max(1 - DRIFT_CORRECTION_CAP, Math.min(1 + DRIFT_CORRECTION_CAP, costDrift))
+    }
+
+    if (fteSum > 0 && bv !== 'Holdings') {
+      const aggrPerFte = aggrSum / fteSum
+      const fteForecast = fteOfBv(bv as BvId, month)
+      if (fteForecast > 0) {
+        return Math.round(aggrPerFte * fteForecast * seasonal * costDrift)
+      }
+    }
+    return Math.round((aggrSum / n) * seasonal * costDrift)
+  }
+
+  /** Forecast voor één cost-sub: aggregaat-forecast × historical share.
+   *  Hierdoor:
+   *    - Subs schalen samen met de aggregaat (geen brutomarge-spike meer)
+   *    - Lege subs (user vult op aggregaat-niveau in) krijgen via defaults
+   *      alsnog een waarde — geen "—" in de Budgetten-tab meer.
+   *    - Sums van subs = aggregate, dus margin-% klopt over actual→LE-grens. */
+  const forecastSubFromAggregate = (
+    bv: EntityName, month: string, key: string, window: string[],
+  ): number => {
+    const aggrKey = aggregateKeyForSub(key)
+    if (!aggrKey) return rawBudget(bv, month, key)
+    const aggrForecast = forecastAggregateCost(bv, month, aggrKey, window)
+    const share = historicalSubShare(bv, key, aggrKey, window)
+    return Math.round(aggrForecast * share)
+  }
+
+  /** Centrale forecast-functie per sub-key. */
   const forecastSub = (bv: EntityName, month: string, key: string): number => {
-    const sameMonth2025 = rawActual2025(bv, toPY(month), key)
-    let ytd2026 = 0, ytd2025 = 0
-    for (const cm of closedMonths) {
-      // Reflectie-adjusted: bij one-off antwoord wordt de actual voor (bv,
-      // cm, key) vervangen door de pre-close LE — zo telt het eenmalige
-      // effect niet mee in de YTD-baseline voor de volgende maand.
-      ytd2026 += getAdjustedActual(bv, cm, key)
-      ytd2025 += rawActual2025(bv, toPY(cm), key)
-    }
-    const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
-    // Run-rate: zelfde adjustment-rule — als de laatste closed-month als
-    // one-off is gemarkeerd voor deze key, pakken we de pre-close LE-waarde
-    // i.p.v. de actual, zodat de runRate-tak de afwijking niet doortrekt.
-    const lastActual = lastClosedMonth ? getAdjustedActual(bv, lastClosedMonth, key) : 0
-
-    let fteAdj = 1
-    if (bv !== 'Holdings' && lastClosedMonth) {
-      const planned = getPlannedFteInfo(bv, month, lastClosedMonth)
-      if (planned.fteLast > 0) {
-        const fteDelta = planned.fte - planned.fteLast
-        if (fteDelta <= 0) {
-          fteAdj = planned.fte / planned.fteLast
-        } else {
-          const tIdx = BUDGET_MONTHS_2026.indexOf(month)
-          const monthsSinceHire = planned.firstIdx >= 0 ? tIdx - planned.firstIdx : 0
-          const ramp = rampFactor(monthsSinceHire)
-          const effectiveFte = planned.fteLast + fteDelta * ramp
-          fteAdj = effectiveFte / planned.fteLast
-        }
-      }
-    }
-
-    let leaveAdj = 1
-    const isRevenueKey = key === 'netto_omzet' || key === 'gefactureerde_omzet'
-    if (bv !== 'Holdings' && closedMonths.length > 0 && isRevenueKey) {
-      const plannedVakantie = getPlannedVakantie(bv as BvId, month)
-      if (plannedVakantie > 0) {
-        let baselineWork = 0, baselineCount = 0
-        for (const cm of closedMonths) {
-          const he = hoursEntries.find(e => e.bv === bv && e.month === cm)
-          if (he) {
-            baselineWork += he.declarable + he.internal
-            baselineCount++
-          }
-        }
-        const avgWork = baselineCount > 0 ? baselineWork / baselineCount : 0
-        if (avgWork > 0) {
-          const leaveRatio = Math.min(plannedVakantie / avgWork, 0.5)
-          leaveAdj = 1 - leaveRatio
-        }
-      }
-    }
-
-    const combinedAdj = fteAdj * leaveAdj
-    const seasonalForecast = sameMonth2025 * perfMult * combinedAdj
-    const runRateForecast  = lastActual * combinedAdj
-
-    if (seasonalForecast === 0 && runRateForecast === 0) return 0
-    if (seasonalForecast === 0) return Math.round(runRateForecast)
-    if (runRateForecast === 0)  return Math.round(seasonalForecast)
-    return Math.round(0.6 * seasonalForecast + 0.4 * runRateForecast)
+    if (isRevenueSub(key)) return forecastRevenueSub(bv, month, key)
+    const window = recentClosedWindow(closedMonths, month, RECENCY_WINDOW)
+    // Cost-subs (directe + OpEx + A&A): aggregate-niveau forecast × share.
+    const aggrKey = aggregateKeyForSub(key)
+    if (aggrKey) return forecastSubFromAggregate(bv, month, key, window)
+    // Echte losstaande keys (financieel_resultaat, VPB) volgen het budget.
+    return rawBudget(bv, month, key)
   }
 
-  /** Forecast-only variant van forecastSub: gebruikt UITSLUITEND de maanden
-   *  STRIKT VÓÓR `targetMonth` als YTD-basis. Bedoeld voor de "pre-close LE
-   *  snapshot" die we vastleggen bij het definitief maken van een maand —
-   *  zodat we achteraf kunnen zien hoe goed de app de maand voorspeld had,
-   *  vóórdat de eigen actuals erin zaten. Houdt FTE-ramp en vakantie-
-   *  correctie identiek aan forecastSub. */
+  /** Pre-close LE voor (bv, maand, key): wat de engine had voorspeld op basis
+   *  van maanden strikt vóór `month`. Gebruikt voor de variance bridge en de
+   *  accuracy-tracker. */
   const forecastSubExcluding = (bv: EntityName, month: string, key: string): number => {
     const tIdx = BUDGET_MONTHS_2026.indexOf(month)
     const priorClosed = closedMonths.filter(cm => BUDGET_MONTHS_2026.indexOf(cm) < tIdx)
-    const lastPrior = priorClosed.length > 0 ? priorClosed[priorClosed.length - 1] : null
-
-    const sameMonth2025 = rawActual2025(bv, toPY(month), key)
-    let ytd2026 = 0, ytd2025 = 0
-    for (const cm of priorClosed) {
-      // Reflectie-adjusted YTD (zie getAdjustedActual). Veilig binnen
-      // forecastSubExcluding zelf: getAdjustedActual delegeert alleen terug
-      // voor maanden die als one-off zijn gemarkeerd, en gebruikt dan een
-      // priorClosed-set die strikt kleiner is dan de huidige — dus geen
-      // infinite recursion.
-      ytd2026 += getAdjustedActual(bv, cm, key)
-      ytd2025 += rawActual2025(bv, toPY(cm), key)
+    // Tijdelijke override: in de forecast-helpers gebruiken we via closure
+    // closedMonths. Voor pre-close LE moeten we hetzelfde mechanisme draaien
+    // met een ingekorte window. We doen dit door een mini-versie van de engine
+    // hier opnieuw uit te voeren.
+    if (priorClosed.length === 0) {
+      return rawBudget(bv, month, key)
     }
-    const perfMult = ytd2025 !== 0 ? ytd2026 / ytd2025 : 1
-    const lastActual = lastPrior ? getAdjustedActual(bv, lastPrior, key) : 0
-
-    let fteAdj = 1
-    if (bv !== 'Holdings' && lastPrior) {
-      const planned = getPlannedFteInfo(bv, month, lastPrior)
-      if (planned.fteLast > 0) {
-        const fteDelta = planned.fte - planned.fteLast
-        if (fteDelta <= 0) {
-          fteAdj = planned.fte / planned.fteLast
-        } else {
-          const monthsSinceHire = planned.firstIdx >= 0 ? tIdx - planned.firstIdx : 0
-          const ramp = rampFactor(monthsSinceHire)
-          const effectiveFte = planned.fteLast + fteDelta * ramp
-          fteAdj = effectiveFte / planned.fteLast
+    if (isRevenueSub(key)) {
+      if (bv === 'Holdings') return 0
+      const bvId = bv as BvId
+      const window = priorClosed.slice(-RECENCY_WINDOW)
+      // Zelfde gelaagde fallback als forecastRevenueTotal, maar met priorClosed
+      // als window (strikt vóór de target-maand) voor de pre-close LE.
+      let revSum = 0, revMonths = 0, fteSum = 0, leaveSum = 0
+      for (const m of window) {
+        if (hasReflectionFlag(bv, m, 'gefactureerde_omzet', 'one-off')) continue
+        const rev = rawActualRevenue(bvId, m)
+        if (rev > 0) { revSum += rev; revMonths++ }
+        const f = fteOfBv(bvId, m)
+        if (f > 0 && rev > 0) {
+          fteSum += f
+          const h = hoursEntries.find(e => e.bv === bvId && e.month === m)
+          leaveSum += h ? (h.vakantie ?? 0) + (h.ziekte ?? 0) : 0
         }
       }
-    }
+      const seasonal = seasonalFactor(bv, month, 'gefactureerde_omzet')
 
-    let leaveAdj = 1
-    const isRevenueKey = key === 'netto_omzet' || key === 'gefactureerde_omzet'
-    if (bv !== 'Holdings' && priorClosed.length > 0 && isRevenueKey) {
-      const plannedVakantie = getPlannedVakantie(bv as BvId, month)
-      if (plannedVakantie > 0) {
-        let baselineWork = 0, baselineCount = 0
-        for (const cm of priorClosed) {
-          const he = hoursEntries.find(e => e.bv === bv && e.month === cm)
-          if (he) {
-            baselineWork += he.declarable + he.internal
-            baselineCount++
+      // Geen historische revenue → 2025-pattern of budget.
+      if (revSum <= 0) {
+        const py = monthlyActuals2025[bv]?.[MONTHS_2025_LABELS[BUDGET_MONTHS_2026.indexOf(month)] ?? '']
+        const pyRev = (py?.['gefactureerde_omzet'] ?? 0) + (py?.['omzet_periode_allocatie'] ?? 0)
+        const total = pyRev > 0 ? Math.round(pyRev) : rawBudget(bv, month, 'gefactureerde_omzet') + rawBudget(bv, month, 'omzet_periode_allocatie')
+        const split = revenueSubSplit({ bv: bvId, window, getMonthly })
+        if (key === 'gefactureerde_omzet') return Math.round(total * split.gefactureerd)
+        return Math.round(total * split.allocatie)
+      }
+
+      const fteForecast = fteOfBv(bvId, month)
+      let total: number
+      if (fteSum > 0 && fteForecast > 0) {
+        const revPerFteMonth = revSum / fteSum
+        const baselineLeavePerFte = leaveSum / fteSum
+        let leaveAdj = 1
+        const h = hoursEntries.find(e => e.bv === bvId && e.month === month)
+        const plannedLeave = h ? (h.vakantie ?? 0) + (h.ziekte ?? 0) : 0
+        if (plannedLeave > 0) {
+          const plannedLeavePerFte = plannedLeave / fteForecast
+          const excessLeavePerFte = Math.max(0, plannedLeavePerFte - baselineLeavePerFte)
+          const capacityPerFte = workdaysInMonth(month) * HOURS_PER_FTE_PER_DAY
+          if (capacityPerFte > 0) {
+            leaveAdj = 1 - Math.min(excessLeavePerFte / capacityPerFte, 0.5)
           }
         }
-        const avgWork = baselineCount > 0 ? baselineWork / baselineCount : 0
-        if (avgWork > 0) {
-          const leaveRatio = Math.min(plannedVakantie / avgWork, 0.5)
-          leaveAdj = 1 - leaveRatio
-        }
+        total = Math.round(fteForecast * revPerFteMonth * seasonal * leaveAdj)
+      } else {
+        const avgPerMonthRev = revSum / Math.max(1, revMonths)
+        total = Math.round(avgPerMonthRev * seasonal)
       }
+      const split = revenueSubSplit({ bv: bvId, window, getMonthly })
+      if (key === 'gefactureerde_omzet') return Math.round(total * split.gefactureerd)
+      return Math.round(total * split.allocatie)
     }
-
-    const combinedAdj = fteAdj * leaveAdj
-    const seasonalForecast = sameMonth2025 * perfMult * combinedAdj
-    const runRateForecast  = lastActual * combinedAdj
-
-    if (seasonalForecast === 0 && runRateForecast === 0) return 0
-    if (seasonalForecast === 0) return Math.round(runRateForecast)
-    if (runRateForecast === 0)  return Math.round(seasonalForecast)
-    return Math.round(0.6 * seasonalForecast + 0.4 * runRateForecast)
+    // Cost-subs: aggregate-niveau forecast × historical share, zelfde aanpak
+    // als forecastSub maar met priorClosed als window (strikt vóór target).
+    const aggrKey = aggregateKeyForSub(key)
+    if (aggrKey) {
+      const window = priorClosed.slice(-RECENCY_WINDOW)
+      const aggrForecast = forecastAggregateCost(bv, month, aggrKey, window)
+      const share = historicalSubShare(bv, key, aggrKey, window)
+      return Math.round(aggrForecast * share)
+    }
+    return rawBudget(bv, month, key)
   }
 
-  /** Sub-key LE — exact zelfde paden als BudgetsTab.rawLeVal:
-   *    leOverride → closed-with-data actual → forecast.
-   *  Een closed-maand zónder data valt terug op de forecast — zo toont een
-   *  nog niet ingevulde maand geen 0 op de chart maar een zinnige LE. */
+  // ── LE-getters ──────────────────────────────────────────────────────────
+  // De aggregate-extras calibration is niet meer nodig sinds cost-subs via
+  // forecastSubFromAggregate worden bepaald: de aggregaat-forecast komt direct
+  // uit getMonthly[aggregate]-history, en subs verdelen die volgens hun
+  // historical share. Sum van subs = aggregaat, dus er is geen "missing"-delta
+  // die we apart hoeven op te tellen.
   const rawLE = (bv: EntityName, month: string, key: string): number => {
     const ov = getLeOverride(bv, month, key)
     if (ov != null) return ov
-    if (isClosedWithData(bv, month)) return rawActual2026(bv, month, key)
+    if (isClosedWithData(bv, month)) return rawActual(bv, month, key)
     return forecastSub(bv, month, key)
   }
 
-  /** Pre-close LE-waarde voor (bv, maand, key) — wat de app voor deze maand
-   *  zou voorspellen op basis van uitsluitend ervoor afgesloten maanden,
-   *  ZONDER dat de eigen actuals al meetellen. Manuele LE-overrides krijgen
-   *  voorrang (override is een bewuste bijstelling). Aggregaten en derived
-   *  keys lossen recursief op via SUBS_OF / DERIVED_FORMULA. */
   const rawPreCloseLE = (bv: EntityName, month: string, key: string): number => {
     const ov = getLeOverride(bv, month, key)
     if (ov != null) return ov
     return forecastSubExcluding(bv, month, key)
   }
+
   const getPreCloseLE = (bv: EntityName, month: string, key: string): number => {
     if (AGGREGATE_KEYS.has(key)) {
+      // Cost-aggregaten: directe aggregate-forecast (geen sum-of-subs nodig).
+      if (key === 'directe_kosten' || key === 'operationele_kosten' || key === 'amortisatie_afschrijvingen') {
+        const tIdx = BUDGET_MONTHS_2026.indexOf(month)
+        const priorClosed = closedMonths.filter(cm => BUDGET_MONTHS_2026.indexOf(cm) < tIdx)
+        const window = priorClosed.slice(-RECENCY_WINDOW)
+        return forecastAggregateCost(bv, month, key, window)
+      }
+      // Revenue-aggregaten: sum van sub-forecasts (al gebaseerd op driver-totaal).
       return SUBS_OF[key].reduce((s, sk) => s + rawPreCloseLE(bv, month, sk), 0)
     }
     if (DERIVED_KEYS.has(key)) {
@@ -385,16 +652,24 @@ export function useLatestEstimate(currentDate?: Date) {
     return rawPreCloseLE(bv, month, key)
   }
 
-  /** Centrale LE-getter — gebruikt isClosedWithData voor de "actual"-tak
-   *  zodat half-gevulde maanden niet onterecht als 0 worden gerapporteerd.
-   *  Voor volledig ingevulde maanden gelijk aan BudgetsTab.getLeVal. */
   const getLE = (bv: EntityName, month: string, key: string): number => {
+    // Voor closed maanden gebruiken we de werkelijke aggregaat-waarde (incl.
+    // IC-verrekening, accruals, etc.) i.p.v. som-of-subs — dat is wat
+    // useAdjustedActuals levert. LE-override wint altijd.
     if (isClosedWithData(bv, month) && (AGGREGATE_KEYS.has(key) || DERIVED_KEYS.has(key))) {
       const ov = getLeOverride(bv, month, key)
       if (ov != null) return ov
-      return rawActual2026(bv, month, key)
+      return rawActual(bv, month, key)
     }
     if (AGGREGATE_KEYS.has(key)) {
+      // Cost-aggregaten: directe aggregate-niveau forecast op basis van
+      // historische aggregaat-data (vangt IC-verrekening/accruals/manual
+      // corrections op die niet in de sub-keys zitten).
+      if (key === 'directe_kosten' || key === 'operationele_kosten' || key === 'amortisatie_afschrijvingen') {
+        const window = recentClosedWindow(closedMonths, month, RECENCY_WINDOW)
+        return forecastAggregateCost(bv, month, key, window)
+      }
+      // Revenue-aggregaat: sum van sub-forecasts (allocatie via revenueSubSplit).
       return SUBS_OF[key].reduce((s, sk) => s + rawLE(bv, month, sk), 0)
     }
     if (DERIVED_KEYS.has(key)) {
@@ -407,8 +682,6 @@ export function useLatestEstimate(currentDate?: Date) {
   const getLeSource = (bv: EntityName, month: string, key: string): LeSource => {
     if (READONLY_KEYS.has(key)) return 'derived'
     if (getLeOverride(bv, month, key) != null) return 'override'
-    // Calendar-past + data aanwezig → actual op de chart-lijn. Een lege
-    // calendar-past maand telt als forecast (LE-lijn pakt 'm op).
     if (isClosedWithData(bv, month)) return 'actual'
     return 'forecast'
   }
@@ -419,16 +692,9 @@ export function useLatestEstimate(currentDate?: Date) {
   const fyLE = (bv: EntityName, key: string): number =>
     sumLE(bv, BUDGET_MONTHS_2026, key)
 
-  // Voor charts: hasLE blijft true (LE is altijd beschikbaar via forecast).
   const hasLE: (bv: EntityName, month: string, key: string) => boolean = () => true
 
-  // isClosed: globaal closed-of-niet (finalized OR data) — gebruikt door de
-  // dashboard chart-color-logic om te bepalen tot waar de actuals-lijn loopt.
-  // Niet-finalized maanden zonder data tellen niet als closed; daar pakt de
-  // LE-forecast over.
   const isClosed = (month: string): boolean => isAnyActual(month)
-  // isActualMonth: per-BV closed met data of finalized — zelfde als
-  // getLeSource→'actual'.
   const isActualMonth: (bv: EntityName, month: string) => boolean = (bv, month) =>
     isClosedWithData(bv, month)
 
