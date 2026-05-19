@@ -76,77 +76,68 @@ function QuestionRow({ question, existing, aiSuggestion, onSave }: QuestionRowPr
     setDirty(false)
   }
 
+  const aiScope = aiSuggestion?.suggestedScope
+  const aiLabel = aiScope === 'one-off' ? 'Eenmalig' : aiScope === 'structural' ? 'Structureel' : null
+
+  const appendSuggestion = (s: string) => {
+    setText(prev => {
+      const trimmed = prev.trim()
+      return trimmed ? `${trimmed} · ${s}` : s
+    })
+    setDirty(true)
+  }
+
   return (
     <div style={{
-      padding: 8, borderRadius: 5,
+      padding: '7px 9px', borderRadius: 5,
       background: existing ? 'rgba(38,201,151,0.06)' : 'var(--bg2)',
       border: `1px solid ${existing ? 'var(--green)' : 'var(--bd2)'}`,
       display: 'flex', flexDirection: 'column', gap: 5,
     }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-        <span style={{ fontSize: 13, lineHeight: 1.2 }}>{CAT_ICON[question.category]}</span>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, lineHeight: 1.4 }}>
+        <span style={{ fontSize: 13 }}>{CAT_ICON[question.category]}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: 'var(--t1)', fontWeight: 600, lineHeight: 1.4 }}>
-            {question.question}
-          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--t1)', fontWeight: 600 }}>{question.question}</div>
           {question.hint && (
-            <div style={{ fontSize: 9.5, color: 'var(--t3)', marginTop: 1, fontStyle: 'italic' }}>
-              💡 {question.hint}
+            <div style={{ fontSize: 9.5, color: 'var(--t3)', marginTop: 2, fontStyle: 'italic' }}>
+              {question.hint}
             </div>
           )}
         </div>
-        {existing && (
-          <span style={{ fontSize: 9, color: 'var(--green)', background: 'var(--bd-green)', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
-            ✓
-          </span>
-        )}
+        {existing && <span style={{ fontSize: 10, color: 'var(--green)', flexShrink: 0 }}>✓</span>}
       </div>
+      {question.suggestions && question.suggestions.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 9.5, color: 'var(--t3)' }}>💡 bv.</span>
+          {question.suggestions.map(s => (
+            <button
+              key={s}
+              onClick={() => appendSuggestion(s)}
+              title="Klik om aan je antwoord toe te voegen"
+              style={{
+                padding: '1px 7px', fontSize: 9.5,
+                borderRadius: 999, cursor: 'pointer',
+                border: '1px solid var(--bd2)', background: 'var(--bg1)', color: 'var(--t2)',
+              }}
+            >
+              + {s}
+            </button>
+          ))}
+        </div>
+      )}
       <textarea
         value={text}
         onChange={e => { setText(e.target.value); setDirty(true) }}
-        placeholder="Korte uitleg — de LE-engine gebruikt dit voor toekomstige prognoses…"
-        rows={2}
+        placeholder="Korte uitleg — of klik een suggestie hierboven…"
+        rows={1}
         style={{
           fontFamily: 'var(--font)', fontSize: 11,
-          padding: '5px 7px', borderRadius: 4,
+          padding: '4px 6px', borderRadius: 4,
           border: '1px solid var(--bd2)', background: 'var(--bg1)', color: 'var(--t1)',
-          resize: 'vertical', minHeight: 32,
+          resize: 'vertical', minHeight: 28,
         }}
       />
-      {aiSuggestion && aiSuggestion.suggestedScope !== 'unknown' && (
-        <div style={{
-          fontSize: 9.5, color: 'var(--t2)', lineHeight: 1.4,
-          padding: '4px 6px', borderRadius: 4,
-          background: 'rgba(139, 92, 246, 0.07)',
-          border: '1px solid rgba(139, 92, 246, 0.25)',
-          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
-        }}>
-          <span style={{ fontSize: 11 }}>🤖</span>
-          <span style={{ fontWeight: 700, color: '#a78bfa' }}>AI</span>
-          <span>denkt:</span>
-          <strong style={{ color: 'var(--t1)' }}>
-            {aiSuggestion.suggestedScope === 'one-off' ? 'Eenmalig' : 'Structureel'}
-          </strong>
-          <span style={{ fontSize: 9, color: 'var(--t3)' }}>
-            ({Math.round(aiSuggestion.confidence * 100)}%)
-          </span>
-          <button
-            onClick={() => { setScope(aiSuggestion.suggestedScope); setDirty(true) }}
-            className="btn sm ghost"
-            style={{ fontSize: 9, padding: '1px 6px', marginLeft: 'auto' }}
-            title="Neem deze classificatie over"
-          >
-            Overnemen
-          </button>
-          {aiSuggestion.reasoning && (
-            <div style={{ flexBasis: '100%', fontSize: 9, color: 'var(--t3)', fontStyle: 'italic', marginTop: 2 }}>
-              {aiSuggestion.reasoning}
-            </div>
-          )}
-        </div>
-      )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 9.5, color: 'var(--t3)' }}>Effect:</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
         {(['one-off', 'structural', 'unknown'] as const).map(s => (
           <button
             key={s}
@@ -162,6 +153,20 @@ function QuestionRow({ question, existing, aiSuggestion, onSave }: QuestionRowPr
             {s === 'one-off' ? 'Eenmalig' : s === 'structural' ? 'Structureel' : 'Onbekend'}
           </button>
         ))}
+        {aiLabel && (
+          <button
+            onClick={() => { setScope(aiScope!); setDirty(true) }}
+            title={aiSuggestion?.reasoning ? `${aiSuggestion.reasoning} (${Math.round((aiSuggestion?.confidence ?? 0) * 100)}%)` : 'Neem AI-classificatie over'}
+            style={{
+              padding: '1px 6px', fontSize: 9.5, borderRadius: 4, cursor: 'pointer',
+              border: '1px solid rgba(139, 92, 246, 0.4)',
+              background: 'rgba(139, 92, 246, 0.08)',
+              color: '#a78bfa', fontWeight: 600,
+            }}
+          >
+            🤖 {aiLabel}
+          </button>
+        )}
         <button
           onClick={handleSave}
           disabled={!text.trim() || (!dirty && !!existing)}
@@ -275,6 +280,17 @@ function BvReflectionBlock({ ctx, bv, month, currentUserEmail }: BvBlockProps) {
 
       {expanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* Korte, altijd zichtbare intro — helpt de gebruiker begrijpen
+              waarom de duiding nodig is, ook als de AI-overlay niet
+              beschikbaar is (bv. lokale dev waar /api/chat een 404 geeft). */}
+          <div style={{
+            padding: '6px 9px', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.45,
+            background: 'var(--bg2)', border: '1px solid var(--bd2)', borderRadius: 4,
+          }}>
+            Geef per afwijking aan of het effect <strong style={{ color: 'var(--t1)' }}>structureel</strong> doorwerkt naar de rest van het jaar
+            (engine schaalt de Latest Estimate mee) of <strong style={{ color: 'var(--t1)' }}>eenmalig</strong> is
+            (alleen deze maand). Klik op een suggestie of typ een eigen toelichting.
+          </div>
           {/* AI-commentary card — getoond bovenaan zodra Claude heeft geantwoord. */}
           {aiCache?.status === 'loading' && (
             <div style={{

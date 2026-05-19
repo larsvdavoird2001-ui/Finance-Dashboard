@@ -111,13 +111,24 @@ export const useLeAiStore = create<LeAiStore>()(
     {
       name: 'tpg-le-ai-cache',
       // Persisteer alleen success-resultaten — loading/error houden we niet
-      // over een refresh heen omdat ze stale zouden zijn.
+      // over een refresh heen. `disabled` wordt bewust NIET gepersisteerd:
+      // een tijdelijke 404 (bv. /api/chat down) mag de feature niet permanent
+      // uitschakelen — elke nieuwe sessie krijgt een verse poging.
       partialize: (s) => ({
         cache: Object.fromEntries(
           Object.entries(s.cache).filter(([, v]) => v.status === 'success'),
         ),
-        disabled: s.disabled,
       }) as unknown as LeAiStore,
+      // Negeer een eventueel oude `disabled: true` die in localStorage staat
+      // van vóór deze wijziging — pak alleen cache uit persisted state, rest
+      // valt terug op de initial state.
+      merge: (persisted, current) => {
+        const p = persisted as Partial<LeAiStore> | undefined
+        return {
+          ...current,
+          cache: p?.cache ?? current.cache,
+        }
+      },
     },
   ),
 )

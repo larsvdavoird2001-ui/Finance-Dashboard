@@ -79,6 +79,9 @@ export interface AiQuestion {
   question: string
   /** Korte hint die de gebruiker stuurt zonder te sturen. */
   hint?: string
+  /** Concrete voorbeeld-antwoorden — getoond als clickbare chips onder de
+   *  vraag zodat de gebruiker met één klik kan beginnen. */
+  suggestions?: string[]
   /** Categorie, voor styling/icoon. */
   category: 'fte' | 'declarability' | 'revenue' | 'cost' | 'margin' | 'leave' | 'general'
   /** Hoe groot de afwijking was — gebruikt voor sortering. Hoger = belangrijker. */
@@ -408,15 +411,16 @@ export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
   if (hasMomDelta || hasBudgetDelta) {
     const parts: string[] = []
     if (hasMomDelta) {
-      parts.push(`${fteDelta! >= 0 ? '+' : ''}${fteDelta!.toFixed(1)} MoM (${ftePrev?.toFixed(1) ?? '?'} → ${fteCurrent.toFixed(1)})`)
+      parts.push(`${fteDelta! >= 0 ? '+' : ''}${fteDelta!.toFixed(1)} MoM`)
     }
     if (hasBudgetDelta) {
-      parts.push(`${fteVsBudget! >= 0 ? '+' : ''}${fteVsBudget!.toFixed(1)} vs budget (actual ${fteCurrent.toFixed(1)} · budget ${fteBudget!.toFixed(1)})`)
+      parts.push(`${fteVsBudget! >= 0 ? '+' : ''}${fteVsBudget!.toFixed(1)} vs budget`)
     }
     out.push({
       id: 'volume-shift',
-      question: `${bv} ${month}: FTE-verandering — ${parts.join(' · ')}. Is dit een structurele aanpassing van de bezetting voor de rest van het jaar, of een tijdelijke afwijking?`,
-      hint: 'Hires, vertrek, ouderschapsverlof, vacature, freelance-buffer. "Structureel" → driver-engine schaalt omzet en directe personeelskosten mee voor de rest van het jaar. "Eenmalig" → alleen deze maand getroffen.',
+      question: `FTE-bezetting ${fteCurrent.toFixed(1)} (${parts.join(' · ')}). Is dit een structurele bezetting voor de rest van het jaar, of een tijdelijke afwijking?`,
+      hint: 'Structureel → engine schaalt omzet en directe personeelskosten mee voor ROY · Eenmalig → alleen deze maand getroffen.',
+      suggestions: ['nieuwe hire', 'vertrek', 'vacature open', 'ouderschapsverlof', 'freelance-buffer'],
       category: 'fte',
       weight: Math.max(
         hasMomDelta    ? Math.abs(fteDelta!)    * 50000 : 0,
@@ -428,11 +432,11 @@ export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
   // ── 2. RATE-SHIFT: omzet-afwijking die NIET (geheel) door FTE komt ──
   // Trigger: |vs LE| ≥ 3% & €5k; rate-component is "wat overblijft na volume".
   if (rev && Math.abs(rev.vsLePct) > 3 && Math.abs(rev.vsLe) > 5000) {
-    const dir = rev.vsLe >= 0 ? 'hoger' : 'lager'
     out.push({
       id: 'rate-shift',
-      question: `${bv} ${month}: omzet ${fmtEur(rev.actual)} kwam ${fmtEur(Math.abs(rev.vsLe))} (${rev.vsLePct >= 0 ? '+' : ''}${rev.vsLePct.toFixed(1)}%) ${dir} uit dan de Latest Estimate van ${fmtEur(rev.preCloseLe)}. Is dit toe te schrijven aan een verandering in het effectieve uurtarief — tariefverhoging, klant-mix met andere bandbreedte, of contract-onderhandeling?`,
-      hint: 'Effectief tarief = revenue / declarabele uren. "Structureel" → engine gebruikt het nieuwe niveau voor de ROY-omzet. Voor volume-effecten (FTE/uren) gebruik de FTE-vraag hierboven.',
+      question: `Omzet ${fmtEur(rev.actual)} = ${rev.vsLe >= 0 ? '+' : ''}${fmtEur(rev.vsLe)} (${rev.vsLePct >= 0 ? '+' : ''}${rev.vsLePct.toFixed(1)}%) vs LE. Komt dit door een verandering in tarief of klant-mix?`,
+      hint: 'Structureel → engine gebruikt het nieuwe tariefniveau voor ROY-omzet · Eenmalig → blijft buiten de baseline.',
+      suggestions: ['tariefverhoging', 'andere klant-mix', 'contract-onderhandeling', 'extra projectomzet', 'minder schaalbaar werk'],
       category: 'revenue',
       weight: Math.abs(rev.vsLe),
     })
@@ -444,8 +448,9 @@ export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
     const diff = declarability - declarabilityPrevAvg
     out.push({
       id: 'utilization-shift',
-      question: `${bv} ${month}: declarability ${declarability.toFixed(1)}% (${diff >= 0 ? '+' : ''}${diff.toFixed(1)} pp t.o.v. gemiddelde ${declarabilityPrevAvg.toFixed(1)}%). Pipeline-shift, einde of start van een groot project, of seizoenseffect?`,
-      hint: 'Declarability = declarabele uren / werkbare uren. "Structureel" → engine gebruikt het nieuwe niveau voor de ROY-omzet (dempt of versterkt het omzet-pad). "Eenmalig" → deze maand wordt uitgesloten uit de baseline.',
+      question: `Declarability ${declarability.toFixed(1)}% (${diff >= 0 ? '+' : ''}${diff.toFixed(1)} pp vs gem. ${declarabilityPrevAvg.toFixed(1)}%). Verandert dit utilization-niveau structureel of is dit eenmalig?`,
+      hint: 'Structureel → engine ankert het nieuwe niveau voor ROY · Eenmalig → maand wordt uit baseline gehaald.',
+      suggestions: ['groot project gestart', 'project afgelopen', 'pipeline-shift', 'seizoenseffect', 'bench-tijd'],
       category: 'declarability',
       weight: Math.abs(diff) * 8000,
     })
@@ -457,8 +462,9 @@ export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
   if (ebitda && Math.abs(ebitda.vsLePct) > 10 && Math.abs(ebitda.vsLe) > 20000) {
     out.push({
       id: 'one-off-month',
-      question: `${bv} ${month}: EBITDA ${fmtEur(ebitda.actual)} wijkt ${fmtEur(Math.abs(ebitda.vsLe))} (${ebitda.vsLePct >= 0 ? '+' : ''}${ebitda.vsLePct.toFixed(1)}%) af van LE ${fmtEur(ebitda.preCloseLe)}. Zit er een eenmalige post in deze maand die NIET door moet werken naar volgende maanden — bv. een settlement, restitutie, accrual-correctie of project-afsluiting?`,
-      hint: '"Eenmalig" → engine excludeert deze maand volledig uit de baseline voor toekomstige forecasts. "Structureel" → het nieuwe niveau wordt het ankerpunt voor ROY.',
+      question: `EBITDA ${fmtEur(ebitda.actual)} = ${ebitda.vsLe >= 0 ? '+' : ''}${fmtEur(ebitda.vsLe)} (${ebitda.vsLePct >= 0 ? '+' : ''}${ebitda.vsLePct.toFixed(1)}%) vs LE. Zit hier een eenmalige post in die NIET door moet werken naar de rest van het jaar?`,
+      hint: 'Eenmalig → engine excludeert deze maand uit de baseline · Structureel → het nieuwe niveau wordt ankerpunt voor ROY.',
+      suggestions: ['settlement', 'restitutie', 'accrual-correctie', 'project-afsluiting', 'eenmalige bonus'],
       category: 'general',
       weight: Math.abs(ebitda.vsLe) * 0.4,
     })
@@ -477,14 +483,14 @@ export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
     const c = costCands.sort((a, b) => Math.abs(b.v.vsLe) - Math.abs(a.v.vsLe))[0]
     out.push({
       id: 'cost-step-change',
-      question: `${bv} ${month}: ${c.label} ${fmtEur(c.v.actual)} wijkt ${fmtEur(Math.abs(c.v.vsLe))} (${c.v.vsLePct >= 0 ? '+' : ''}${c.v.vsLePct.toFixed(1)}%) af van LE. Is dit een structurele kosten-shift (huur-indexatie, nieuwe leverancier, contract-aanpassing, payroll-verhoging) of een eenmalige boeking?`,
-      hint: '"Structureel" → engine ankert het nieuwe kostenniveau voor de rest van het jaar. "Eenmalig" → de maand wordt uitgesloten uit de baseline-window.',
+      question: `${c.label} ${fmtEur(c.v.actual)} = ${c.v.vsLe >= 0 ? '+' : ''}${fmtEur(c.v.vsLe)} (${c.v.vsLePct >= 0 ? '+' : ''}${c.v.vsLePct.toFixed(1)}%) vs LE. Is dit een structurele kosten-shift of een eenmalige boeking?`,
+      hint: 'Structureel → engine ankert het nieuwe kostenniveau voor ROY · Eenmalig → maand valt buiten de baseline.',
+      suggestions: ['huur-indexatie', 'nieuwe leverancier', 'contract-aanpassing', 'payroll-verhoging', 'eenmalige boeking'],
       category: 'cost',
       weight: Math.abs(c.v.vsLe),
     })
   }
 
-  // Sorteer op weight en cap op 5 — in de praktijk komen er zelden meer dan 3
-  // tegelijk in beeld omdat de triggers materieel gekozen zijn.
-  return out.sort((a, b) => b.weight - a.weight).slice(0, 5)
+  // Sorteer op weight en cap op 4 — alleen de meest materiële afwijkingen.
+  return out.sort((a, b) => b.weight - a.weight).slice(0, 4)
 }
