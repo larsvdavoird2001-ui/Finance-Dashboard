@@ -616,7 +616,7 @@ export function AiChat() {
           width: 380, height: 560,
           background: 'var(--bg2)', border: '1px solid var(--bd)',
           borderRadius: 12, display: 'flex', flexDirection: 'column',
-          boxShadow: '0 8px 32px rgba(0,0,0,.45)',
+          boxShadow: '0 12px 40px rgba(0,0,0,.55), 0 4px 16px rgba(0,169,224,.18)',
           overflow: 'hidden',
         }}>
           {/* Header */}

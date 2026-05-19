@@ -221,7 +221,7 @@ function slideTitle(pptx: PptxGenJS, monthLabel: string, logoB64: string) {
     x: 0.5, y: 4.5, w: 4.5, h: 0.4,
     fontFace: 'Inter', fontSize: 14, color: 'FFFFFF',
   })
-  slide.addText('TPG Finance · Geautomatiseerd gegenereerd vanuit live data', {
+  slide.addText('TPG Business Control · Geautomatiseerd gegenereerd vanuit live data', {
     x: 0.5, y: PAGE_H - 0.6, w: 4.5, h: 0.3,
     fontFace: 'Inter', fontSize: 10, color: 'FFFFFF',
   })
@@ -1133,7 +1133,7 @@ export interface GeneratePptxInput {
 async function buildMonthPptxDeck(input: GeneratePptxInput): Promise<PptxGenJS> {
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
-  pptx.author = 'TPG Finance'
+  pptx.author = 'TPG Business Control'
   pptx.company = 'The People Group'
   pptx.title = `Maandrapportage ${input.monthLabel}`
   pptx.subject = `Maandrapportage ${input.month}`

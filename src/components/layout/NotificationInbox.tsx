@@ -133,7 +133,7 @@ export function NotificationInbox({ userEmail }: Props) {
             position: 'absolute', top: 'calc(100% + 6px)', right: 0,
             width: 360, maxHeight: 480, overflowY: 'auto',
             background: 'var(--bg2)', border: '1px solid var(--bd2)',
-            borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,.4)',
+            borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,.50), 0 4px 12px rgba(0,169,224,.14)',
             zIndex: 100,
           }}
         >

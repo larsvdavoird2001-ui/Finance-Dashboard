@@ -11,9 +11,9 @@ interface Props {
 }
 
 const items: { id: TabId; ic: string; label: string; group: string; adminOnly?: boolean; hideForViewer?: boolean }[] = [
-  // CFO Dashboards
-  { id: 'dashboard',  ic: '🏠', label: 'Executive Overview',   group: 'CFO Dashboard' },
-  { id: 'hours',      ic: '⏱',  label: 'Uren Dashboard',       group: 'CFO Dashboard' },
+  // Executive dashboards — bovenste groep in de sidebar
+  { id: 'dashboard',  ic: '🏠', label: 'Executive Overview',   group: 'Overview' },
+  { id: 'hours',      ic: '⏱',  label: 'Uren Dashboard',       group: 'Overview' },
   // Rapportage
   { id: 'budget',  ic: '🎯', label: 'Budget vs Actuals',  group: 'Rapportage' },
   { id: 'budgets', ic: '💼', label: 'Budgetten',          group: 'Rapportage' },
@@ -41,7 +41,7 @@ export function Sidebar({ active, onNav, userEmail, isAdmin, userRole, onSignOut
     <nav className="sb">
       <div className="sb-logo">
         <img src="/tpg-logo.png" alt="The People Group" className="sb-logo-img" />
-        <div className="sb-logo-sub">Finance · CFO</div>
+        <div className="sb-logo-sub">Business Control</div>
       </div>
       {groups.map(g => (
         <div key={g} className="sb-group">

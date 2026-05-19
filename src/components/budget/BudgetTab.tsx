@@ -275,7 +275,7 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
     const cellStyles: Record<string, XLSX.CellStyle> = {}
 
     // Rij 0: titel
-    rows.push(['Budget vs Actuals — TPG Finance'])
+    rows.push(['Budget vs Actuals — TPG Business Control'])
     merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } })
     cellStyles['A1'] = {
       font: { ...fontBase, sz: 16, bold: true, color: { rgb: BRAND_CYAN } },

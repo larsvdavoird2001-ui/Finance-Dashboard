@@ -158,7 +158,7 @@ function DescCell({
             whiteSpace: 'nowrap',
             paddingRight: isTruncatable && !expanded ? 20 : 7,
             transition: 'width 0.18s ease, background 0.12s',
-            boxShadow: expanded ? '0 4px 16px rgba(0,0,0,0.4)' : 'none',
+            boxShadow: expanded ? '0 4px 16px rgba(0,169,224,.18)' : 'none',
             position: 'relative', zIndex: 2,
           }}
           defaultValue={row.description}

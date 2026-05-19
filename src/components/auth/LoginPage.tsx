@@ -61,7 +61,7 @@ export function LoginPage({
     mode === 'magic'  ? 'Login via magic-link' :
                         'Wachtwoord vergeten?'
   const subtitle =
-    mode === 'signin' ? 'Log in met je TPG Finance-account.' :
+    mode === 'signin' ? 'Log in op TPG Business Control.' :
     mode === 'magic'  ? 'Vul je e-mail in en ontvang een eenmalige inlog-link.' :
                         'Vul je e-mail in en ontvang een reset-link.'
 
@@ -69,29 +69,44 @@ export function LoginPage({
     <div style={{
       height: '100vh', width: '100vw',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'linear-gradient(135deg, var(--bg0) 0%, #0a1530 50%, var(--bg0) 100%)',
+      background: 'linear-gradient(135deg, #00bcf0 0%, #00a9e0 45%, #0086b3 100%)',
       padding: 20,
+      position: 'relative',
+      overflow: 'hidden',
     }}>
+      {/* Subtiele radial overlays — mirrort de TPG website-hero */}
       <div style={{
-        width: '100%', maxWidth: 420,
-        background: 'var(--bg1)',
+        position: 'absolute', inset: 0,
+        background:
+          'radial-gradient(circle at 20% 20%, rgba(255,255,255,.15) 0%, transparent 50%), ' +
+          'radial-gradient(circle at 80% 80%, rgba(0,0,0,.10) 0%, transparent 50%)',
+        pointerEvents: 'none',
+      }} />
+      <div style={{
+        width: '100%', maxWidth: 440,
+        background: 'var(--bg2)',
         border: '1px solid var(--bd2)',
-        borderRadius: 14,
-        boxShadow: '0 20px 60px rgba(0,0,0,.5)',
-        padding: '36px 32px',
+        borderRadius: 16,
+        boxShadow: '0 24px 60px rgba(0,0,0,.45), 0 4px 16px rgba(0,169,224,.20)',
+        padding: '40px 36px',
+        position: 'relative',
+        zIndex: 1,
       }}>
-        {/* Logo */}
+        {/* Logo — wit invert zodat het cyan logo op de donkere card werkt */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <img
             src={logoUrl}
             alt="The People Group"
-            style={{ maxWidth: 220, height: 'auto', maxHeight: 56, objectFit: 'contain' }}
+            style={{
+              maxWidth: 240, height: 'auto', maxHeight: 64, objectFit: 'contain',
+              filter: 'brightness(0) invert(1)',
+            }}
           />
           <div style={{
-            marginTop: 14, fontSize: 13, color: 'var(--t3)',
-            fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase',
+            marginTop: 14, fontSize: 12, color: 'var(--brand)',
+            fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase',
           }}>
-            Finance · CFO Dashboard
+            TPG Business Control
           </div>
         </div>
 
@@ -242,7 +257,7 @@ export function LoginPage({
           fontSize: 10, color: 'var(--t3)', textAlign: 'center',
         }}>
           Geen account? Vraag de admin om een uitnodiging.
-          <br />TPG Finance Dashboard · {new Date().getFullYear()} The People Group
+          <br />TPG Business Control · {new Date().getFullYear()} The People Group
         </div>
       </div>
     </div>
