@@ -395,7 +395,7 @@ export function buildReflectionContext(args: {
 // dan vijf signalen sorteren we op weight en pakken de top 5; in de praktijk
 // zullen er per maand zelden meer dan 2-3 vragen tegelijk verschijnen.
 export function generateAiQuestions(ctx: ReflectionContext): AiQuestion[] {
-  const { month, bv, variances, fteDelta, fteCurrent, ftePrev, fteBudget, fteVsBudget, declarability, declarabilityPrevAvg } = ctx
+  const { variances, fteDelta, fteCurrent, fteBudget, fteVsBudget, declarability, declarabilityPrevAvg } = ctx
 
   const rev    = variances.find(v => v.key === 'netto_omzet')
   const dirCst = variances.find(v => v.key === 'directe_kosten')
