@@ -106,6 +106,16 @@ const GROWTH_TREND_WEIGHT = 0.15
  *  voorkomen wanneer recente maanden uitschieters bevatten. */
 const GROWTH_TREND_CAP_PER_MONTH = 0.05
 
+/** Budget-anchor weight: hoe sterk een handmatig aangepast budget doorwerkt
+ *  in de LE-forecast voor open maanden. 0 = pure driver (budget heeft geen
+ *  invloed), 1 = LE = budget (driver vervalt). 0.5 = halverwege — een budget-
+ *  bijstelling van +€100k tilt de LE met +€50k. Reden: de driver-engine geeft
+ *  een data-driven forecast op basis van actuals, maar als de CFO bewust het
+ *  budget bijwerkt is dat een plan-signaal dat in evenredige mate de LE moet
+ *  bewegen. Closed maanden gebruiken de actual en zijn niet onderhevig aan
+ *  deze blend. */
+const BUDGET_ANCHOR_WEIGHT = 0.5
+
 /** 2025-zelfde-maand → 2025-jaargemiddelde ratio. Wordt cached per (bv, key)
  *  in een Map binnen de hook zodat we niet bij elke forecast-call opnieuw
  *  itereren over alle 12 maanden. */
@@ -273,6 +283,28 @@ export function useLatestEstimate(currentDate?: Date) {
     return Math.pow(capped, distance * GROWTH_TREND_WEIGHT)
   }
 
+  // ── Budget-anchor blend ────────────────────────────────────────────────
+  /** Blendt een driver-forecast met de ingegeven budget-waarde. Behoudt
+   *  bestaande edge-cases:
+   *    - budget = 0 → pure driver (gebruiker heeft niets ingegeven)
+   *    - driver = 0 → val volledig terug op budget (geen driver-signaal,
+   *      consistent met de eerdere "no-history → budget"-fallback)
+   *    - beide ≠ 0 → gewogen gemiddelde via BUDGET_ANCHOR_WEIGHT
+   *  Zo werkt een budget-aanpassing evenredig door in LE en grafieken,
+   *  zonder dat de driver-methodiek (FTE × rev/FTE, kost-ratio's, seizoens-
+   *  overlay, drift, growth) zijn vorm verliest. */
+  const blendWithBudget = (driver: number, budget: number): number => {
+    if (budget === 0) return Math.round(driver)
+    if (driver === 0) return Math.round(budget)
+    return Math.round((1 - BUDGET_ANCHOR_WEIGHT) * driver + BUDGET_ANCHOR_WEIGHT * budget)
+  }
+
+  /** Som van sub-budgets voor een aggregate-key (voor cost-aggregate blend). */
+  const aggregateBudget = (bv: EntityName, month: string, aggrKey: string): number => {
+    const subs = SUBS_OF[aggrKey] ?? []
+    return subs.reduce((s, sk) => s + rawBudget(bv, month, sk), 0)
+  }
+
   // ── Driver-forecasts ────────────────────────────────────────────────────
 
   /** Totale revenue-LE voor een toekomstige maand op basis van drivers.
@@ -355,15 +387,16 @@ export function useLatestEstimate(currentDate?: Date) {
     return Math.round(avgPerMonthRev * seasonal * correction)
   }
 
-  /** Forecast voor een revenue-sub (gefactureerd vs allocatie) — totaal × split. */
+  /** Forecast voor een revenue-sub (gefactureerd vs allocatie) — totaal × split,
+   *  geblendt met het ingegeven budget zodat budget-aanpassingen doorwerken. */
   const forecastRevenueSub = (bv: EntityName, month: string, key: string): number => {
     if (bv === 'Holdings') return 0
     const total = forecastRevenueTotal(bv, month)
-    if (total === 0) return 0
     const window = recentClosedWindow(closedMonths, month, RECENCY_WINDOW)
     const split = revenueSubSplit({ bv: bv as BvId, window, getMonthly })
-    if (key === 'gefactureerde_omzet') return Math.round(total * split.gefactureerd)
-    if (key === 'omzet_periode_allocatie') return Math.round(total * split.allocatie)
+    const budgetVal = rawBudget(bv, month, key)
+    if (key === 'gefactureerde_omzet') return blendWithBudget(total * split.gefactureerd, budgetVal)
+    if (key === 'omzet_periode_allocatie') return blendWithBudget(total * split.allocatie, budgetVal)
     return 0
   }
 
@@ -443,10 +476,10 @@ export function useLatestEstimate(currentDate?: Date) {
   const forecastAggregateCost = (
     bv: EntityName, month: string, aggrKey: string, window: string[],
   ): number => {
+    const budgetForAggr = aggregateBudget(bv, month, aggrKey)
     if (window.length === 0) {
       // Geen historie — som van budgets per sub
-      const subs = SUBS_OF[aggrKey] ?? []
-      return subs.reduce((s, sk) => s + rawBudget(bv, month, sk), 0)
+      return budgetForAggr
     }
 
     // ── Directe kosten: cost-to-revenue ratio (margin-anchored) ──
@@ -469,7 +502,7 @@ export function useLatestEstimate(currentDate?: Date) {
         // Cost-to-revenue ratio is typisch negatief (costs zijn negatief).
         const ratio = costSum / revSum
         const revForecast = forecastRevenueTotal(bv, month)
-        return Math.round(revForecast * ratio)
+        return blendWithBudget(revForecast * ratio, budgetForAggr)
       }
       // Geen revenue-historie — val door naar FTE-pad
     }
@@ -484,8 +517,7 @@ export function useLatestEstimate(currentDate?: Date) {
       else { aggrSum += v; n++ }
     }
     if (n === 0) {
-      const subs = SUBS_OF[aggrKey] ?? []
-      return subs.reduce((s, sk) => s + rawBudget(bv, month, sk), 0)
+      return budgetForAggr
     }
     const seasonal = seasonalFactor(bv, month, aggrKey)
     // EBITDA-drift alleen op operationele_kosten — directe_kosten heeft al
@@ -501,10 +533,10 @@ export function useLatestEstimate(currentDate?: Date) {
       const aggrPerFte = aggrSum / fteSum
       const fteForecast = fteOfBv(bv as BvId, month)
       if (fteForecast > 0) {
-        return Math.round(aggrPerFte * fteForecast * seasonal * costDrift)
+        return blendWithBudget(aggrPerFte * fteForecast * seasonal * costDrift, budgetForAggr)
       }
     }
-    return Math.round((aggrSum / n) * seasonal * costDrift)
+    return blendWithBudget((aggrSum / n) * seasonal * costDrift, budgetForAggr)
   }
 
   /** Forecast voor één cost-sub: aggregaat-forecast × historical share.
@@ -520,7 +552,10 @@ export function useLatestEstimate(currentDate?: Date) {
     if (!aggrKey) return rawBudget(bv, month, key)
     const aggrForecast = forecastAggregateCost(bv, month, aggrKey, window)
     const share = historicalSubShare(bv, key, aggrKey, window)
-    return Math.round(aggrForecast * share)
+    // forecastAggregateCost is al budget-geblendt op aggregate-niveau. Daarna
+    // alsnog blenden op sub-niveau zorgt dat een sub-specifieke budget-edit
+    // (bv. enkel verkoopkosten omhoog) zichtbaar wordt in die ene sub-cell.
+    return blendWithBudget(aggrForecast * share, rawBudget(bv, month, key))
   }
 
   /** Centrale forecast-functie per sub-key. */

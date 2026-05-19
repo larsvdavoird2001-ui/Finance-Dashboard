@@ -521,7 +521,7 @@ export function BudgetsTab({ filter, onFilterChange }: Props) {
           src === 'actual'   ? 'Werkelijk (uit Maandafsluiting/OHW)' :
           src === 'override' ? 'Handmatige override uit eerder (read-only)' :
           src === 'budget'   ? 'Geen historische driver-basis — terugval op ingegeven budget' :
-                               'Driver-based forecast — FTE × werkdagen × declarability × €/uur (omzet) / run-rate per FTE (kosten) / budget (OpEx & A&A)'
+                               'Driver-based forecast — rev/FTE × FTE (omzet) / cost-to-revenue ratio of run-rate per FTE (kosten), 50/50 geblendt met het ingegeven budget zodat budget-aanpassingen evenredig doorwerken'
         }
       >
         {val === 0 ? '—' : fmt(val)}
@@ -863,7 +863,7 @@ export function BudgetsTab({ filter, onFilterChange }: Props) {
                 </div>
                 <div style={{ padding: '4px 14px', fontSize: 10, color: 'var(--t3)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(0,169,224,.2)', border: '1px solid var(--brand)', marginRight: 4, verticalAlign: 'middle' }} /> actual (Maandafsluiting/OHW)</span>
-                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(245,158,11,.15)', border: '1px solid var(--amber)', marginRight: 4, verticalAlign: 'middle' }} /> forecast (60% seizoen + 40% run-rate × FTE)</span>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(245,158,11,.15)', border: '1px solid var(--amber)', marginRight: 4, verticalAlign: 'middle' }} /> forecast (driver-based blended 50/50 met budget)</span>
                   <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'rgba(59,130,246,.15)', border: '1px solid var(--blue)', marginRight: 4, verticalAlign: 'middle' }} /> budget (geen forecast-signaal — terugval op ingegeven budget)</span>
                 </div>
                 <div style={{ overflowX: 'auto', marginTop: 4 }}>
