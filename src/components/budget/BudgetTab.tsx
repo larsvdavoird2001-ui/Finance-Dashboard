@@ -95,12 +95,31 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
     // (bv. YTD) achteraan zodat de chronologie klopt: Jan, Feb, Mar, Apr, ..., YTD.
     const single = [...base.filter(p => !!p.month), ...extra]
       .sort((a, b) => monthSortKey(a.month as string) - monthSortKey(b.month as string))
-    const aggregates = base.filter(p => !p.month)
+    // Aggregaten: YTD-26 krijgt dynamisch alle bekende single-maanden als
+    // ytdMonths zodat sommen en LE-reflectie automatisch meeschuiven zodra
+    // een volgende maand wordt afgesloten (i.p.v. hardgecodeerd Jan/Feb/Mar).
+    const aggregates: Period[] = base.filter(p => !p.month).map(agg => {
+      if (agg.id === 'ytd26' && single.length > 0) {
+        return { ...agg, ytdMonths: single.map(p => p.month as string) }
+      }
+      return agg
+    })
     return [...single, ...aggregates]
   }, [filter.year, finalizedMonths])
-  const defaultPeriod = filter.year === '2025' ? 'ytd25' : 'ytd26'
 
-  const [period,    setPeriod]    = useState<string>(defaultPeriod)
+  // Pak bij tab-open standaard de laatste maand-afsluiting (de meest recente
+  // finalized 2026-maand). Geen finalized 2026-maand? Val terug op YTD voor
+  // dat jaar. 2025 is een afgesloten jaar — YTD-25 is hier de juiste default.
+  const pickDefaultPeriod = (year: GlobalFilter['year'], finalized: typeof finalizedMonths): string => {
+    if (year === '2025') return 'ytd25'
+    const fin26 = finalized
+      .map(f => f.month)
+      .filter(m => m.endsWith('-26'))
+      .sort((a, b) => monthSortKey(a) - monthSortKey(b))
+    return fin26.length > 0 ? monthIdToCode(fin26[fin26.length - 1]) : 'ytd26'
+  }
+
+  const [period,    setPeriod]    = useState<string>(() => pickDefaultPeriod(filter.year, useFinStore.getState().finalized))
   const [colTypes,  setColTypes]  = useState<Set<ColType>>(new Set(['actual', 'budget', 'delta']))
 
   // Pending nav vanuit MaandChecklist na finalize → selecteer de zojuist
@@ -127,9 +146,12 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
   // functie, die stabiel is).
   useBudgetStore(s => s.overrides)
 
-  // When year changes, jump to that year's YTD period (prevents mismatch: 2026 periods shown while 2025 selected)
+  // Bij jaarwissel: pak opnieuw de laatste maand-afsluiting voor dat jaar
+  // (of YTD-fallback) — voorkomt dat een eerdere periode-keuze achterblijft
+  // op een jaar waar die ID niet bestaat.
   useEffect(() => {
-    setPeriod(filter.year === '2025' ? 'ytd25' : 'ytd26')
+    setPeriod(pickDefaultPeriod(filter.year, useFinStore.getState().finalized))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter.year])
 
   // Holdings zit alleen in de totalen / analyse wanneer geen specifieke BV

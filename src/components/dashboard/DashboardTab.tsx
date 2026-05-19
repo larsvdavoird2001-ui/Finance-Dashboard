@@ -207,11 +207,26 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   // filter.bv al naar de eigen BV; verbergen voorkomt dode klikken.
   const lockedBv = useLockedBv()
 
-  const [period, setPeriod] = useState<string>('Mar-26')
+  // Default = laatste maand-afsluiting. Bij tab-open en bij jaarwissel pakken
+  // we de meest recente finalized 2026-maand. Geen finalized 2026-maand? Val
+  // terug op de laatste calendar-known maand (Mar-26 in PERIODS_2026, of de
+  // hoogste dynamische periode). 2025 is fully closed → Dec-25.
+  const pickDefaultDashboardPeriod = (year2025: boolean): string => {
+    if (year2025) return 'Dec-25'
+    const fin26 = useFinStore.getState().finalized
+      .map(f => f.month)
+      .filter(m => m.endsWith('-26'))
+      .sort((a, b) => monthSortKey(a) - monthSortKey(b))
+    if (fin26.length > 0) return fin26[fin26.length - 1]
+    return ACTUAL_PERIODS_2026[ACTUAL_PERIODS_2026.length - 1] ?? 'Mar-26'
+  }
+
+  const [period, setPeriod] = useState<string>(() => pickDefaultDashboardPeriod(is2025))
   const [viewMode, setViewMode] = useState<ViewMode>('monthly')
 
   useEffect(() => {
-    setPeriod(is2025 ? 'Dec-25' : 'Mar-26')
+    setPeriod(pickDefaultDashboardPeriod(is2025))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [is2025])
 
   // Pending nav vanuit finalize-flow: als er een reviewMonth/month meekomt,
