@@ -794,17 +794,26 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
         </div>
         <div style={{ padding: '14px 18px' }}>
 
-          {/* Top-line: Δ EBITDA samengevat — met %-referentie en brutomarge-margin */}
+          {/* Top-line tegels — Actuals (absoluut, groot) + Δ vs budget eronder */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+            {/* Brutomarge */}
             <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: '1px solid var(--bd2)' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
-                Δ Brutomarge
+                Brutomarge
               </div>
-              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: deltaBrut >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {deltaBrut >= 0 ? '+' : ''}{fmt(deltaBrut)}
-                <span style={{ fontSize: 11, marginLeft: 6, color: 'var(--t3)', fontWeight: 400 }}>
-                  {(totalBudget['brutomarge'] ?? 0) !== 0 ? `(${deltaBrut >= 0 ? '+' : ''}${(deltaBrut / Math.abs(totalBudget['brutomarge']) * 100).toFixed(1)}%)` : ''}
-                </span>
+              <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--t1)' }}>
+                {fmt(totalActuals['brutomarge'] ?? 0)}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, fontFamily: 'var(--mono)', color: deltaBrut >= 0 ? 'var(--green)' : 'var(--red)', marginTop: 3 }}>
+                Δ {deltaBrut >= 0 ? '+' : ''}{fmt(deltaBrut)}
+                {(totalBudget['brutomarge'] ?? 0) !== 0 && (
+                  <span style={{ marginLeft: 4, color: 'var(--t3)', fontWeight: 400 }}>
+                    ({deltaBrut >= 0 ? '+' : ''}{(deltaBrut / Math.abs(totalBudget['brutomarge']) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 2 }}>
+                budget: <span style={{ fontFamily: 'var(--mono)' }}>{fmt(totalBudget['brutomarge'] ?? 0)}</span>
               </div>
               {isFinite(gmDelta) && (
                 <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 3 }}>
@@ -816,29 +825,46 @@ export function BudgetTab({ filter, onFilterChange }: Props) {
                 </div>
               )}
             </div>
+
+            {/* EBITDA — primaire tegel, iets prominenter */}
             <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: `1px solid ${deltaEbitda >= 0 ? 'var(--green)' : 'var(--red)'}` }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
-                Δ EBITDA
+                EBITDA
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)', color: deltaEbitda >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {deltaEbitda >= 0 ? '+' : ''}{fmt(deltaEbitda)}
-                <span style={{ fontSize: 11, marginLeft: 6, color: 'var(--t3)', fontWeight: 400 }}>
-                  {(totalBudget['ebitda'] ?? 0) !== 0 ? `(${deltaEbitda >= 0 ? '+' : ''}${(deltaEbitda / Math.abs(totalBudget['ebitda']) * 100).toFixed(1)}%)` : ''}
-                </span>
+              <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--t1)' }}>
+                {fmt(totalActuals['ebitda'] ?? 0)}
               </div>
-              <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 3 }}>
-                actuals {fmt(totalActuals['ebitda'] ?? 0)} · budget {fmt(totalBudget['ebitda'] ?? 0)}
+              <div style={{ fontSize: 12, fontWeight: 600, fontFamily: 'var(--mono)', color: deltaEbitda >= 0 ? 'var(--green)' : 'var(--red)', marginTop: 3 }}>
+                Δ {deltaEbitda >= 0 ? '+' : ''}{fmt(deltaEbitda)}
+                {(totalBudget['ebitda'] ?? 0) !== 0 && (
+                  <span style={{ marginLeft: 4, color: 'var(--t3)', fontWeight: 400 }}>
+                    ({deltaEbitda >= 0 ? '+' : ''}{(deltaEbitda / Math.abs(totalBudget['ebitda']) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 2 }}>
+                budget: <span style={{ fontFamily: 'var(--mono)' }}>{fmt(totalBudget['ebitda'] ?? 0)}</span>
               </div>
             </div>
+
+            {/* EBIT */}
             <div style={{ padding: '10px 12px', borderRadius: 7, background: 'var(--bg3)', border: '1px solid var(--bd2)' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 4 }}>
-                Δ EBIT
+                EBIT
               </div>
-              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: deltaEbit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {deltaEbit >= 0 ? '+' : ''}{fmt(deltaEbit)}
-                <span style={{ fontSize: 11, marginLeft: 6, color: 'var(--t3)', fontWeight: 400 }}>
-                  {(totalBudget['ebit'] ?? 0) !== 0 ? `(${deltaEbit >= 0 ? '+' : ''}${(deltaEbit / Math.abs(totalBudget['ebit']) * 100).toFixed(1)}%)` : ''}
-                </span>
+              <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--t1)' }}>
+                {fmt(totalActuals['ebit'] ?? 0)}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, fontFamily: 'var(--mono)', color: deltaEbit >= 0 ? 'var(--green)' : 'var(--red)', marginTop: 3 }}>
+                Δ {deltaEbit >= 0 ? '+' : ''}{fmt(deltaEbit)}
+                {(totalBudget['ebit'] ?? 0) !== 0 && (
+                  <span style={{ marginLeft: 4, color: 'var(--t3)', fontWeight: 400 }}>
+                    ({deltaEbit >= 0 ? '+' : ''}{(deltaEbit / Math.abs(totalBudget['ebit']) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 2 }}>
+                budget: <span style={{ fontFamily: 'var(--mono)' }}>{fmt(totalBudget['ebit'] ?? 0)}</span>
               </div>
             </div>
           </div>

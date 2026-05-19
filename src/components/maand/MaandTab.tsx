@@ -34,6 +34,7 @@ import { useLockedBv } from '../../lib/permissions'
 import { ExportOptionsModal } from './ExportOptionsModal'
 import { MaandChecklist } from './MaandChecklist'
 import { MaandLeHistory } from './MaandLeHistory'
+import { MaandafsluitingCheckPanel } from './MaandafsluitingCheckPanel'
 import { restoreKeysFromBackups, listBackups } from '../../lib/localBackup'
 import { supabase, supabaseEnabled } from '../../lib/supabase'
 
@@ -2000,6 +2001,9 @@ export function MaandTab({ filter: _filter }: Props) {
                 {warnings.map((w, i) => <div key={i} style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 2 }}>• {w}</div>)}
               </div>
             )}
+
+            {/* Controle vs Excel maandafsluiting — alle 2025/2026 maand × BV combinaties */}
+            <MaandafsluitingCheckPanel currentMonth={month} />
 
             {/* Input table */}
             <div className="card">

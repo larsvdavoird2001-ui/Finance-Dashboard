@@ -12,12 +12,16 @@ import {
 } from '../lib/db'
 
 // Financieel resultaat & vennootschapsbelasting per BV/maand — bekende
-// actuals-waardes uit de P&L (plData 2026). Jan/Feb worden voor-ingevuld
-// zodat de user ze alleen hoeft te bevestigen / aanpassen; Mar start op 0.
-const FIN_RES_JAN: Record<ClosingBv, number> = { Consultancy: -512,  Projects: -242,  Software: -102,   Holdings: -37559 }
-const FIN_RES_FEB: Record<ClosingBv, number> = { Consultancy: -382,  Projects: -196,  Software: -7431,  Holdings: -37135 }
-const VPB_JAN:     Record<ClosingBv, number> = { Consultancy: 0,     Projects: 0,     Software: 0,      Holdings: 0      }
-const VPB_FEB:     Record<ClosingBv, number> = { Consultancy: 0,     Projects: 0,     Software: 0,      Holdings: 0      }
+// actuals-waardes uit de P&L (plData 2026). Jan-Apr worden voor-ingevuld
+// zodat de user ze alleen hoeft te bevestigen / aanpassen.
+const FIN_RES_JAN: Record<ClosingBv, number> = { Consultancy: -512,   Projects: -242,   Software: -102,    Holdings: -37559  }
+const FIN_RES_FEB: Record<ClosingBv, number> = { Consultancy: -382,   Projects: -196,   Software: -7431,   Holdings: -37135  }
+const FIN_RES_MAR: Record<ClosingBv, number> = { Consultancy: -3700,  Projects: -2632,  Software: 6848,    Holdings: -40718  }
+const FIN_RES_APR: Record<ClosingBv, number> = { Consultancy: -444,   Projects: -188,   Software: -78,     Holdings: -112089 }
+const VPB_JAN:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
+const VPB_FEB:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
+const VPB_MAR:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
+const VPB_APR:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
 
 // Initial closing data sourced from P02.2026 Maandrapportage actuals
 const INITIAL_ENTRIES: ClosingEntry[] = [
@@ -71,29 +75,54 @@ const INITIAL_ENTRIES: ClosingEntry[] = [
     financieelResultaat: FIN_RES_FEB.Software, vennootschapsbelasting: VPB_FEB.Software,
     remark: '',
   },
-  // ── March 2026 (open / empty template) ───────────────────────────────────
+  // ── March 2026 (actuals uit maandafsluiting) ─────────────────────────────
   {
     id: 'c-mar26', bv: 'Consultancy', month: 'Mar-26',
-    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    factuurvolume: 1068056, debiteuren: 0, ohwMutatie: -44348,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: 0, vennootschapsbelasting: 0,
+    financieelResultaat: FIN_RES_MAR.Consultancy, vennootschapsbelasting: VPB_MAR.Consultancy,
     remark: '',
   },
   {
     id: 'p-mar26', bv: 'Projects', month: 'Mar-26',
-    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    factuurvolume: 698848, debiteuren: 0, ohwMutatie: 14646,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: 0, vennootschapsbelasting: 0,
+    financieelResultaat: FIN_RES_MAR.Projects, vennootschapsbelasting: VPB_MAR.Projects,
     remark: '',
   },
   {
     id: 's-mar26', bv: 'Software', month: 'Mar-26',
-    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    factuurvolume: 203630, debiteuren: 0, ohwMutatie: 49665,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: 0, vennootschapsbelasting: 0,
+    financieelResultaat: FIN_RES_MAR.Software, vennootschapsbelasting: VPB_MAR.Software,
+    remark: '',
+  },
+  // ── April 2026 (actuals uit maandafsluiting) ─────────────────────────────
+  {
+    id: 'c-apr26', bv: 'Consultancy', month: 'Apr-26',
+    factuurvolume: 1113614, debiteuren: 0, ohwMutatie: -175592,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_APR.Consultancy, vennootschapsbelasting: VPB_APR.Consultancy,
+    remark: '',
+  },
+  {
+    id: 'p-apr26', bv: 'Projects', month: 'Apr-26',
+    factuurvolume: 477026, debiteuren: 0, ohwMutatie: 166062,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_APR.Projects, vennootschapsbelasting: VPB_APR.Projects,
+    remark: '',
+  },
+  {
+    id: 's-apr26', bv: 'Software', month: 'Apr-26',
+    factuurvolume: 272008, debiteuren: 0, ohwMutatie: 110015,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_APR.Software, vennootschapsbelasting: VPB_APR.Software,
     remark: '',
   },
   // ── Holdings: geen OHW/factuurvolume flow, alleen kosten-invoer ─────
@@ -118,7 +147,15 @@ const INITIAL_ENTRIES: ClosingEntry[] = [
     factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: 0, vennootschapsbelasting: 0,
+    financieelResultaat: FIN_RES_MAR.Holdings, vennootschapsbelasting: VPB_MAR.Holdings,
+    remark: '',
+  },
+  {
+    id: 'h-apr26', bv: 'Holdings', month: 'Apr-26',
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_APR.Holdings, vennootschapsbelasting: VPB_APR.Holdings,
     remark: '',
   },
 ]
@@ -129,11 +166,15 @@ const INITIAL_ENTRIES: ClosingEntry[] = [
 export function getFinResDefault(bv: ClosingBv, month: string): number {
   if (month === 'Jan-26') return FIN_RES_JAN[bv] ?? 0
   if (month === 'Feb-26') return FIN_RES_FEB[bv] ?? 0
+  if (month === 'Mar-26') return FIN_RES_MAR[bv] ?? 0
+  if (month === 'Apr-26') return FIN_RES_APR[bv] ?? 0
   return 0
 }
 export function getVpbDefault(bv: ClosingBv, month: string): number {
   if (month === 'Jan-26') return VPB_JAN[bv] ?? 0
   if (month === 'Feb-26') return VPB_FEB[bv] ?? 0
+  if (month === 'Mar-26') return VPB_MAR[bv] ?? 0
+  if (month === 'Apr-26') return VPB_APR[bv] ?? 0
   return 0
 }
 

@@ -4,6 +4,7 @@ import '../../lib/chartSetup'
 import { ytdActuals2025 } from '../../data/plData'
 import { monthlyActuals2025, monthlyBudget2025, MONTHS_2025_LABELS } from '../../data/plData2025'
 import type { EntityName } from '../../data/plData'
+import { OHW_TOTAAL_2025 } from '../../data/ohwTotaal2025'
 import { hoursData2026, hoursData2025, MONTHS_2025 } from '../../data/hoursData'
 import { fmt } from '../../lib/format'
 import type { BvId, ClosingBv, GlobalFilter } from '../../data/types'
@@ -259,8 +260,21 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   const ohwEntitiesFiltered = filter.bv === 'all'
     ? ohwData2026.entities
     : ohwData2026.entities.filter(e => e.entity === filter.bv)
-  for (const m of closedOhwMonths) {
-    wipByMonth[m] = ohwEntitiesFiltered.reduce((sum, e) => sum + (e.totaalOnderhanden[m] ?? 0), 0)
+  if (is2025) {
+    // 2025 OHW Totaal: gebruik OHW_TOTAAL_2025 (uit OHW Excel)
+    // i.p.v. ohwData2026 (dat alleen Dec-25 als opening-maand bevat).
+    const activeBvKeys = filter.bv === 'all'
+      ? ['Consultancy', 'Projects', 'Software']
+      : [filter.bv as string]
+    for (const m of MONTHS_2025_LABELS) {
+      let sum = 0
+      for (const bv of activeBvKeys) sum += OHW_TOTAAL_2025[bv]?.[m] ?? 0
+      if (sum > 0) wipByMonth[m] = sum
+    }
+  } else {
+    for (const m of closedOhwMonths) {
+      wipByMonth[m] = ohwEntitiesFiltered.reduce((sum, e) => sum + (e.totaalOnderhanden[m] ?? 0), 0)
+    }
   }
 
   // ── Data selection: monthly or YTD ──────────────────────────────────────
@@ -344,13 +358,23 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   // closing_finalized fetch leeg terugkomt) misleidend €0 ondanks dat de
   // OHW-cijfers gewoon in Supabase staan.
   const prevPeriod = ACTUAL_PERIODS[ACTUAL_PERIODS.indexOf(period) - 1]
-  const wipTotal = ohwEntitiesFiltered.reduce(
-    (sum, e) => sum + (e.totaalOnderhanden[period] ?? 0), 0,
-  )
-  const wipPrev = prevPeriod
-    ? ohwEntitiesFiltered.reduce(
-        (sum, e) => sum + (e.totaalOnderhanden[prevPeriod] ?? 0), 0,
+  // 2025 KPI-tile leest uit OHW_TOTAAL_2025 (uit OHW Excel) i.p.v.
+  // ohwData2026 (dat geen 2025-historie heeft buiten Dec-25).
+  const wipTotal = is2025
+    ? (filter.bv === 'all'
+        ? ['Consultancy', 'Projects', 'Software'].reduce((s, bv) => s + (OHW_TOTAAL_2025[bv]?.[period] ?? 0), 0)
+        : (OHW_TOTAAL_2025[filter.bv as string]?.[period] ?? 0))
+    : ohwEntitiesFiltered.reduce(
+        (sum, e) => sum + (e.totaalOnderhanden[period] ?? 0), 0,
       )
+  const wipPrev = prevPeriod
+    ? (is2025
+        ? (filter.bv === 'all'
+            ? ['Consultancy', 'Projects', 'Software'].reduce((s, bv) => s + (OHW_TOTAAL_2025[bv]?.[prevPeriod] ?? 0), 0)
+            : (OHW_TOTAAL_2025[filter.bv as string]?.[prevPeriod] ?? 0))
+        : ohwEntitiesFiltered.reduce(
+            (sum, e) => sum + (e.totaalOnderhanden[prevPeriod] ?? 0), 0,
+          ))
     : 0
   const wipDelta = wipTotal - wipPrev
 

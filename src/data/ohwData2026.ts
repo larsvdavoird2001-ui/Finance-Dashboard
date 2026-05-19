@@ -52,7 +52,7 @@ export const projectsData2026: OhwEntityData = {
   ],
   totaalOnderhanden: { "Dec-25": 952410, "Jan-26": 1132708, "Feb-26": 1240598, "Mar-26": 150000, "Apr-26": 133333, "May-26": 116667, "Jun-26": 100000, "Jul-26": 83333, "Aug-26": 66667, "Sep-26": 50000, "Oct-26": 33333, "Nov-26": 16667, "Dec-26": null },
   debiteuren: { "Dec-25": 979010, "Jan-26": 658811, "Feb-26": 727562 },
-  factuurvolume: { "Dec-25": 640017, "Jan-26": 364790, "Feb-26": 418811 },
+  factuurvolume: { "Dec-25": 640017, "Jan-26": 364790, "Feb-26": 419601, "Mar-26": 698848, "Apr-26": 477026 },
   mutatieOhw: { "Dec-25": -952410, "Jan-26": 180298, "Feb-26": 107890, "Mar-26": -1090598, "Apr-26": -16667, "May-26": -16667, "Jun-26": -16667, "Jul-26": -16667, "Aug-26": -16667, "Sep-26": -16667, "Oct-26": -16667, "Nov-26": -16667, "Dec-26": -16667 },
   nettoOmzetVoorIC: { "Dec-25": -312393, "Jan-26": 545088, "Feb-26": 526701, "Mar-26": -1090598, "Apr-26": -16667, "May-26": -16667, "Jun-26": -16667, "Jul-26": -16667, "Aug-26": -16667, "Sep-26": -16667, "Oct-26": -16667, "Nov-26": -16667, "Dec-26": -16667 },
   icVerrekening: [
@@ -125,7 +125,7 @@ export const consultancyData2026: OhwEntityData = {
   ],
   totaalOnderhanden: { "Dec-25": 272868, "Jan-26": 490556, "Feb-26": 695855 },
   debiteuren: { "Dec-25": 1446840, "Jan-26": 1021167, "Feb-26": 1422775 },
-  factuurvolume: { "Dec-25": 893924, "Jan-26": 719770, "Feb-26": 797454 },
+  factuurvolume: { "Dec-25": 893924, "Jan-26": 719770, "Feb-26": 797454, "Mar-26": 1068056, "Apr-26": 1113614 },
   mutatieOhw: { "Jan-26": 217688, "Feb-26": 205300, "Mar-26": -695855 },
   nettoOmzetVoorIC: { "Dec-25": 893924, "Jan-26": 937458, "Feb-26": 1002754, "Mar-26": -695855 },
   icVerrekening: [
@@ -224,7 +224,7 @@ export const softwareData2026: OhwEntityData = {
   ],
   totaalOnderhanden: { "Dec-25": 446602, "Jan-26": 411600, "Feb-26": 404600 },
   debiteuren: { "Dec-25": 863796, "Jan-26": 654225, "Feb-26": 737578 },
-  factuurvolume: { "Dec-25": 1009773, "Jan-26": 493761, "Feb-26": 261030 },
+  factuurvolume: { "Dec-25": 1109773, "Jan-26": 493761, "Feb-26": 261030, "Mar-26": 203630, "Apr-26": 272008 },
   mutatieOhw: { "Jan-26": -35002, "Feb-26": -7000, "Mar-26": -404600 },
   nettoOmzetVoorIC: { "Dec-25": 1009773, "Jan-26": 290246, "Feb-26": 299092, "Mar-26": 861451 },
   icVerrekening: [
