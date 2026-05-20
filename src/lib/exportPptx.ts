@@ -641,7 +641,7 @@ function slideManagementSummary(
 }
 
 function slideKpiDashboard(
-  pptx: PptxGenJS, monthLabel: string, month: string,
+  pptx: PptxGenJS, monthLabel: string,
   snaps: BvSnapshot[], closingEntries: ClosingEntry[],
 ) {
   const slide = pptx.addSlide()
@@ -855,7 +855,7 @@ function slideMargeTrend(
 }
 
 function slideLatestEstimate(
-  pptx: PptxGenJS, monthLabel: string, ds: ReportDataset, snaps: BvSnapshot[], ytdMonths: string[], num: number,
+  pptx: PptxGenJS, monthLabel: string, snaps: BvSnapshot[], ytdMonths: string[], num: number,
 ) {
   const slide = pptx.addSlide()
   slide.background = { color: C.page }
@@ -1494,10 +1494,10 @@ async function buildMonthPptxDeck(input: GeneratePptxInput): Promise<PptxGenJS> 
   slideToc(pptx)
 
   slideManagementSummary(pptx, input.monthLabel, input.month, snaps, input.closingEntries, input.ohwData2026)
-  slideKpiDashboard(pptx, input.monthLabel, input.month, snaps, input.closingEntries)
+  slideKpiDashboard(pptx, input.monthLabel, snaps, input.closingEntries)
   slideOmzetTrend(pptx, input.monthLabel, ds, snaps, input.ytdMonths, 5)
   slideMargeTrend(pptx, input.monthLabel, ds, snaps, input.ytdMonths, 6)
-  slideLatestEstimate(pptx, input.monthLabel, ds, snaps, input.ytdMonths, 7)
+  slideLatestEstimate(pptx, input.monthLabel, snaps, input.ytdMonths, 7)
   slideDeclarabiliteit(pptx, input.monthLabel, ds, snaps, input.ytdMonths, 8)
   slideOhwStatus(pptx, input.monthLabel, input.month, input.ohwData2026, 9)
   slideFacturatiePipeline(pptx, input.monthLabel, input.month, input.importRecords, 10)
