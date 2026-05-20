@@ -6,6 +6,7 @@ import type { CostBreakdown } from '../store/useCostBreakdownStore'
 import type { EvidenceEntry } from '../lib/db'
 import { buildMonthPptxBlob, monthLabelFromCode } from './exportPptx'
 import type { ReportDataset, AiAnalysisEntry } from './exportPptx'
+import type { InternalHoursEntry } from './parseInternalHours'
 
 export interface MonthBundleInput {
   month: string                  // "Mar-26"
@@ -227,6 +228,8 @@ export interface FullMonthReportInput {
   reportData?: ReportDataset
   /** AI-duiding (CFO-commentary) per BV — voor de PowerPoint AI-duiding. */
   aiAnalyses?: AiAnalysisEntry[]
+  /** Interne uren — gedetailleerde uitsplitsing niet-declarabele uren. */
+  internalHours?: InternalHoursEntry[]
 }
 
 /** Sla de closing-entries op in een leesbaar Excel-formaat.
@@ -594,10 +597,12 @@ export async function buildFullMonthReportZip(input: FullMonthReportInput): Prom
         monthLabel:      monthLabelFromCode(input.month),
         ytdMonths:       input.ytdMonths,
         closingEntries:  input.closingEntries,
+        ohwData2025:     input.ohwData2025,
         ohwData2026:     input.ohwData2026,
         importRecords:   input.importRecords,
         data:            input.reportData,
         aiAnalyses:      input.aiAnalyses,
+        internalHours:   input.internalHours,
       })
       const pptxBuf = await pptxBlob.arrayBuffer()
       root.file(`Maandrapportage_${safeName(input.month)}.pptx`, pptxBuf)

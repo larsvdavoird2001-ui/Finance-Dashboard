@@ -26,7 +26,7 @@ const SLOT_DESTINATION: Record<string, string> = {
 
 /** Slots die uren-data verwerken i.p.v. financiële bedragen. Weergave schakelt
  *  daarmee over van € naar 'u' en verbergt de Δ vs-budget-achtige summaries. */
-const HOURS_SLOTS = new Set(['geschreven_uren'])
+const HOURS_SLOTS = new Set(['geschreven_uren', 'interne_uren'])
 
 /** Formatteer een uren-getal voor in de modal. */
 function fmtU(v: number): string {

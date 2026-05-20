@@ -15,6 +15,8 @@ import type { ClosingEntry, BvId, OhwYearData, ImportRecord, HoursRecord } from 
 import type { EntityName } from '../data/plData'
 import { monthlyActuals2025 } from '../data/plData2025'
 import { hoursData2025, hoursData2026, MONTHS_2025, MONTHS_2026 } from '../data/hoursData'
+import type { InternalHoursEntry } from './parseInternalHours'
+import { INTERNAL_HOURS_CATEGORIES, INTERNAL_CAT_KEYS } from './parseInternalHours'
 
 // ─── TPG light theme ────────────────────────────────────────────────────
 const C = {
@@ -283,13 +285,19 @@ function staticHours(bv: BvId, monthCode: string): HoursRecord | undefined {
   const data = monthCode.endsWith('-25') ? hoursData2025 : hoursData2026
   return data.find(x => x.bv === bv && x.month === monthCode)
 }
-function declarableMonth(ds: ReportDataset, bv: BvId, monthCode: string): number {
+/** Echte uren-entry alleen als die zinnige werk-uren bevat — anders valt
+ *  de helper terug op de seed-dataset zodat de grafiek nooit leeg blijft. */
+function realHours(ds: ReportDataset, bv: BvId, monthCode: string) {
   const h = ds.hours[bv]?.[monthCode]
+  return h && (h.declarable || 0) + (h.internal || 0) > 0 ? h : null
+}
+function declarableMonth(ds: ReportDataset, bv: BvId, monthCode: string): number {
+  const h = realHours(ds, bv, monthCode)
   if (h) return h.declarable
   return staticHours(bv, monthCode)?.declarable ?? 0
 }
 function workedMonth(ds: ReportDataset, bv: BvId, monthCode: string): number {
-  const h = ds.hours[bv]?.[monthCode]
+  const h = realHours(ds, bv, monthCode)
   if (h) return h.declarable + h.internal
   return staticHours(bv, monthCode)?.written ?? 0
 }
@@ -305,19 +313,33 @@ function declPctYtd(ds: ReportDataset, bv: BvId, months: string[]): number {
 
 /** Capaciteitsverdeling in uren — productief / verlof / improductief / ziek —
  *  zelfde methodiek als de Uren-tab (noemer = totale capaciteit incl.
- *  afwezigheid en missing uren). Null als er geen geüploade uren zijn. */
-interface CapacitySplit { productive: number; leave: number; nonproductive: number; sick: number; total: number }
+ *  afwezigheid en missing uren).
+ *
+ *  `isReal` = gebaseerd op geüploade SAP-uren (verlof/ziekte apart bekend).
+ *  Zonder upload valt de functie terug op de seed-dataset, zodat het deck
+ *  altijd capaciteitscijfers toont — dan zit verlof+ziekte samen in `leave`. */
+interface CapacitySplit {
+  productive: number; leave: number; nonproductive: number; sick: number
+  total: number; isReal: boolean
+}
 function capacitySplit(ds: ReportDataset, bv: BvId, monthCode: string): CapacitySplit | null {
   const h = ds.hours[bv]?.[monthCode]
-  if (!h) return null
-  const work = h.declarable + h.internal
-  const verlof = h.vakantie + h.overigVerlof
-  const ziekte = h.ziekte
-  const baseCap = staticHours(bv, monthCode)?.capacity ?? 0
-  const cap = Math.max(baseCap, work + verlof + ziekte)
-  const missing = bv === 'Consultancy' ? Math.max(0, cap - (work + verlof + ziekte)) : 0
-  const total = work + verlof + ziekte + missing
-  return { productive: h.declarable, leave: verlof, nonproductive: h.internal + missing, sick: ziekte, total }
+  const work = h ? (h.declarable || 0) + (h.internal || 0) : 0
+  if (h && work > 0) {
+    const verlof = (h.vakantie || 0) + (h.overigVerlof || 0)
+    const ziekte = h.ziekte || 0
+    const baseCap = staticHours(bv, monthCode)?.capacity ?? 0
+    const cap = Math.max(baseCap, work + verlof + ziekte)
+    const missing = bv === 'Consultancy' ? Math.max(0, cap - (work + verlof + ziekte)) : 0
+    const total = work + verlof + ziekte + missing
+    return { productive: h.declarable, leave: verlof, nonproductive: h.internal + missing, sick: ziekte, total, isReal: true }
+  }
+  // Fallback: seed-dataset — geen verlof/ziekte-uitsplitsing beschikbaar.
+  const r = staticHours(bv, monthCode)
+  if (!r || r.written <= 0) return null
+  const cap = Math.max(r.capacity, r.written)
+  const absence = Math.max(0, cap - r.written)
+  return { productive: r.declarable, leave: absence, nonproductive: r.nonDeclarable, sick: 0, total: cap, isReal: false }
 }
 /** Capaciteit-budget% (uit de Budgetten-tab) voor één categorie. 0/leeg = geen budget. */
 const CAP_BUDGET_KEY: Record<string, string> = {
@@ -327,6 +349,32 @@ const CAP_BUDGET_KEY: Record<string, string> = {
 function capBudgetPct(ds: ReportDataset, bv: BvId, monthCode: string, cat: string): number | null {
   const v = ds.budget[bv]?.[monthCode]?.[CAP_BUDGET_KEY[cat]]
   return v == null || v === 0 ? null : v
+}
+
+// ─── Maand-tijdreeks-helpers (2025 + 2026 gecombineerd) ─────────────────
+const MONTHS_ALL = [...MONTHS_2025, ...MONTHS_2026]
+
+/** Korte maandlabel voor een code als 'May-25' → 'Mei 25'. */
+function monthShortLabel(code: string): string {
+  const idx = MONTHS_ALL.indexOf(code)
+  if (idx < 0) return code
+  return `${MONTH_LABELS_SHORT[idx % 12]} ${code.slice(-2)}`
+}
+/** 12-maands venster dat eindigt op `month` (geen toekomstige maanden). */
+function trailing12(month: string): string[] {
+  const idx = MONTHS_ALL.indexOf(month)
+  if (idx < 0) return MONTHS_ALL.slice(-12)
+  return MONTHS_ALL.slice(Math.max(0, idx - 11), idx + 1)
+}
+/** OHW-veldwaarde voor een entiteit in een maand — kiest 2025- of 2026-data
+ *  op basis van het maand-suffix. */
+function ohwField(
+  ohw25: OhwYearData, ohw26: OhwYearData, entity: string, monthCode: string,
+  field: 'totaalOnderhanden' | 'debiteuren' | 'factuurvolume',
+): number {
+  const yd = monthCode.endsWith('-25') ? ohw25 : ohw26
+  const e = yd.entities.find(x => x.entity === entity)
+  return e?.[field]?.[monthCode] ?? 0
 }
 
 // ─── BV-snapshot: alle kerncijfers per BV, één keer berekend ─────────────
@@ -522,6 +570,71 @@ function buildBvNarrative(s: BvSnapshot): string {
   return out.join(' ')
 }
 
+// ─── Interne uren — leegloop & niet-declarabel detail ───────────────────
+
+const fmtHrs = (n: number) => Math.round(n).toLocaleString('nl-NL') + ' u'
+
+interface InternalHoursAgg {
+  hasData: boolean
+  months: string[]
+  catYtd: Record<string, number>
+  total: number
+  leegloopPct: number
+  leegloopByMonth: number[]
+  leegloopTrend: number
+  leegloopFcRest: number
+  perBv: { bv: BvId; tot: number; leeg: number; leegPct: number }[]
+  topEmp: { naam: string; leegloop: number }[]
+}
+
+function aggInternalHours(entries: InternalHoursEntry[] | undefined): InternalHoursAgg {
+  const ent = (entries ?? []).filter(e => e.month.endsWith('-26'))
+  const months = MONTHS_2026.filter(m => ent.some(e => e.month === m))
+  const catYtd: Record<string, number> = {}
+  for (const k of INTERNAL_CAT_KEYS) catYtd[k] = ent.reduce((s, e) => s + (e.categories[k] ?? 0), 0)
+  const total = Object.values(catYtd).reduce((s, v) => s + v, 0)
+  const leegloopByMonth = months.map(m =>
+    ent.filter(e => e.month === m).reduce((s, e) => s + (e.categories.leegloop ?? 0), 0))
+  const perBv = BVS.map(bv => {
+    const be = ent.filter(e => e.bv === bv)
+    const tot = be.reduce((s, e) => s + INTERNAL_CAT_KEYS.reduce((ss, k) => ss + (e.categories[k] ?? 0), 0), 0)
+    const leeg = be.reduce((s, e) => s + (e.categories.leegloop ?? 0), 0)
+    return { bv, tot, leeg, leegPct: tot > 0 ? leeg / tot * 100 : 0 }
+  })
+  const empMap = new Map<string, number>()
+  for (const e of ent) for (const emp of e.employees) {
+    empMap.set(emp.naam, (empMap.get(emp.naam) ?? 0) + emp.leegloop)
+  }
+  const topEmp = [...empMap.entries()].map(([naam, leegloop]) => ({ naam, leegloop }))
+    .sort((a, b) => b.leegloop - a.leegloop).slice(0, 5)
+  const lastIdx = months.length ? Math.max(...months.map(m => MONTHS_2026.indexOf(m))) : -1
+  const remaining = lastIdx >= 0 ? 11 - lastIdx : 0
+  const fcMonth = months.length ? catYtd.leegloop / months.length : 0
+  return {
+    hasData: ent.length > 0 && total > 0,
+    months, catYtd, total,
+    leegloopPct: total > 0 ? catYtd.leegloop / total * 100 : 0,
+    leegloopByMonth,
+    leegloopTrend: leegloopByMonth.length >= 2
+      ? leegloopByMonth[leegloopByMonth.length - 1] - leegloopByMonth[0] : 0,
+    leegloopFcRest: fcMonth * remaining,
+    perBv, topEmp,
+  }
+}
+
+/** Bondige leegloop-bevinding voor het totaaloverzicht. */
+function internalHoursFinding(agg: InternalHoursAgg): Finding | null {
+  if (!agg.hasData) return null
+  const dir = agg.leegloopTrend < -1 ? 'daalt' : agg.leegloopTrend > 1 ? 'stijgt' : 'is stabiel'
+  return {
+    severity: agg.leegloopTrend < -1 ? 'good' : agg.leegloopPct > 45 ? 'warn' : 'good',
+    text: `Interne uren: ${agg.leegloopPct.toFixed(0)}% is leegloop / niet-declarabel (${fmtHrs(agg.catYtd.leegloop)} YTD) en ${dir} — directe hefboom op declarabiliteit en marge.`,
+    advice: agg.leegloopPct > 40
+      ? 'Stuur op de leegloop: koppel onbenutte capaciteit aan opdrachten of commerciële inzet.'
+      : undefined,
+  }
+}
+
 // ─── Slide builders ─────────────────────────────────────────────────────
 
 function slideTitle(pptx: PptxGenJS, monthLabel: string, logoB64: string) {
@@ -568,7 +681,7 @@ function slideToc(pptx: PptxGenJS) {
   const items: Array<[string, string[]]> = [
     ['Kern',         ['Managementsamenvatting', 'KPI-dashboard', 'Omzetontwikkeling', 'Marge & EBITDA']],
     ['Vooruitblik',  ['Latest Estimate FY 2026', 'Scenario-bandbreedte']],
-    ['Operationeel', ['Declarabiliteit', 'Onderhanden werk', 'Facturatie-pipeline']],
+    ['Operationeel', ['Declarabiliteit', 'Interne uren & leegloop', 'Onderhanden werk', 'Facturatie-pipeline']],
     ['Verdieping',   ['Per business unit + AI-duiding', 'Balansposities', 'Totaaloverzicht & advies']],
   ]
   const colW = (PAGE_W - 2 * MARGIN) / items.length
@@ -974,20 +1087,16 @@ function slideDeclarabiliteit(
   })
 
   // ── Capaciteitsverdeling — actual vs budget, maand + YTD ──
-  const cats = [
-    { key: 'productive',    label: 'Productief (declarabel)', higherIsBetter: true },
-    { key: 'nonproductive', label: 'Improductief / intern',   higherIsBetter: false },
-    { key: 'leave',         label: 'Verlof',                  higherIsBetter: false },
-    { key: 'sick',          label: 'Ziekte',                  higherIsBetter: false },
-  ] as const
   const periodCapacity = (months: string[]) => {
     const agg: Record<string, number> = { productive: 0, leave: 0, nonproductive: 0, sick: 0, total: 0 }
     const bw: Record<string, { sum: number; w: number }> = {
       productive: { sum: 0, w: 0 }, leave: { sum: 0, w: 0 }, nonproductive: { sum: 0, w: 0 }, sick: { sum: 0, w: 0 },
     }
+    let anyReal = false
     for (const bv of BVS) for (const m of months) {
       const cs = capacitySplit(ds, bv, m)
       if (!cs || cs.total <= 0) continue
+      if (cs.isReal) anyReal = true
       agg.productive += cs.productive; agg.leave += cs.leave
       agg.nonproductive += cs.nonproductive; agg.sick += cs.sick; agg.total += cs.total
       for (const c of ['productive', 'leave', 'nonproductive', 'sick']) {
@@ -995,10 +1104,24 @@ function slideDeclarabiliteit(
         if (b != null) { bw[c].sum += b * cs.total; bw[c].w += cs.total }
       }
     }
-    return { agg, bw }
+    return { agg, bw, anyReal }
   }
   const mCap = periodCapacity([reportMonth])
   const yCap = periodCapacity(ytdMonths)
+  // Met geüploade SAP-uren splitsen we verlof en ziekte; zonder upload
+  // (seed-data) tonen we verlof + ziekte samen als 'afwezigheid'.
+  const cats: { key: string; label: string; higherIsBetter: boolean }[] = yCap.anyReal
+    ? [
+        { key: 'productive',    label: 'Productief (declarabel)', higherIsBetter: true },
+        { key: 'nonproductive', label: 'Improductief / intern',   higherIsBetter: false },
+        { key: 'leave',         label: 'Verlof',                  higherIsBetter: false },
+        { key: 'sick',          label: 'Ziekte',                  higherIsBetter: false },
+      ]
+    : [
+        { key: 'productive',    label: 'Productief (declarabel)', higherIsBetter: true },
+        { key: 'nonproductive', label: 'Improductief / intern',   higherIsBetter: false },
+        { key: 'leave',         label: 'Verlof & afwezigheid',    higherIsBetter: false },
+      ]
   const actPct = (cap: ReturnType<typeof periodCapacity>, c: string) =>
     cap.agg.total > 0 ? cap.agg[c] / cap.agg.total * 100 : null
   const budPct = (cap: ReturnType<typeof periodCapacity>, c: string) =>
@@ -1042,7 +1165,7 @@ function slideDeclarabiliteit(
   const ins: Insight[] = [
     { tone: 'plain', text: `Declarabiliteit YTD per BV: ${declList}. De spreiding verklaart een groot deel van het margeverschil tussen de BV's.` },
   ]
-  if (sickY != null) {
+  if (yCap.anyReal && sickY != null) {
     ins.push(sickBud != null && sickY > sickBud + 0.5
       ? { tone: 'warn', text: `Ziekteverzuim YTD ${sickY.toFixed(1)}% ligt boven het budget van ${sickBud.toFixed(1)}% — dit kost direct declarabele capaciteit.` }
       : { tone: 'good', text: `Ziekteverzuim YTD ${sickY.toFixed(1)}%${sickBud != null ? ` (budget ${sickBud.toFixed(1)}%)` : ''} blijft beheersbaar.` })
@@ -1057,35 +1180,111 @@ function slideDeclarabiliteit(
   addFooter(slide, monthLabel)
 }
 
-function slideOhwStatus(pptx: PptxGenJS, monthLabel: string, month: string, ohwData: OhwYearData, num: number) {
+function slideInterneUren(
+  pptx: PptxGenJS, monthLabel: string, agg: InternalHoursAgg, snaps: BvSnapshot[], num: number,
+) {
   const slide = pptx.addSlide()
   slide.background = { color: C.page }
-  addSectionHeader(slide, 'Operationeel', 'Onderhanden werk — status & mutaties', num)
+  addSectionHeader(slide, 'Operationeel', 'Interne uren — leegloop & niet-declarabele tijd', num)
 
-  const entities = ohwData.entities
-  // Venster van ~12 maanden dat eindigt op de gerapporteerde maand (geen
-  // toekomstige maanden meenemen) — bv. apr-25 t/m apr-26.
-  const allMonths = ohwData.displayMonths
-  const monthIdx = allMonths.indexOf(month)
-  const showMonths = monthIdx >= 0
-    ? allMonths.slice(Math.max(0, monthIdx - 12), monthIdx + 1)
-    : allMonths.slice(-13)
+  // Bar chart links — 7 categorieën YTD
+  slide.addText('Niet-declarabele uren per categorie — YTD 2026', {
+    x: MARGIN, y: 1.28, w: 6.3, h: 0.3, fontFace: 'Inter', fontSize: 11, bold: true, color: C.navy,
+  })
+  slide.addChart(pptx.ChartType.bar, [{
+    name: 'Uren YTD',
+    labels: INTERNAL_HOURS_CATEGORIES.map(c => c.label),
+    values: INTERNAL_HOURS_CATEGORIES.map(c => Math.round(agg.catYtd[c.key] ?? 0)),
+  }], {
+    x: MARGIN, y: 1.6, w: 6.3, h: 2.7,
+    barDir: 'bar', chartColors: [C.cyan],
+    showValue: true, dataLabelFontSize: 8, dataLabelColor: C.ink,
+    catAxisLabelFontSize: 8, valAxisLabelFontSize: 8,
+    showLegend: false, ...chartBase,
+  })
+
+  // Line chart rechts — leegloop-verloop per maand
+  slide.addText('Leegloop / niet-declarabel — verloop per maand (uren)', {
+    x: 7.05, y: 1.28, w: 5.7, h: 0.3, fontFace: 'Inter', fontSize: 11, bold: true, color: C.navy,
+  })
+  slide.addChart(pptx.ChartType.line, [{
+    name: 'Leegloop',
+    labels: agg.months.map(m => MONTH_LABELS_SHORT[MONTHS_2026.indexOf(m)] ?? m),
+    values: agg.leegloopByMonth.map(v => Math.round(v)),
+  }], {
+    x: 7.05, y: 1.6, w: 5.7, h: 2.7,
+    chartColors: [C.red], lineSize: 3, lineDataSymbolSize: 6,
+    showValue: true, dataLabelFontSize: 8, dataLabelColor: C.inkSoft,
+    catAxisLabelFontSize: 9, valAxisLabelFontSize: 8,
+    showLegend: false, ...chartBase,
+  })
+
+  // Per-BV tabel (links onder)
+  const rows: PptxGenJS.TableRow[] = [[
+    hCell('BV'), hCell('Interne uren', 'right'), hCell('Leegloop', 'right'), hCell('% leegloop', 'right'),
+  ]]
+  for (const b of agg.perBv) {
+    rows.push([
+      { text: b.bv, options: { bold: true, color: BV_COLOR[b.bv as EntityName] } },
+      { text: fmtHrs(b.tot), options: { align: 'right', color: C.ink } },
+      { text: fmtHrs(b.leeg), options: { align: 'right', color: C.red } },
+      { text: `${b.leegPct.toFixed(0)}%`, options: { align: 'right', bold: true, color: b.leegPct > 45 ? C.red : C.ink } },
+    ])
+  }
+  slide.addText('Interne uren per business unit', {
+    x: MARGIN, y: 4.45, w: 6.3, h: 0.3, fontFace: 'Inter', fontSize: 11, bold: true, color: C.navy,
+  })
+  slide.addTable(rows, { x: MARGIN, y: 4.77, w: 6.3, rowH: 0.4, ...tableBase })
+
+  // Inzicht (rechts onder)
+  const g = groupTotals(snaps)
+  const declPct = g.workedY > 0 ? g.declarableY / g.workedY * 100 : 0
+  const topBv = [...agg.perBv].sort((a, b) => b.leegPct - a.leegPct)[0]
+  const ins: Insight[] = [
+    { tone: 'plain', text: `${agg.leegloopPct.toFixed(0)}% van de ${fmtHrs(agg.total)} interne uren is leegloop / niet-declarabel (${fmtHrs(agg.catYtd.leegloop)}).` },
+    agg.leegloopTrend < -1
+      ? { tone: 'good', text: `De leegloop daalt ${fmtHrs(Math.abs(agg.leegloopTrend))} over de periode — dit werkt direct door in de declarabiliteit (nu ${declPct.toFixed(1)}%) en de brutomarge.` }
+      : agg.leegloopTrend > 1
+        ? { tone: 'risk', text: `De leegloop stijgt ${fmtHrs(agg.leegloopTrend)} over de periode — dit drukt de declarabiliteit (${declPct.toFixed(1)}%) en de marge.` }
+        : { tone: 'warn', text: `De leegloop is stabiel; declarabiliteit staat op ${declPct.toFixed(1)}% — er is geen verbetering zichtbaar.` },
+    { tone: 'plain', text: `${topBv.bv} heeft het hoogste leegloop-aandeel (${topBv.leegPct.toFixed(0)}%); prognose resterend 2026 ≈ ${fmtHrs(agg.leegloopFcRest)} leegloop bij gelijk tempo.` },
+    { tone: 'advice', text: `Stuur op de leegloop: koppel onbenutte capaciteit aan opdrachten of pré-sales — elk uur minder leegloop is een potentieel declarabel uur.` },
+  ]
+  if (agg.topEmp.length > 0) {
+    ins.push({ tone: 'plain', text: `Meeste leegloop: ${agg.topEmp.slice(0, 3).map(e => `${e.naam} (${fmtHrs(e.leegloop)})`).join(' · ')}.` })
+  }
+  addInsightBlock(slide, 7.05, 4.45, 5.7, 2.2, ins.slice(0, 5))
+  addFooter(slide, monthLabel)
+}
+
+function slideOhwStatus(
+  pptx: PptxGenJS, monthLabel: string, month: string,
+  ohw25: OhwYearData, ohw26: OhwYearData, num: number,
+) {
+  const slide = pptx.addSlide()
+  slide.background = { color: C.page }
+  addSectionHeader(slide, 'Operationeel', 'Onderhanden werk — verloop & status', num)
+
+  const entities = ohw26.entities
+  // Vast venster van 12 maanden dat eindigt op de gerapporteerde maand —
+  // spant 2025 + 2026 (bv. mei-25 t/m apr-26).
+  const showMonths = trailing12(month)
   const rangeLabel = showMonths.length > 0
-    ? `${showMonths[0]} t/m ${showMonths[showMonths.length - 1]}`
+    ? `${monthShortLabel(showMonths[0])} t/m ${monthShortLabel(showMonths[showMonths.length - 1])}`
     : ''
 
-  slide.addText(`OHW-saldo per BV — ${rangeLabel} (€k)`, {
+  slide.addText(`OHW-saldo per BV — verloop ${rangeLabel} (€k)`, {
     x: MARGIN, y: 1.28, w: PAGE_W - 2 * MARGIN, h: 0.3, fontFace: 'Inter', fontSize: 11, bold: true, color: C.navy,
   })
   slide.addChart(pptx.ChartType.line, entities.map(e => ({
     name: e.entity,
-    labels: showMonths,
-    values: showMonths.map(m => (e.totaalOnderhanden[m] ?? 0) / 1000),
+    labels: showMonths.map(monthShortLabel),
+    values: showMonths.map(m => ohwField(ohw25, ohw26, e.entity, m, 'totaalOnderhanden') / 1000),
   })), {
     x: MARGIN, y: 1.58, w: PAGE_W - 2 * MARGIN, h: 2.5,
     chartColors: entities.map(e => BV_COLOR[e.entity as EntityName] ?? C.cyan),
     lineSize: 3, lineDataSymbolSize: 6,
-    catAxisLabelFontSize: 9, catAxisLabelRotate: -30, valAxisLabelFontSize: 9, valAxisLabelFormatCode: '#,##0" k"',
+    catAxisLabelFontSize: 8, catAxisLabelRotate: -30, valAxisLabelFontSize: 9, valAxisLabelFormatCode: '#,##0" k"',
     showLegend: true, legendPos: 'b', legendColor: C.inkSoft, legendFontSize: 10,
     ...chartBase,
   })
@@ -1097,11 +1296,11 @@ function slideOhwStatus(pptx: PptxGenJS, monthLabel: string, month: string, ohwD
   ]]
   let tot = 0, totDeb = 0
   for (const e of entities) {
-    const cur = e.totaalOnderhanden[month] ?? 0
-    const deb = e.debiteuren[month] ?? 0
+    const cur = ohwField(ohw25, ohw26, e.entity, month, 'totaalOnderhanden')
+    const deb = ohwField(ohw25, ohw26, e.entity, month, 'debiteuren')
     tot += cur; totDeb += deb
     const idx = showMonths.indexOf(month)
-    const prev = idx > 0 ? (e.totaalOnderhanden[showMonths[idx - 1]] ?? 0) : 0
+    const prev = idx > 0 ? ohwField(ohw25, ohw26, e.entity, showMonths[idx - 1], 'totaalOnderhanden') : 0
     const delta = cur - prev
     let status = '● Stabiel'
     let sColor: string = C.green
@@ -1331,38 +1530,163 @@ function slideBvFull(
   addFooter(slide, monthLabel)
 }
 
-function slideBalans(pptx: PptxGenJS, monthLabel: string, month: string, ohwData: OhwYearData, num: number) {
+/** Tweede per-BV slide — inzoom op kostenuitsplitsing, OHW-verloop en
+ *  declarabiliteit voor één business unit. */
+function slideBvDetail(
+  pptx: PptxGenJS, monthLabel: string, month: string, ds: ReportDataset,
+  snap: BvSnapshot, ytdMonths: string[], ohw25: OhwYearData, ohw26: OhwYearData, num: number,
+) {
+  const bv = snap.bv
   const slide = pptx.addSlide()
   slide.background = { color: C.page }
-  addSectionHeader(slide, 'Verdieping', 'Balansposities — werkkapitaal', num)
+  addSectionHeader(slide, 'Per business unit', `${bv} — verdieping: kosten · OHW · declarabiliteit`, num)
+  const color = BV_COLOR[bv as EntityName]
 
-  const entities = ohwData.entities
-  slide.addText(`Werkkapitaal per BV — ${monthLabel} (€k)`, {
-    x: MARGIN, y: 1.28, w: 7, h: 0.3, fontFace: 'Inter', fontSize: 11, bold: true, color: C.navy,
+  // ── Kostenuitsplitsing (links) ──
+  const costGroups: { title: string; keys: [string, string][] }[] = [
+    { title: 'Directe kosten', keys: [
+      ['directe_personeelskosten', 'Personeelskosten'],
+      ['directe_inkoopkosten', 'Inkoopkosten'],
+      ['directe_overige_personeelskosten', 'Overige personeelskosten'],
+      ['directe_autokosten', 'Autokosten'],
+    ] },
+    { title: 'Operationele kosten', keys: [
+      ['indirecte_personeelskosten', 'Indirecte personeelskosten'],
+      ['overige_personeelskosten', 'Overige personeelskosten'],
+      ['huisvestingskosten', 'Huisvestingskosten'],
+      ['automatiseringskosten', 'Automatiseringskosten'],
+      ['indirecte_autokosten', 'Autokosten'],
+      ['verkoopkosten', 'Verkoopkosten'],
+      ['algemene_kosten', 'Algemene kosten'],
+      ['doorbelaste_kosten', 'Doorbelaste kosten'],
+    ] },
+  ]
+  const tblW = 6.7
+  const rows: PptxGenJS.TableRow[] = [[
+    hCell('Kostenregel'), hCell(monthLabel, 'right'), hCell('YTD 2026', 'right'),
+    hCell('Budget YTD', 'right'), hCell('Δ YTD', 'right'),
+  ]]
+  for (const grp of costGroups) {
+    let gM = 0, gYA = 0, gYB = 0
+    const subRows: PptxGenJS.TableRow[] = []
+    for (const [k, label] of grp.keys) {
+      const mA = Math.abs(mv(ds, bv, month, k, 'actual'))
+      const yA = Math.abs(ytd(ds, bv, ytdMonths, k, 'actual'))
+      const yB = Math.abs(ytd(ds, bv, ytdMonths, k, 'budget'))
+      gM += mA; gYA += yA; gYB += yB
+      const d = yA - yB
+      subRows.push([
+        { text: '   ' + label, options: { color: C.ink, fontSize: 9 } },
+        { text: fmtEur(mA), options: { align: 'right', color: C.ink, fontSize: 9 } },
+        { text: fmtEur(yA), options: { align: 'right', color: C.cyanDark, fontSize: 9 } },
+        { text: fmtEur(yB), options: { align: 'right', color: C.inkSoft, fontSize: 9 } },
+        { text: fmtSignedEurK(d), options: { align: 'right', bold: true, color: d <= 0 ? C.green : C.red, fontSize: 9 } },
+      ])
+    }
+    const gd = gYA - gYB
+    rows.push([
+      { text: grp.title, options: { bold: true, color: C.navy, fill: { color: C.lineSoft }, fontSize: 9 } },
+      { text: fmtEur(gM), options: { align: 'right', bold: true, color: C.navy, fill: { color: C.lineSoft }, fontSize: 9 } },
+      { text: fmtEur(gYA), options: { align: 'right', bold: true, color: C.navy, fill: { color: C.lineSoft }, fontSize: 9 } },
+      { text: fmtEur(gYB), options: { align: 'right', bold: true, color: C.inkSoft, fill: { color: C.lineSoft }, fontSize: 9 } },
+      { text: fmtSignedEurK(gd), options: { align: 'right', bold: true, color: gd <= 0 ? C.green : C.red, fill: { color: C.lineSoft }, fontSize: 9 } },
+    ])
+    rows.push(...subRows)
+  }
+  slide.addText('Kostenuitsplitsing — directe & operationele kosten (magnitudes)', {
+    x: MARGIN, y: 1.28, w: tblW, h: 0.3, fontFace: 'Inter', fontSize: 11, bold: true, color: C.navy,
   })
-  slide.addChart(pptx.ChartType.bar, entities.map(e => ({
-    name: e.entity,
-    labels: ['Debiteuren', 'OHW'],
-    values: [(e.debiteuren[month] ?? 0) / 1000, (e.totaalOnderhanden[month] ?? 0) / 1000],
-  })), {
-    x: MARGIN, y: 1.58, w: 6.6, h: 3.0,
-    barDir: 'col', barGrouping: 'clustered',
-    chartColors: entities.map(e => BV_COLOR[e.entity as EntityName] ?? C.cyan),
-    showValue: true, dataLabelFontSize: 8, dataLabelColor: C.ink, dataLabelFormatCode: '#,##0" k"',
-    catAxisLabelFontSize: 10, valAxisLabelFontSize: 9, valAxisLabelFormatCode: '#,##0" k"',
-    showLegend: true, legendPos: 'b', legendColor: C.inkSoft, legendFontSize: 10,
+  slide.addTable(rows, { x: MARGIN, y: 1.6, w: tblW, rowH: 0.3, ...tableBase, fontSize: 9 })
+
+  // ── Rechts: OHW-verloop + declarabiliteit ──
+  const rx = MARGIN + tblW + 0.3
+  const rw = PAGE_W - MARGIN - rx
+  const ohwMonths = trailing12(month)
+  const ohwSeries = ohwMonths.map(m => ohwField(ohw25, ohw26, bv, m, 'totaalOnderhanden') / 1000)
+  slide.addText(`OHW-verloop ${bv} — 12 maanden (€k)`, {
+    x: rx, y: 1.28, w: rw, h: 0.3, fontFace: 'Inter', fontSize: 10.5, bold: true, color: C.navy,
+  })
+  slide.addChart(pptx.ChartType.line, [
+    { name: 'OHW-saldo', labels: ohwMonths.map(monthShortLabel), values: ohwSeries },
+  ], {
+    x: rx, y: 1.6, w: rw, h: 2.0,
+    chartColors: [color], lineSize: 2.75, lineDataSymbolSize: 5,
+    catAxisLabelFontSize: 7, catAxisLabelRotate: -45, valAxisLabelFontSize: 8, valAxisLabelFormatCode: '#,##0" k"',
+    showLegend: false, ...chartBase,
+  })
+
+  const declSeries = ytdMonths.map(m => declPctMonth(ds, bv, m) ?? 0)
+  slide.addText(`Declarabiliteit ${bv} — 2026 t/m ${monthLabel} (%)`, {
+    x: rx, y: 3.75, w: rw, h: 0.3, fontFace: 'Inter', fontSize: 10.5, bold: true, color: C.navy,
+  })
+  slide.addChart(pptx.ChartType.line, [
+    { name: 'Declarabiliteit', labels: ytdMonths.map(m => MONTH_LABELS_SHORT[MONTHS_2026.indexOf(m)] ?? m), values: declSeries },
+  ], {
+    x: rx, y: 4.07, w: rw, h: 1.95,
+    chartColors: [C.amber], lineSize: 2.75, lineDataSymbolSize: 5,
+    valAxisMinVal: 50, valAxisMaxVal: 100,
+    catAxisLabelFontSize: 8, valAxisLabelFontSize: 8, valAxisLabelFormatCode: '0"%"',
+    showLegend: false, showValue: true, dataLabelFontSize: 7, dataLabelColor: C.inkSoft, dataLabelFormatCode: '0"%"',
     ...chartBase,
   })
 
+  // ── Inzicht-strook onderaan ──
+  const ohwNow = ohwField(ohw25, ohw26, bv, month, 'totaalOnderhanden')
+  const ohwDelta = ohwNow - ohwSeries[0] * 1000
+  addInsightBlock(slide, rx, 6.18, rw, 0.78, [
+    { tone: ohwDelta >= 0 ? 'warn' : 'good',
+      text: `OHW ${fmtEur(ohwNow)} — ${ohwDelta >= 0 ? '+' : ''}${fmtEurK(ohwDelta)} over 12 mnd · declarabiliteit YTD ${snap.declYtd.toFixed(1)}% (${fmtPpt(snap.declDelta)} vs 2025).` },
+  ], 'Inzicht', 8.5)
+  addFooter(slide, monthLabel)
+}
+
+function slideBalans(
+  pptx: PptxGenJS, monthLabel: string, month: string,
+  ohw25: OhwYearData, ohw26: OhwYearData, num: number,
+) {
+  const slide = pptx.addSlide()
+  slide.background = { color: C.page }
+  addSectionHeader(slide, 'Verdieping', 'Balansposities — werkkapitaal door de tijd', num)
+
+  const entities = ohw26.entities
+  const showMonths = trailing12(month)
+  const rangeLabel = showMonths.length > 0
+    ? `${monthShortLabel(showMonths[0])} t/m ${monthShortLabel(showMonths[showMonths.length - 1])}`
+    : ''
+  const sumField = (m: string, field: 'totaalOnderhanden' | 'debiteuren') =>
+    entities.reduce((s, e) => s + ohwField(ohw25, ohw26, e.entity, m, field), 0)
+
+  // ── Trend: debiteuren · OHW · werkkapitaal totaal over 12 maanden ──
+  slide.addText(`Werkkapitaal-verloop — totaal alle BV's · ${rangeLabel} (€k)`, {
+    x: MARGIN, y: 1.26, w: PAGE_W - 2 * MARGIN, h: 0.3, fontFace: 'Inter', fontSize: 11, bold: true, color: C.navy,
+  })
+  const debSeries = showMonths.map(m => sumField(m, 'debiteuren') / 1000)
+  const ohwSeries = showMonths.map(m => sumField(m, 'totaalOnderhanden') / 1000)
+  const wcSeries  = showMonths.map((_, i) => debSeries[i] + ohwSeries[i])
+  slide.addChart(pptx.ChartType.line, [
+    { name: 'Debiteuren', labels: showMonths.map(monthShortLabel), values: debSeries },
+    { name: 'Onderhanden werk', labels: showMonths.map(monthShortLabel), values: ohwSeries },
+    { name: 'Werkkapitaal (debiteuren + OHW)', labels: showMonths.map(monthShortLabel), values: wcSeries },
+  ], {
+    x: MARGIN, y: 1.56, w: PAGE_W - 2 * MARGIN, h: 2.5,
+    chartColors: [C.cyan, C.amber, C.navy],
+    lineSize: 2.75, lineDataSymbolSize: 5,
+    catAxisLabelFontSize: 8, catAxisLabelRotate: -30, valAxisLabelFontSize: 9, valAxisLabelFormatCode: '#,##0" k"',
+    showLegend: true, legendPos: 'b', legendColor: C.inkSoft, legendFontSize: 9,
+    ...chartBase,
+  })
+
+  // ── Snapshot-tabel per BV — gerapporteerde maand ──
+  const tblW = 7.55
   const rows: PptxGenJS.TableRow[] = [[
     hCell('BV'), hCell('Debiteuren', 'right'), hCell('OHW', 'right'),
     hCell('Factuurvol.', 'right'), hCell('Werkkap.-dgn', 'right'),
   ]]
   let tDeb = 0, tOhw = 0
   for (const e of entities) {
-    const deb = e.debiteuren[month] ?? 0
-    const ohw = e.totaalOnderhanden[month] ?? 0
-    const fv = e.factuurvolume[month] ?? 0
+    const deb = ohwField(ohw25, ohw26, e.entity, month, 'debiteuren')
+    const ohw = ohwField(ohw25, ohw26, e.entity, month, 'totaalOnderhanden')
+    const fv = ohwField(ohw25, ohw26, e.entity, month, 'factuurvolume')
     tDeb += deb; tOhw += ohw
     rows.push([
       { text: e.entity, options: { bold: true, color: BV_COLOR[e.entity as EntityName] ?? C.cyan } },
@@ -1379,14 +1703,21 @@ function slideBalans(pptx: PptxGenJS, monthLabel: string, month: string, ohwData
     { text: '', options: { fill: { color: C.panelAlt } } },
     { text: fmtEur(tDeb + tOhw), options: { align: 'right', bold: true, color: C.cyanDark, fill: { color: C.panelAlt } } },
   ])
-  slide.addTable(rows, { x: 7.45, y: 1.58, w: 5.3, rowH: 0.42, ...tableBase })
+  slide.addText(`Werkkapitaal per BV — ${monthLabel}`, {
+    x: MARGIN, y: 4.28, w: tblW, h: 0.3, fontFace: 'Inter', fontSize: 11, bold: true, color: C.navy,
+  })
+  slide.addTable(rows, { x: MARGIN, y: 4.6, w: tblW, rowH: 0.36, ...tableBase })
 
+  // ── Inzicht — verloop ──
+  const wcNow = tDeb + tOhw
+  const wcStart = (debSeries[0] + ohwSeries[0]) * 1000
+  const wcDelta = wcNow - wcStart
   const ins: Insight[] = [
-    { tone: 'plain', text: `Er zit ${fmtEur(tDeb + tOhw)} werkkapitaal vast: ${fmtEur(tDeb)} debiteuren + ${fmtEur(tOhw)} onderhanden werk.` },
-    { tone: 'plain', text: 'Werkkapitaal-dagen = (debiteuren + OHW) / maand-factuurvolume × 30 — een hoger getal betekent dat meer kas in de business vastzit.' },
-    { tone: 'advice', text: 'Verkort de incasso-cyclus en factureer OHW sneller; dat maakt kas vrij zonder dat er omzet bij hoeft.' },
+    { tone: 'plain', text: `Het werkkapitaal staat op ${fmtEur(wcNow)} (${fmtEur(tDeb)} debiteuren + ${fmtEur(tOhw)} OHW).` },
+    { tone: wcDelta > 0 ? 'warn' : 'good', text: `Over de afgelopen 12 maanden is het werkkapitaal ${wcDelta >= 0 ? 'gestegen' : 'gedaald'} met ${fmtEurK(Math.abs(wcDelta))} — ${wcDelta > 0 ? 'er gaat meer kas in de business zitten' : 'er komt kas vrij'}.` },
+    { tone: 'advice', text: 'Bewaak de trend: stijgend werkkapitaal vraagt om snellere facturatie van OHW en een strakkere incasso van debiteuren.' },
   ]
-  addInsightBlock(slide, MARGIN, 4.8, PAGE_W - 2 * MARGIN, 1.85, ins)
+  addInsightBlock(slide, MARGIN + tblW + 0.25, 4.28, PAGE_W - 2 * MARGIN - tblW - 0.25, 2.0, ins)
   addFooter(slide, monthLabel)
 }
 
@@ -1394,13 +1725,19 @@ function slideBalans(pptx: PptxGenJS, monthLabel: string, month: string, ohwData
  *  belangrijkste aanbevelingen op één slide. */
 function slideConclusie(
   pptx: PptxGenJS, monthLabel: string, month: string, snaps: BvSnapshot[],
-  closingEntries: ClosingEntry[], ohwData: OhwYearData, num: number,
+  closingEntries: ClosingEntry[], ohwData: OhwYearData, internalAgg: InternalHoursAgg, num: number,
 ) {
   const slide = pptx.addSlide()
   slide.background = { color: C.page }
   addSectionHeader(slide, 'Afsluiting', `Totaaloverzicht & aanbevelingen — ${monthLabel}`, num)
 
   const { findings, advice, verdict } = buildFindings(snaps, month, closingEntries, ohwData)
+  // Bondige leegloop-regel mee in het totaaloverzicht.
+  const ihFinding = internalHoursFinding(internalAgg)
+  if (ihFinding) {
+    findings.splice(Math.min(3, findings.length), 0, ihFinding)
+    if (ihFinding.advice && !advice.includes(ihFinding.advice)) advice.push(ihFinding.advice)
+  }
   const g = groupTotals(snaps)
   const declPct = g.workedY > 0 ? g.declarableY / g.workedY * 100 : 0
 
@@ -1469,12 +1806,15 @@ export interface GeneratePptxInput {
   monthLabel: string
   ytdMonths: string[]
   closingEntries: ClosingEntry[]
+  ohwData2025: OhwYearData
   ohwData2026: OhwYearData
   importRecords: ImportRecord[]
   /** Live dataset uit de app-stores. */
   data: ReportDataset
   /** AI-duiding per BV (LE-leerlus cache of live rapportage-AI). */
   aiAnalyses?: AiAnalysisEntry[]
+  /** Interne uren — gedetailleerde uitsplitsing niet-declarabele uren. */
+  internalHours?: InternalHoursEntry[]
 }
 
 async function buildMonthPptxDeck(input: GeneratePptxInput): Promise<PptxGenJS> {
@@ -1499,18 +1839,23 @@ async function buildMonthPptxDeck(input: GeneratePptxInput): Promise<PptxGenJS> 
   slideMargeTrend(pptx, input.monthLabel, ds, snaps, input.ytdMonths, 6)
   slideLatestEstimate(pptx, input.monthLabel, snaps, input.ytdMonths, 7)
   slideDeclarabiliteit(pptx, input.monthLabel, ds, snaps, input.ytdMonths, 8)
-  slideOhwStatus(pptx, input.monthLabel, input.month, input.ohwData2026, 9)
-  slideFacturatiePipeline(pptx, input.monthLabel, input.month, input.importRecords, 10)
+  const internalAgg = aggInternalHours(input.internalHours)
+  if (internalAgg.hasData) {
+    slideInterneUren(pptx, input.monthLabel, internalAgg, snaps, 9)
+  }
+  slideOhwStatus(pptx, input.monthLabel, input.month, input.ohwData2025, input.ohwData2026, 10)
+  slideFacturatiePipeline(pptx, input.monthLabel, input.month, input.importRecords, 11)
 
-  slideSectionDivider(pptx, 'Per business unit', `${input.monthLabel} · P&L · prognose · AI-duiding`)
+  slideSectionDivider(pptx, 'Per business unit', `${input.monthLabel} · P&L · OHW · declarabiliteit · AI-duiding`)
   let num = 12
   for (const snap of snaps) {
     const commentary = ai.find(a => a.bv === snap.bv)?.commentary ?? null
     slideBvFull(pptx, input.monthLabel, input.month, ds, snap, input.ytdMonths, commentary, num++)
+    slideBvDetail(pptx, input.monthLabel, input.month, ds, snap, input.ytdMonths, input.ohwData2025, input.ohwData2026, num++)
   }
 
-  slideBalans(pptx, input.monthLabel, input.month, input.ohwData2026, num++)
-  slideConclusie(pptx, input.monthLabel, input.month, snaps, input.closingEntries, input.ohwData2026, num++)
+  slideBalans(pptx, input.monthLabel, input.month, input.ohwData2025, input.ohwData2026, num++)
+  slideConclusie(pptx, input.monthLabel, input.month, snaps, input.closingEntries, input.ohwData2026, internalAgg, num++)
 
   return pptx
 }

@@ -3,9 +3,13 @@
 // "Directe inkoopkosten") één niveau dieper specifieke posten in te vullen.
 // Als er breakdowns bestaan voor een (maand, categorie), dan is de som
 // van die breakdowns per BV het effectieve bedrag voor die categorie.
+//
+// Persistentie: Supabase (tabel `cost_breakdowns`) + localStorage als cache,
+// zodat de kosten-uitsplitsingen gedeeld zijn met alle gebruikers.
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ClosingBv } from '../data/types'
+import { fetchCostBreakdowns, upsertCostBreakdowns, deleteCostBreakdown } from '../lib/db'
 
 export interface CostBreakdown {
   id: string
@@ -17,6 +21,9 @@ export interface CostBreakdown {
 
 interface CostBreakdownStore {
   entries: CostBreakdown[]
+  loaded: boolean
+  /** Laad uit Supabase + merge met lokale state (DB wint per id). */
+  loadFromDb: () => Promise<void>
   /** Voeg een nieuwe breakdown toe voor (month, category) — lege waardes. */
   add: (month: string, category: string, label?: string) => string
   /** Update de label van een breakdown. */
@@ -43,27 +50,51 @@ export const useCostBreakdownStore = create<CostBreakdownStore>()(
   persist(
     (set, get) => ({
       entries: [],
+      loaded: false,
+
+      loadFromDb: async () => {
+        let dbRows: CostBreakdown[] = []
+        try {
+          dbRows = await fetchCostBreakdowns()
+        } catch (e) {
+          console.warn('[useCostBreakdownStore] fetch failed — keeping local state:', e)
+          set({ loaded: true })
+          return
+        }
+        const local = get().entries
+        const byId = new Map(local.map(e => [e.id, e]))
+        for (const r of dbRows) byId.set(r.id, r)   // Supabase wint per id
+        set({ entries: Array.from(byId.values()), loaded: true })
+        const dbIds = new Set(dbRows.map(r => r.id))
+        const localOnly = local.filter(e => !dbIds.has(e.id))
+        if (localOnly.length > 0) upsertCostBreakdowns(localOnly)
+      },
 
       add: (month, category, label = '') => {
         const id = `cb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-        set(s => ({
-          entries: [...s.entries, { id, month, category, label, values: emptyValues() }],
-        }))
+        const entry: CostBreakdown = { id, month, category, label, values: emptyValues() }
+        set(s => ({ entries: [...s.entries, entry] }))
+        upsertCostBreakdowns([entry])
         return id
       },
 
       updateLabel: (id, label) => {
         set(s => ({ entries: s.entries.map(e => e.id === id ? { ...e, label } : e) }))
+        const e = get().entries.find(x => x.id === id)
+        if (e) upsertCostBreakdowns([e])
       },
 
       updateValue: (id, bv, value) => {
         set(s => ({
           entries: s.entries.map(e => e.id === id ? { ...e, values: { ...e.values, [bv]: value } } : e),
         }))
+        const e = get().entries.find(x => x.id === id)
+        if (e) upsertCostBreakdowns([e])
       },
 
       remove: (id) => {
         set(s => ({ entries: s.entries.filter(e => e.id !== id) }))
+        deleteCostBreakdown(id)
       },
 
       getForCategory: (month, category) =>

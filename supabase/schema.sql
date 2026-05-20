@@ -368,6 +368,139 @@ ALTER TABLE fte_entries ADD COLUMN IF NOT EXISTS fte_budget numeric;
 ALTER TABLE fte_entries ADD COLUMN IF NOT EXISTS headcount_budget integer;
 
 -- ============================================================================
+-- 10. Cross-device sync voor uren, kosten-specificaties en LE-reflecties.
+--     Deze stores waren voorheen alleen localStorage — nu gedeeld via Supabase
+--     zodat elke gebruiker dezelfde data ziet (declarabiliteit, ziekte, etc.).
+-- ============================================================================
+
+-- 10a. Geüploade SAP-uren per BV per maand (declarabel/intern/verlof/ziekte).
+CREATE TABLE IF NOT EXISTS hours_entries (
+  id text PRIMARY KEY,                    -- `${bv}-${month}`
+  bv text NOT NULL,
+  month text NOT NULL,
+  declarable numeric DEFAULT 0,
+  internal numeric DEFAULT 0,
+  vakantie numeric DEFAULT 0,
+  ziekte numeric DEFAULT 0,
+  overig_verlof numeric DEFAULT 0,
+  updated_at timestamptz DEFAULT now()
+);
+
+-- 10b. Geüploade SAP-uren per BV per ISO-week.
+CREATE TABLE IF NOT EXISTS hours_week_entries (
+  id text PRIMARY KEY,                    -- `${bv}-${year}-W${week}`
+  bv text NOT NULL,
+  year integer NOT NULL,
+  week integer NOT NULL,
+  month text NOT NULL,
+  week_start text DEFAULT '',
+  week_end text DEFAULT '',
+  declarable numeric DEFAULT 0,
+  internal numeric DEFAULT 0,
+  vakantie numeric DEFAULT 0,
+  ziekte numeric DEFAULT 0,
+  overig_verlof numeric DEFAULT 0,
+  planned_work numeric DEFAULT 0,
+  missing_hours_open numeric DEFAULT 0,
+  updated_at timestamptz DEFAULT now()
+);
+
+-- 10c. Kosten-specificaties — handmatige uitsplitsing onder kosten-subregels.
+CREATE TABLE IF NOT EXISTS cost_breakdowns (
+  id text PRIMARY KEY,
+  month text NOT NULL,
+  category text NOT NULL,
+  label text DEFAULT '',
+  values jsonb NOT NULL DEFAULT '{}',     -- { Consultancy, Projects, Software, Holdings }
+  updated_at timestamptz DEFAULT now()
+);
+
+-- 10d. LE-reflecties — antwoorden van de gebruiker over varianties per maand/BV.
+CREATE TABLE IF NOT EXISTS closing_reflections (
+  id text PRIMARY KEY,                    -- `${month}::${bv}`
+  month text NOT NULL,
+  bv text NOT NULL,
+  answers jsonb NOT NULL DEFAULT '[]',
+  updated_at timestamptz DEFAULT now()
+);
+
+-- 10e. Interne uren — gedetailleerde uitsplitsing van de niet-declarabele
+--      uren per BV/maand/categorie (+ per werknemer).
+CREATE TABLE IF NOT EXISTS internal_hours (
+  id text PRIMARY KEY,                    -- `${bv}-${month}`
+  bv text NOT NULL,
+  month text NOT NULL,
+  categories jsonb NOT NULL DEFAULT '{}', -- categorie-key → uren
+  employees jsonb NOT NULL DEFAULT '[]',  -- [{ naam, totaal, leegloop }]
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE hours_entries        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE hours_week_entries   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cost_breakdowns      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE closing_reflections  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE internal_hours       ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all on hours_entries" ON hours_entries;
+CREATE POLICY "Allow all on hours_entries" ON hours_entries FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all on hours_week_entries" ON hours_week_entries;
+CREATE POLICY "Allow all on hours_week_entries" ON hours_week_entries FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all on cost_breakdowns" ON cost_breakdowns;
+CREATE POLICY "Allow all on cost_breakdowns" ON cost_breakdowns FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all on closing_reflections" ON closing_reflections;
+CREATE POLICY "Allow all on closing_reflections" ON closing_reflections FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all on internal_hours" ON internal_hours;
+CREATE POLICY "Allow all on internal_hours" ON internal_hours FOR ALL USING (true) WITH CHECK (true);
+
+CREATE INDEX IF NOT EXISTS idx_hours_bv_month       ON hours_entries(bv, month);
+CREATE INDEX IF NOT EXISTS idx_hours_week_bv        ON hours_week_entries(bv, year, week);
+CREATE INDEX IF NOT EXISTS idx_cost_breakdowns_mc   ON cost_breakdowns(month, category);
+CREATE INDEX IF NOT EXISTS idx_reflections_month_bv ON closing_reflections(month, bv);
+CREATE INDEX IF NOT EXISTS idx_internal_hours_bv    ON internal_hours(bv, month);
+
+CREATE OR REPLACE TRIGGER trg_hours_updated       BEFORE UPDATE ON hours_entries       FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE OR REPLACE TRIGGER trg_hours_week_updated  BEFORE UPDATE ON hours_week_entries  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE OR REPLACE TRIGGER trg_cost_breakdowns_upd BEFORE UPDATE ON cost_breakdowns     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE OR REPLACE TRIGGER trg_reflections_updated BEFORE UPDATE ON closing_reflections FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE OR REPLACE TRIGGER trg_internal_hours_upd  BEFORE UPDATE ON internal_hours      FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================================
+-- Realtime / live sync — CRUCIAAL voor "iedereen ziet meteen de laatste data".
+-- ----------------------------------------------------------------------------
+-- De app abonneert zich via Supabase Realtime op onderstaande tabellen
+-- (zie src/hooks/useRealtimeSync.ts). Zonder dat de tabellen in de
+-- `supabase_realtime` publication staan, komen er GEEN postgres_changes-events
+-- binnen — dan zien gebruikers elkaars wijzigingen (bv. een afgesloten maand)
+-- pas na een handmatige refresh.
+--
+-- Dit blok voegt elke tabel idempotent toe aan de publication: al-aanwezige
+-- tabellen worden overgeslagen, dus het is veilig om de schema.sql opnieuw te
+-- draaien. Voer dit één keer uit in de Supabase SQL Editor.
+-- ============================================================================
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'closing_entries', 'closing_finalized', 'fte_entries', 'import_records',
+    'import_raw_data', 'ohw_entities', 'tariff_entries', 'budget_overrides',
+    'ohw_evidence', 'hours_entries', 'hours_week_entries', 'cost_breakdowns',
+    'closing_reflections', 'internal_hours'
+  ] LOOP
+    -- to_regclass-check: sla tabellen over die (nog) niet bestaan, zodat het
+    -- blok niet crasht op een database die nog niet volledig gemigreerd is.
+    IF to_regclass('public.' || t) IS NOT NULL
+       AND NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+      RAISE NOTICE 'Realtime ingeschakeld voor tabel %', t;
+    END IF;
+  END LOOP;
+END$$;
+
+-- ============================================================================
 -- Bootstrap: zorg dat de TPG Finance hoofd-admin altijd aanwezig is.
 -- Pas dit aan als jouw admin-email anders is.
 -- ============================================================================

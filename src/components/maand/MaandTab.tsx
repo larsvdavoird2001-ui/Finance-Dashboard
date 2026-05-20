@@ -76,7 +76,7 @@ const GENERIC_WIZARD_SLOTS = new Set(['factuurvolume', 'geschreven_uren', 'uren_
 // Slots die bij de Uren Analyse horen (Uren Dashboard) i.p.v. de
 // maandafsluiting. Worden in de Bestanden Importeren-sectie als aparte
 // groep getoond met eigen sub-header.
-const UREN_ANALYSE_SLOTS = new Set(['geschreven_uren', 'uren_facturering_totaal'])
+const UREN_ANALYSE_SLOTS = new Set(['geschreven_uren', 'uren_facturering_totaal', 'interne_uren'])
 import { useTariffStore } from '../../store/useTariffStore'
 import { useRawDataStore } from '../../store/useRawDataStore'
 import type { BvId, ClosingBv, ClosingEntry, ImportRecord, GlobalFilter } from '../../data/types'
@@ -88,6 +88,9 @@ import { TariffTable } from './TariffTable'
 import { FteTab } from './FteTab'
 import { useCostBreakdownStore } from '../../store/useCostBreakdownStore'
 import { useHoursStore } from '../../store/useHoursStore'
+import { useInternalHoursStore } from '../../store/useInternalHoursStore'
+import { parseInternalHoursFile } from '../../lib/parseInternalHours'
+import type { InternalHoursEntry } from '../../lib/parseInternalHours'
 import { useHoursWeekStore } from '../../store/useHoursWeekStore'
 import {
   isSapTimesheetHeaders, aggregateSapTimesheet,
@@ -127,6 +130,7 @@ interface UploadSlot {
 const UPLOAD_SLOTS: UploadSlot[] = [
   // ── Uren Analyse (Uren Dashboard) ──────────────────────────────────────
   { id: 'geschreven_uren',          label: 'Werknemertijden YTD',      icon: '⏱', description: 'SAP werknemertijden YTD per week — declarabele/interne/verlof uren + open missing-hours per BV → Uren Dashboard', appliesTo: [] },
+  { id: 'interne_uren',             label: 'Interne uren',             icon: '🧩', description: 'SAP interne-uren-export — gedetailleerde uitsplitsing van de niet-declarabele uren per categorie (leegloop, sales, overleg, opleiding, …) en per werknemer → Uren Dashboard', appliesTo: [] },
   { id: 'uren_facturering_totaal',  label: 'Uren Facturering Totaal',  icon: '💶', description: 'Alleen Consultancy — TOTALE facturatiewaarde per maand → "Waarde Declarabel" in Uren Analyse', appliesTo: [], targetBv: 'Consultancy' },
   // ── Maandafsluiting ────────────────────────────────────────────────────
   { id: 'factuurvolume',   label: 'Factuurvolume',    icon: '🧾', description: 'SAP facturenlijst — gefactureerde omzet per BV (alle BVs)', appliesTo: ['factuurvolume'] },
@@ -491,10 +495,12 @@ export function MaandTab({ filter: _filter }: Props) {
   const uploadLocked     = finalizedMonths.some(f => f.month === uploadMonth)
   const upsertHoursBulk = useHoursStore(s => s.upsertBulk)
   const upsertHoursWeekBulk = useHoursWeekStore(s => s.upsertBulk)
+  const upsertInternalBulk = useInternalHoursStore(s => s.upsertBulk)
   // Pending geschreven-uren-batches per record-id. Worden gepusht naar de
   // hours-store zodra de user ze goedkeurt in de ImportApprovalModal.
   const [pendingHoursByRecord, setPendingHoursByRecord] = useState<Record<string, ParsedHoursEntry[]>>({})
   const [pendingWeeksByRecord, setPendingWeeksByRecord] = useState<Record<string, ParsedHoursWeekEntry[]>>({})
+  const [pendingInternalByRecord, setPendingInternalByRecord] = useState<Record<string, InternalHoursEntry[]>>({})
   const { records: importRecords, addRecord, approveRecord, rejectRecord, removeRecord, updateRecordValues, exportPeriod } = useImportStore()
   const reloadImports = useImportStore(s => s.loadFromDb)
   const reloadRaw = useRawDataStoreFull(s => s.loadFromDb)
@@ -716,6 +722,57 @@ export function MaandTab({ filter: _filter }: Props) {
       return
     }
 
+    // Interne uren: vast CSV-formaat — direct parsen (geen kolom-wizard nodig)
+    // en daarna langs dezelfde goedkeur-workflow als de overige uploads.
+    if (slotId === 'interne_uren') {
+      setUploadLoading(prev => ({ ...prev, [slotId]: true }))
+      try {
+        const parsed = await parseInternalHoursFile(file)
+        if (parsed.entries.length === 0) {
+          showToast('Geen interne uren herkend in dit bestand', 'r')
+          return
+        }
+        const slot = UPLOAD_SLOTS.find(s => s.id === slotId)!
+        const record: ImportRecord = {
+          id: `${slotId}-${Date.now()}`,
+          slotId,
+          slotLabel: slot.label,
+          month: uploadMonth,
+          fileName: file.name,
+          uploadedAt: new Date().toLocaleString('nl-NL'),
+          perBv: parsed.perBv,
+          totalAmount: parsed.totalHours,
+          rowCount: parsed.rowCount,
+          parsedCount: parsed.parsedCount,
+          skippedCount: parsed.skippedCount,
+          detectedAmountCol: 'Geregistreerde tijd',
+          detectedBvCol: 'Bedrijf',
+          headers: ['Project', 'Bedrijf', 'Taaknaam', 'Werknemer', 'Datum', 'Geregistreerde tijd'],
+          preview: parsed.entries.slice(0, 6).map(e => ({
+            BV: e.bv, Maand: e.month,
+            'Interne uren': Math.round(Object.values(e.categories).reduce((s, v) => s + v, 0)),
+          })),
+          status: 'pending',
+          warnings: [],
+        }
+        addRecord(record)
+        notifyImportPending(slot.label, uploadMonth, currentUserEmail ?? 'editor')
+        setPendingInternalByRecord(prev => ({ ...prev, [record.id]: parsed.entries }))
+        addRawEntry({
+          recordId: record.id, slotId, slotLabel: slot.label, month: uploadMonth,
+          fileName: file.name, uploadedAt: record.uploadedAt, rows: [],
+          amountCol: 'Geregistreerde tijd', bvCol: 'Bedrijf', status: 'pending',
+        })
+        setPendingFile(file)
+        setPendingRecord(record)
+      } catch (err) {
+        showToast(`Interne uren niet verwerkt: ${err instanceof Error ? err.message : String(err)}`, 'r')
+      } finally {
+        setUploadLoading(prev => ({ ...prev, [slotId]: false }))
+      }
+      return
+    }
+
     // Generic wizard: zelfde workflow (sheet/header/kolommen/verfijnen) voor
     // factuurvolume, geschreven_uren, uren_lijst, d_lijst en conceptfacturen.
     if (GENERIC_WIZARD_SLOTS.has(slotId)) {
@@ -894,7 +951,9 @@ export function MaandTab({ filter: _filter }: Props) {
 
   const handleApprove = (record: ImportRecord) => {
     // Guard: niet goedkeuren als de maand al definitief afgesloten is.
-    if (finalizedMonths.some(f => f.month === record.month)) {
+    // Uitzondering: Uren Analyse-bestanden zijn YTD (niet maand-gebonden) en
+    // blijven goedkeurbaar, ook nadat de maand is afgesloten.
+    if (finalizedMonths.some(f => f.month === record.month) && !UREN_ANALYSE_SLOTS.has(record.slotId)) {
       showToast(`Maand ${record.month} is definitief afgesloten — heropen eerst via Maandafsluiting`, 'r')
       return
     }
@@ -938,6 +997,19 @@ export function MaandTab({ filter: _filter }: Props) {
         showToast(`${record.slotLabel}: ${pendingW.length} BV×week regels verwerkt`, 'g')
       }
     } catch (err) { console.error('upsertHoursWeekBulk faalde:', err) }
+    // Interne uren: push de gedetailleerde categorie-uitsplitsing naar de store.
+    try {
+      const pendingInt = pendingInternalByRecord[record.id]
+      if (pendingInt && pendingInt.length > 0) {
+        upsertInternalBulk(pendingInt)
+        setPendingInternalByRecord(prev => {
+          const next = { ...prev }
+          delete next[record.id]
+          return next
+        })
+        showToast(`${record.slotLabel}: ${pendingInt.length} BV×maand-regels verwerkt in Uren Dashboard`, 'g')
+      }
+    } catch (err) { console.error('upsertInternalBulk faalde:', err) }
     try {
       applyImportToEntries(record)
       showToast(`${record.slotLabel} goedgekeurd en toegepast`, 'g')
@@ -1518,8 +1590,7 @@ export function MaandTab({ filter: _filter }: Props) {
               </div>
             </div>
 
-            <fieldset disabled={uploadLocked} style={{ border: 'none', padding: 0, margin: 0, minInlineSize: 'auto' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12, opacity: uploadLocked ? 0.55 : 1 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
               {/* Section-header voor de Uren Analyse-tegels (geschreven_uren +
                   uren_facturering_totaal). Beslaat de volledige rasterbreedte
                   zodat hij visueel scheidt van de maandafsluiting-tegels. */}
@@ -1544,6 +1615,10 @@ export function MaandTab({ filter: _filter }: Props) {
                 // header injecteren als full-width grid-item, vóór de tegel.
                 const firstNonAnalyseIdx = UPLOAD_SLOTS.findIndex(s => !UREN_ANALYSE_SLOTS.has(s.id))
                 const isFirstNonAnalyse = idx === firstNonAnalyseIdx
+                // Uren Analyse-bestanden zijn YTD — niet aan een maand gekoppeld.
+                // Die blijven uploadbaar, óók als de maand is afgesloten; alleen
+                // de maandafsluiting-tegels worden dan vergrendeld.
+                const tileLocked = uploadLocked && !UREN_ANALYSE_SLOTS.has(slot.id)
 
                 return (
                   <Fragment key={slot.id}>
@@ -1560,6 +1635,7 @@ export function MaandTab({ filter: _filter }: Props) {
                         </span>
                       </div>
                     )}
+                  <fieldset disabled={tileLocked} style={{ border: 'none', padding: 0, margin: 0, minInlineSize: 'auto', opacity: tileLocked ? 0.55 : 1 }}>
                   <div
                     className="card"
                     id={`import-slot-${slot.id}`}
@@ -1600,7 +1676,7 @@ export function MaandTab({ filter: _filter }: Props) {
                           het aantal UREN i.p.v. een €-bedrag, want de upload
                           bevat tijden, geen factuurwaarde. */}
                       {latest && (() => {
-                        const isHours = slot.id === 'geschreven_uren'
+                        const isHours = slot.id === 'geschreven_uren' || slot.id === 'interne_uren'
                         const fmtVal = (v: number) =>
                           isHours
                             ? `${Math.round(v).toLocaleString('nl-NL')} u`
@@ -1678,11 +1754,11 @@ export function MaandTab({ filter: _filter }: Props) {
                       )}
                     </div>
                   </div>
+                  </fieldset>
                   </Fragment>
                 )
               })}
             </div>
-            </fieldset>
           </>
         )}
 
@@ -1754,10 +1830,12 @@ export function MaandTab({ filter: _filter }: Props) {
                         monthLabel: monthLabelFromCode(m),
                         ytdMonths: CLOSING_MONTHS.slice(0, CLOSING_MONTHS.indexOf(m) + 1),
                         closingEntries: mEntries,
+                        ohwData2025: useOhwStore.getState().data2025,
                         ohwData2026: useOhwStore.getState().data2026,
                         importRecords: importRecords,
                         data: reportData,
                         aiAnalyses: await buildAiAnalyses(reportData, m),
+                        internalHours: useInternalHoursStore.getState().entries,
                       })
                     }
                     showToast(`Maandrapportage PPTX gegenereerd voor ${exportMonths.join(', ')}`, 'g')
@@ -1815,6 +1893,7 @@ export function MaandTab({ filter: _filter }: Props) {
                       bvFilter: lockedBv ?? null,
                       reportData,
                       aiAnalyses: await buildAiAnalyses(reportData, m),
+                      internalHours: useInternalHoursStore.getState().entries,
                     })
                     const bvSuffix = lockedBv ? `_${lockedBv}` : ''
                     downloadBlob(blob, `TPG_Volledig_Rapport_${m.replace(/\s+/g, '_')}${bvSuffix}.zip`)
@@ -1855,15 +1934,18 @@ export function MaandTab({ filter: _filter }: Props) {
                     )}
                     {importRecords.map(r => {
                       const rowLocked = finalizedMonths.some(f => f.month === r.month)
+                      // geschreven_uren / interne_uren bevatten uren, geen euro's.
+                      const isHoursRec = r.slotId === 'geschreven_uren' || r.slotId === 'interne_uren'
+                      const fmtAmt = (v: number) => isHoursRec ? `${Math.round(v).toLocaleString('nl-NL')} u` : fmt(v)
                       return (
                       <tr key={r.id} className="sub">
                         <td style={{ fontWeight: 600 }}>{r.month}{rowLocked && <span title="Maand definitief afgesloten" style={{ marginLeft: 4, fontSize: 9 }}>🔒</span>}</td>
                         <td>{UPLOAD_SLOTS.find(s => s.id === r.slotId)?.icon} {r.slotLabel}</td>
                         <td style={{ color: 'var(--t3)', fontSize: 11 }}>{r.fileName}</td>
-                        <td className="mono r">{fmt(r.totalAmount)}</td>
-                        <td className="mono r" style={{ color: BV_COLORS.Consultancy }}>{r.perBv['Consultancy'] > 0 ? fmt(r.perBv['Consultancy']) : '—'}</td>
-                        <td className="mono r" style={{ color: BV_COLORS.Projects }}>{r.perBv['Projects'] > 0 ? fmt(r.perBv['Projects']) : '—'}</td>
-                        <td className="mono r" style={{ color: BV_COLORS.Software }}>{r.perBv['Software'] > 0 ? fmt(r.perBv['Software']) : '—'}</td>
+                        <td className="mono r">{fmtAmt(r.totalAmount)}</td>
+                        <td className="mono r" style={{ color: BV_COLORS.Consultancy }}>{r.perBv['Consultancy'] > 0 ? fmtAmt(r.perBv['Consultancy']) : '—'}</td>
+                        <td className="mono r" style={{ color: BV_COLORS.Projects }}>{r.perBv['Projects'] > 0 ? fmtAmt(r.perBv['Projects']) : '—'}</td>
+                        <td className="mono r" style={{ color: BV_COLORS.Software }}>{r.perBv['Software'] > 0 ? fmtAmt(r.perBv['Software']) : '—'}</td>
                         <td>
                           <span style={{
                             fontSize: 10, padding: '2px 6px', borderRadius: 3, fontWeight: 600,

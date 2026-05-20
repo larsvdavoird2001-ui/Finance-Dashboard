@@ -4,6 +4,11 @@
 import { supabase, supabaseEnabled } from './supabase'
 import type { ClosingEntry, FteEntry, ImportRecord, OhwEntityData } from '../data/types'
 import type { RawDataEntry } from '../store/useRawDataStore'
+import type { HoursEntry } from '../store/useHoursStore'
+import type { HoursWeekEntry } from '../store/useHoursWeekStore'
+import type { CostBreakdown } from '../store/useCostBreakdownStore'
+import type { ReflectionRecord } from '../store/useReflectionStore'
+import type { InternalHoursEntry } from './parseInternalHours'
 import { emitDbEvent } from './dbEvents'
 import { useSaveStatus } from './saveStatus'
 
@@ -489,4 +494,141 @@ export async function touchUserSignIn(email: string): Promise<void> {
     .update({ last_sign_in: new Date().toISOString() })
     .eq('email', email.trim().toLowerCase())
   if (error) console.error('touchUserSignIn:', error)
+}
+
+// ── Hours entries (SAP geschreven-uren per maand) ───────────────────────────
+export async function fetchHoursEntries(): Promise<HoursEntry[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('hours_entries').select('*')
+  if (error) { console.error('fetchHoursEntries:', error); return [] }
+  return (data ?? []).map(row => ({
+    id: String(row.id), bv: row.bv, month: row.month,
+    declarable: Number(row.declarable ?? 0), internal: Number(row.internal ?? 0),
+    vakantie: Number(row.vakantie ?? 0), ziekte: Number(row.ziekte ?? 0),
+    overigVerlof: Number(row.overig_verlof ?? 0),
+  }))
+}
+export async function upsertHoursEntries(entries: HoursEntry[]): Promise<void> {
+  if (!supabaseEnabled || entries.length === 0) return
+  const rows = entries.map(e => ({
+    id: e.id, bv: e.bv, month: e.month,
+    declarable: e.declarable, internal: e.internal,
+    vakantie: e.vakantie, ziekte: e.ziekte, overig_verlof: e.overigVerlof,
+  }))
+  await trackedWrite('hours_entries', () =>
+    supabase.from('hours_entries').upsert(rows, { onConflict: 'id' }))
+}
+export async function deleteAllHoursEntries(): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('hours_entries').delete().neq('id', '')
+  if (error) console.error('deleteAllHoursEntries:', error)
+}
+
+// ── Hours week entries (SAP-uren per ISO-week) ──────────────────────────────
+export async function fetchHoursWeekEntries(): Promise<HoursWeekEntry[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('hours_week_entries').select('*')
+  if (error) { console.error('fetchHoursWeekEntries:', error); return [] }
+  return (data ?? []).map(row => ({
+    id: String(row.id), bv: row.bv, year: Number(row.year ?? 0), week: Number(row.week ?? 0),
+    month: row.month, weekStart: row.week_start ?? '', weekEnd: row.week_end ?? '',
+    declarable: Number(row.declarable ?? 0), internal: Number(row.internal ?? 0),
+    vakantie: Number(row.vakantie ?? 0), ziekte: Number(row.ziekte ?? 0),
+    overigVerlof: Number(row.overig_verlof ?? 0),
+    plannedWork: Number(row.planned_work ?? 0), missingHoursOpen: Number(row.missing_hours_open ?? 0),
+  }))
+}
+export async function upsertHoursWeekEntries(entries: HoursWeekEntry[]): Promise<void> {
+  if (!supabaseEnabled || entries.length === 0) return
+  const rows = entries.map(e => ({
+    id: e.id, bv: e.bv, year: e.year, week: e.week, month: e.month,
+    week_start: e.weekStart, week_end: e.weekEnd,
+    declarable: e.declarable, internal: e.internal, vakantie: e.vakantie,
+    ziekte: e.ziekte, overig_verlof: e.overigVerlof,
+    planned_work: e.plannedWork, missing_hours_open: e.missingHoursOpen,
+  }))
+  await trackedWrite('hours_week_entries', () =>
+    supabase.from('hours_week_entries').upsert(rows, { onConflict: 'id' }))
+}
+export async function deleteAllHoursWeekEntries(): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('hours_week_entries').delete().neq('id', '')
+  if (error) console.error('deleteAllHoursWeekEntries:', error)
+}
+
+// ── Kosten-specificaties ────────────────────────────────────────────────────
+export async function fetchCostBreakdowns(): Promise<CostBreakdown[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('cost_breakdowns').select('*')
+  if (error) { console.error('fetchCostBreakdowns:', error); return [] }
+  return (data ?? []).map(row => {
+    const v = (row.values ?? {}) as Record<string, number>
+    return {
+      id: String(row.id), month: row.month, category: row.category, label: row.label ?? '',
+      values: {
+        Consultancy: Number(v.Consultancy ?? 0), Projects: Number(v.Projects ?? 0),
+        Software: Number(v.Software ?? 0), Holdings: Number(v.Holdings ?? 0),
+      },
+    }
+  })
+}
+export async function upsertCostBreakdowns(items: CostBreakdown[]): Promise<void> {
+  if (!supabaseEnabled || items.length === 0) return
+  const rows = items.map(b => ({
+    id: b.id, month: b.month, category: b.category, label: b.label, values: b.values,
+  }))
+  await trackedWrite('cost_breakdowns', () =>
+    supabase.from('cost_breakdowns').upsert(rows, { onConflict: 'id' }))
+}
+export async function deleteCostBreakdown(id: string): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('cost_breakdowns').delete().eq('id', id)
+  if (error) console.error('deleteCostBreakdown:', error)
+}
+
+// ── LE-reflecties ───────────────────────────────────────────────────────────
+export async function fetchReflections(): Promise<ReflectionRecord[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('closing_reflections').select('*')
+  if (error) { console.error('fetchReflections:', error); return [] }
+  return (data ?? []).map(row => ({
+    month: String(row.month),
+    bv: row.bv as ReflectionRecord['bv'],
+    answers: (row.answers ?? []) as ReflectionRecord['answers'],
+  }))
+}
+export async function upsertReflections(records: ReflectionRecord[]): Promise<void> {
+  if (!supabaseEnabled || records.length === 0) return
+  const rows = records.map(r => ({
+    id: `${r.month}::${r.bv ?? 'all'}`,
+    month: r.month, bv: r.bv ?? 'all', answers: r.answers,
+  }))
+  await trackedWrite('closing_reflections', () =>
+    supabase.from('closing_reflections').upsert(rows, { onConflict: 'id' }))
+}
+
+// ── Interne uren (gedetailleerde niet-declarabele uren per BV/maand) ────────
+export async function fetchInternalHours(): Promise<InternalHoursEntry[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('internal_hours').select('*')
+  if (error) { console.error('fetchInternalHours:', error); return [] }
+  return (data ?? []).map(row => ({
+    id: String(row.id), bv: row.bv, month: row.month,
+    categories: (row.categories ?? {}) as Record<string, number>,
+    employees: (row.employees ?? []) as InternalHoursEntry['employees'],
+  }))
+}
+export async function upsertInternalHours(entries: InternalHoursEntry[]): Promise<void> {
+  if (!supabaseEnabled || entries.length === 0) return
+  const rows = entries.map(e => ({
+    id: e.id, bv: e.bv, month: e.month,
+    categories: e.categories, employees: e.employees,
+  }))
+  await trackedWrite('internal_hours', () =>
+    supabase.from('internal_hours').upsert(rows, { onConflict: 'id' }))
+}
+export async function deleteAllInternalHours(): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('internal_hours').delete().neq('id', '')
+  if (error) console.error('deleteAllInternalHours:', error)
 }

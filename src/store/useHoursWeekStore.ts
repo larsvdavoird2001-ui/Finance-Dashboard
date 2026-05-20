@@ -11,6 +11,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { BvId } from '../data/types'
+import { fetchHoursWeekEntries, upsertHoursWeekEntries, deleteAllHoursWeekEntries } from '../lib/db'
 
 export interface HoursWeekEntry {
   /** `${bv}-${year}-W${week}` (week zero-padded) */
@@ -40,6 +41,8 @@ export interface HoursWeekEntry {
 interface HoursWeekStore {
   entries: HoursWeekEntry[]
   loaded: boolean
+  /** Laad uit Supabase + merge met lokale state (DB wint per id). */
+  loadFromDb: () => Promise<void>
   /** Bulk-upsert per id. Voor (bv, year, week)-combinaties die NIET in de
    *  upload zitten: ongemoeid laten. Voor wel aanwezige: vervangen. */
   upsertBulk: (batch: HoursWeekEntry[]) => void
@@ -60,12 +63,31 @@ export const useHoursWeekStore = create<HoursWeekStore>()(
       entries: [],
       loaded: false,
 
+      loadFromDb: async () => {
+        let dbRows: HoursWeekEntry[] = []
+        try {
+          dbRows = await fetchHoursWeekEntries()
+        } catch (e) {
+          console.warn('[useHoursWeekStore] fetch failed — keeping local state:', e)
+          set({ loaded: true })
+          return
+        }
+        const local = get().entries
+        const byId = new Map(local.map(e => [e.id, e]))
+        for (const r of dbRows) byId.set(r.id, r)
+        set({ entries: Array.from(byId.values()), loaded: true })
+        const dbIds = new Set(dbRows.map(r => r.id))
+        const localOnly = local.filter(e => !dbIds.has(e.id))
+        if (localOnly.length > 0) upsertHoursWeekEntries(localOnly)
+      },
+
       upsertBulk: (batch) => {
         set(s => {
           const byKey = new Map(s.entries.map(e => [e.id, e]))
           for (const e of batch) byKey.set(e.id, e)
           return { entries: Array.from(byKey.values()) }
         })
+        upsertHoursWeekEntries(batch)
       },
 
       getEntry: (bv, year, week) =>
@@ -75,7 +97,10 @@ export const useHoursWeekStore = create<HoursWeekStore>()(
         get().entries.filter(e => e.bv === bv && e.year === year)
           .sort((a, b) => a.week - b.week),
 
-      clearAll: () => set({ entries: [] }),
+      clearAll: () => {
+        set({ entries: [] })
+        deleteAllHoursWeekEntries()
+      },
     }),
     {
       name: 'tpg-hours-week-entries',

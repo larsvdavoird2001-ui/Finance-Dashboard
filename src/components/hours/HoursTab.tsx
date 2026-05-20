@@ -9,6 +9,7 @@ import { useHoursWeekStore } from '../../store/useHoursWeekStore'
 import { useImportStore } from '../../store/useImportStore'
 import { useFteStore } from '../../store/useFteStore'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
+import { InternalHoursSection } from './InternalHoursSection'
 import { useFinStore } from '../../store/useFinStore'
 import { fmt } from '../../lib/format'
 import { getFteLe as sharedGetFteLe } from '../../lib/fteLe'
@@ -1235,6 +1236,9 @@ export function HoursTab({ filter, onFilterChange }: Props) {
           ⚠ Gemiddelde declarabelheid {ytdDeclPct.toFixed(1)}% (YTD actuals) ligt onder de norm van 75%. Controleer niet-declarabele uren.
         </div>
       )}
+
+      {/* Interne uren — gedetailleerde onderverdeling van de niet-declarabele uren */}
+      <InternalHoursSection />
     </div>
   )
 }

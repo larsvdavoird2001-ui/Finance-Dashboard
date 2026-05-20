@@ -5,12 +5,12 @@
 // eenmalig of structureel is, zodat toekomstige forecasts daarmee rekening
 // houden.
 //
-// Persistentie: localStorage via zustand persist. (Cross-device sync zou een
-// Supabase-tabel zijn — nu local-only zodat deze feature zonder DB-migratie
-// werkt. Later evt. uitbreiden naar `closing_reflections`.)
+// Persistentie: Supabase (tabel `closing_reflections`) + localStorage als
+// cache, zodat de reflecties gedeeld zijn met alle gebruikers.
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ClosingBv } from '../data/types'
+import { fetchReflections, upsertReflections } from '../lib/db'
 
 export interface ReflectionAnswer {
   /** Stable id zoals 'fte-up' — komt uit de question generator. */
@@ -38,6 +38,9 @@ export interface ReflectionRecord {
 
 interface ReflectionStore {
   records: ReflectionRecord[]
+  loaded: boolean
+  /** Laad uit Supabase + merge met lokale state (DB wint per maand/BV). */
+  loadFromDb: () => Promise<void>
   /** Bewaar of update een antwoord voor (maand, bv, vraag-id). */
   saveAnswer: (
     month: string,
@@ -64,6 +67,25 @@ export const useReflectionStore = create<ReflectionStore>()(
   persist(
     (set, get) => ({
       records: [],
+      loaded: false,
+
+      loadFromDb: async () => {
+        let dbRows: ReflectionRecord[] = []
+        try {
+          dbRows = await fetchReflections()
+        } catch (e) {
+          console.warn('[useReflectionStore] fetch failed — keeping local state:', e)
+          set({ loaded: true })
+          return
+        }
+        const local = get().records
+        const byKey = new Map(local.map(r => [recordKey(r), r]))
+        for (const r of dbRows) byKey.set(recordKey(r), r)   // Supabase wint
+        set({ records: Array.from(byKey.values()), loaded: true })
+        const dbKeys = new Set(dbRows.map(recordKey))
+        const localOnly = local.filter(r => !dbKeys.has(recordKey(r)))
+        if (localOnly.length > 0) upsertReflections(localOnly)
+      },
 
       saveAnswer: (month, bv, questionId, question, answer, scope, savedBy) => {
         const key = `${month}::${bv}`
@@ -88,6 +110,8 @@ export const useReflectionStore = create<ReflectionStore>()(
             records: s.records.map(r => recordKey(r) === key ? { ...r, answers: next } : r),
           }
         })
+        const rec = get().records.find(r => recordKey(r) === key)
+        if (rec) upsertReflections([rec])
       },
 
       removeAnswer: (month, bv, questionId) => {
@@ -99,6 +123,8 @@ export const useReflectionStore = create<ReflectionStore>()(
               : r,
           ),
         }))
+        const rec = get().records.find(r => recordKey(r) === key)
+        if (rec) upsertReflections([rec])
       },
 
       getAnswers: (month, bv) => {

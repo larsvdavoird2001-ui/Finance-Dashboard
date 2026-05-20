@@ -7,6 +7,11 @@ import { useOhwStore } from '../store/useOhwStore'
 import { useTariffStore } from '../store/useTariffStore'
 import { useEvidenceStore } from '../store/useEvidenceStore'
 import { useBudgetStore } from '../store/useBudgetStore'
+import { useHoursStore } from '../store/useHoursStore'
+import { useHoursWeekStore } from '../store/useHoursWeekStore'
+import { useCostBreakdownStore } from '../store/useCostBreakdownStore'
+import { useReflectionStore } from '../store/useReflectionStore'
+import { useInternalHoursStore } from '../store/useInternalHoursStore'
 
 /** Geeft één functie terug die alle data-stores opnieuw uit Supabase laadt.
  *  Bedoeld voor:
@@ -23,6 +28,11 @@ export function useDataRefresh() {
   const loadTariff   = useTariffStore(s => s.loadFromDb)
   const loadEvidence = useEvidenceStore(s => s.loadFromDb)
   const loadBudget   = useBudgetStore(s => s.loadFromDb)
+  const loadHours          = useHoursStore(s => s.loadFromDb)
+  const loadHoursWeek      = useHoursWeekStore(s => s.loadFromDb)
+  const loadCostBreakdown  = useCostBreakdownStore(s => s.loadFromDb)
+  const loadReflection     = useReflectionStore(s => s.loadFromDb)
+  const loadInternalHours  = useInternalHoursStore(s => s.loadFromDb)
 
   return useCallback(async () => {
     await Promise.all([
@@ -34,6 +44,12 @@ export function useDataRefresh() {
       loadTariff().catch(e => console.warn('[refresh] tariff:', e)),
       loadEvidence().catch(e => console.warn('[refresh] evidence:', e)),
       loadBudget().catch(e => console.warn('[refresh] budget:', e)),
+      loadHours().catch(e => console.warn('[refresh] hours:', e)),
+      loadHoursWeek().catch(e => console.warn('[refresh] hoursWeek:', e)),
+      loadCostBreakdown().catch(e => console.warn('[refresh] costBreakdown:', e)),
+      loadReflection().catch(e => console.warn('[refresh] reflection:', e)),
+      loadInternalHours().catch(e => console.warn('[refresh] internalHours:', e)),
     ])
-  }, [loadFin, loadFte, loadImport, loadRaw, loadOhw, loadTariff, loadEvidence, loadBudget])
+  }, [loadFin, loadFte, loadImport, loadRaw, loadOhw, loadTariff, loadEvidence, loadBudget,
+      loadHours, loadHoursWeek, loadCostBreakdown, loadReflection, loadInternalHours])
 }
