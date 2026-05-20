@@ -163,3 +163,75 @@ export function parseLeAiResponse(text: string): LeAiResult {
   const commentary = typeof parsed.commentary === 'string' ? parsed.commentary.trim() : ''
   return { suggestions, commentary, retrievedAt: new Date().toISOString() }
 }
+
+// ─── Maandrapportage: AI-analyse per BV (voor de PowerPoint-export) ──────────
+//
+// Aparte, lichtgewicht AI-call los van de LE-leerlus: levert per business unit
+// een vloeiende CFO-analyse op basis van de YTD-cijfers, het budget, vorig jaar
+// en de Latest Estimate. Wordt door de maandrapportage-export aangeroepen zodat
+// de AI-analyseslide altijd een geschreven duiding bevat. Faalt de call (bv.
+// /api/chat niet bereikbaar in dev), dan valt de export terug op een lokaal
+// gegenereerde analyse.
+
+const REPORT_SYSTEM_PROMPT = `Je bent een senior FP&A-analist / business controller bij The People Group, een Nederlands consultancy-bedrijf met drie business units. Je krijgt per business unit de financiële kerncijfers van een maandrapportage: omzet (maand + YTD) versus budget en versus vorig jaar, brutomarge en marge-%, EBITDA, declarabiliteit en de Latest Estimate (jaarprognose) versus jaarbudget.
+
+Schrijf voor ELKE aangeleverde business unit een scherpe analyse van 4 à 5 zinnen in correct, zakelijk Nederlands voor de CFO. Eisen:
+- Begin direct met de belangrijkste bevinding (geen inleiding).
+- LEG VERBANDEN tussen de cijfers en verklaar het waaróm: koppel bijvoorbeeld een lagere declarabiliteit aan margedruk en aan de EBITDA, of een omzetafwijking aan budget én vorig jaar. Cijfers zonder duiding zijn niet genoeg.
+- Wees concreet met bedragen en percentages uit de input; rond netjes af (bv. "€ 1,2 mln", "+3,4%").
+- Sluit af met een vooruitblik op de Latest Estimate versus het jaarbudget én één concreet, uitvoerbaar advies voor bijsturing.
+- Geen jargon, geen disclaimers, geen opsommingstekens, geen herhaling van de ruwe getallenlijst.
+
+ANTWOORD UITSLUITEND IN GELDIG JSON, exact dit schema (geen markdown-code-fences, geen tekst eromheen):
+
+{ "Consultancy": "<analyse>", "Projects": "<analyse>", "Software": "<analyse>" }
+
+Gebruik exact de business-unit-namen die in de input staan als sleutels.`
+
+/** Vraag Claude om een analyse-tekst per business unit voor de maandrapportage. */
+export async function requestReportNarratives(
+  month: string,
+  bvData: Array<{ bv: string; metrics: Record<string, number | null> }>,
+  signal?: AbortSignal,
+): Promise<Record<string, string>> {
+  const userMessage = `Maand: ${month}\n\nFinanciële kerncijfers per business unit (bedragen in euro):\n\n${JSON.stringify(bvData, null, 2)}\n\nGeef het JSON-antwoord nu.`
+
+  const resp = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      system: REPORT_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userMessage }],
+      max_tokens: 1400,
+    }),
+    signal,
+  })
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(`Rapportage-AI API-fout (${resp.status}): ${text.slice(0, 200)}`)
+  }
+  const data = await resp.json()
+  if (data?.error) throw new Error(data.error?.message ?? JSON.stringify(data.error))
+  if (!Array.isArray(data?.content)) throw new Error('Onverwacht response-formaat van Claude')
+
+  const text = data.content
+    .filter((b: { type?: string }) => b?.type === 'text')
+    .map((b: { text?: string }) => b.text ?? '')
+    .join('')
+    .trim()
+
+  let cleaned = text.trim()
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+  }
+  const first = cleaned.indexOf('{')
+  const last = cleaned.lastIndexOf('}')
+  if (first < 0 || last <= first) throw new Error('Geen JSON gevonden in AI-antwoord')
+  const parsed = JSON.parse(cleaned.slice(first, last + 1)) as Record<string, unknown>
+
+  const out: Record<string, string> = {}
+  for (const [bv, v] of Object.entries(parsed)) {
+    if (typeof v === 'string' && v.trim().length > 0) out[bv] = v.trim()
+  }
+  return out
+}

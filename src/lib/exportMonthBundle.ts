@@ -5,6 +5,7 @@ import type { RawDataEntry } from '../store/useRawDataStore'
 import type { CostBreakdown } from '../store/useCostBreakdownStore'
 import type { EvidenceEntry } from '../lib/db'
 import { buildMonthPptxBlob, monthLabelFromCode } from './exportPptx'
+import type { ReportDataset, AiAnalysisEntry } from './exportPptx'
 
 export interface MonthBundleInput {
   month: string                  // "Mar-26"
@@ -222,6 +223,10 @@ export interface FullMonthReportInput {
   /** Optioneel: beperk de export tot één BV (voor BV-locked gebruikers).
    *  null/undefined = alle BVs. */
   bvFilter?: ClosingBv | null
+  /** Live dataset (actuals, budget incl. overrides, LE, uren) voor de PPTX. */
+  reportData?: ReportDataset
+  /** AI-duiding (CFO-commentary) per BV — voor de PowerPoint AI-duiding. */
+  aiAnalyses?: AiAnalysisEntry[]
 }
 
 /** Sla de closing-entries op in een leesbaar Excel-formaat.
@@ -582,7 +587,7 @@ export async function buildFullMonthReportZip(input: FullMonthReportInput): Prom
   }
 
   // 8. PowerPoint maandrapportage
-  if (sections.pptx) {
+  if (sections.pptx && input.reportData) {
     try {
       const pptxBlob = await buildMonthPptxBlob({
         month:           input.month,
@@ -591,6 +596,8 @@ export async function buildFullMonthReportZip(input: FullMonthReportInput): Prom
         closingEntries:  input.closingEntries,
         ohwData2026:     input.ohwData2026,
         importRecords:   input.importRecords,
+        data:            input.reportData,
+        aiAnalyses:      input.aiAnalyses,
       })
       const pptxBuf = await pptxBlob.arrayBuffer()
       root.file(`Maandrapportage_${safeName(input.month)}.pptx`, pptxBuf)

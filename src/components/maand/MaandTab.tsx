@@ -26,6 +26,15 @@ import { BijlagenSection } from './BijlagenSection'
 import { buildMonthBundleZip, buildFullMonthReportZip, downloadBlob } from '../../lib/exportMonthBundle'
 import type { FullReportSections } from '../../lib/exportMonthBundle'
 import { generateMonthPptx, monthLabelFromCode } from '../../lib/exportPptx'
+import type { ReportDataset, AiAnalysisEntry, HoursBreakdown } from '../../lib/exportPptx'
+import { useLatestEstimate } from '../../hooks/useLatestEstimate'
+import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
+import { useBudgetStore } from '../../store/useBudgetStore'
+import { useLeAiStore } from '../../store/useLeAiStore'
+import { requestReportNarratives } from '../../lib/leAi'
+import { derivePL } from '../../lib/plDerive'
+import { monthlyActuals2025 } from '../../data/plData2025'
+import { MONTHS_2025, MONTHS_2026 } from '../../data/hoursData'
 import { useRawDataStore as useRawDataStoreFull } from '../../store/useRawDataStore'
 import { useFteStore } from '../../store/useFteStore'
 import { useEvidenceStore } from '../../store/useEvidenceStore'
@@ -271,6 +280,112 @@ const AMORTISATIE_SUBS = [
 export function MaandTab({ filter: _filter }: Props) {
   const lockedBv = useLockedBv()
   const currentUserEmail = useCurrentUserEmail()
+  // Latest Estimate-engine + adjusted actuals — leveren samen de live cijfers
+  // voor de PowerPoint-export. Zo gebruikt het rapport exact de bewerkte
+  // budgetten, closing-aanpassingen en geüploade uren die de CFO in de app ziet.
+  const le = useLatestEstimate()
+  const adjusted = useAdjustedActuals()
+
+  /** Bouw de volledige dataset voor de PowerPoint-export uit de app-stores:
+   *  adjusted actuals, budget incl. overrides, Latest Estimate en SAP-uren. */
+  const buildReportDataset = (): ReportDataset => {
+    const bvs: EntityName[] = ['Consultancy', 'Projects', 'Software']
+    const actuals: Record<string, Record<string, Record<string, number>>> = {}
+    const budget:  Record<string, Record<string, Record<string, number>>> = {}
+    const leData:  Record<string, Record<string, Record<string, number>>> = {}
+    const hours:   Record<string, Record<string, HoursBreakdown>> = {}
+    const leKeys = ['netto_omzet', 'brutomarge', 'ebitda', 'ebit', 'directe_kosten', 'operationele_kosten']
+    // Aggregate-/derived-budgetregels worden — net als in de Budgetten-tab —
+    // afgeleid uit de (eventueel bewerkte) sub-budgetten; een stale opgeslagen
+    // aggregate-waarde wordt genegeerd. Anders telt een budget-edit niet mee.
+    const deriveKeys = ['netto_omzet', 'directe_kosten', 'operationele_kosten', 'amortisatie_afschrijvingen', 'brutomarge', 'ebitda', 'ebit']
+    const hoursEntries = useHoursStore.getState().entries
+    const getBudget = useBudgetStore.getState().getMonth
+    for (const bv of bvs) {
+      actuals[bv] = {}; budget[bv] = {}; leData[bv] = {}; hours[bv] = {}
+      for (const mc of MONTHS_2026) {
+        actuals[bv][mc] = adjusted.getMonthly(bv, mc)
+        const rawBud = getBudget(bv, mc)
+        const bud: Record<string, number> = { ...rawBud }
+        for (const k of deriveKeys) bud[k] = derivePL(key => rawBud[key] ?? 0, k)
+        budget[bv][mc] = bud
+        const leM: Record<string, number> = {}
+        for (const k of leKeys) leM[k] = le.getLE(bv, mc, k)
+        leData[bv][mc] = leM
+      }
+      for (const mc of [...MONTHS_2025, ...MONTHS_2026]) {
+        const he = hoursEntries.find(e => e.bv === bv && e.month === mc)
+        if (he) hours[bv][mc] = {
+          declarable: he.declarable, internal: he.internal,
+          vakantie: he.vakantie, ziekte: he.ziekte, overigVerlof: he.overigVerlof,
+        }
+      }
+    }
+    return { actuals, budget, le: leData, hours }
+  }
+
+  /** Financiële kerncijfers per BV — rijke input voor de AI-analyse, zodat de
+   *  duiding verbanden kan leggen tussen omzet, marge, declarabiliteit en LE. */
+  const buildBvMetrics = (ds: ReportDataset, bv: EntityName, m: string): Record<string, number | null> => {
+    const ytdM = CLOSING_MONTHS.slice(0, CLOSING_MONTHS.indexOf(m) + 1)
+    const y25  = ytdM.map(x => x.replace('-26', '-25'))
+    const sumA = (key: string) => ytdM.reduce((s, mm) => s + (ds.actuals[bv]?.[mm]?.[key] ?? 0), 0)
+    const sumB = (key: string) => ytdM.reduce((s, mm) => s + (ds.budget[bv]?.[mm]?.[key] ?? 0), 0)
+    const fyLe = (key: string) => MONTHS_2026.reduce((s, mm) => s + (ds.le[bv]?.[mm]?.[key] ?? 0), 0)
+    const fyBud = (key: string) => MONTHS_2026.reduce((s, mm) => s + (ds.budget[bv]?.[mm]?.[key] ?? 0), 0)
+    let worked = 0, declarable = 0
+    for (const mm of ytdM) {
+      const h = ds.hours[bv]?.[mm]
+      if (h) { worked += h.declarable + h.internal; declarable += h.declarable }
+    }
+    const omzetY = sumA('netto_omzet')
+    return {
+      omzet_ytd:            Math.round(omzetY),
+      omzet_budget_ytd:     Math.round(sumB('netto_omzet')),
+      omzet_maand:          Math.round(ds.actuals[bv]?.[m]?.['netto_omzet'] ?? 0),
+      omzet_maand_budget:   Math.round(ds.budget[bv]?.[m]?.['netto_omzet'] ?? 0),
+      omzet_vorig_jaar_ytd: Math.round(y25.reduce((s, mm) => s + (monthlyActuals2025[bv]?.[mm]?.['netto_omzet'] ?? 0), 0)),
+      brutomarge_ytd:       Math.round(sumA('brutomarge')),
+      brutomarge_pct:       omzetY > 0 ? Math.round(sumA('brutomarge') / omzetY * 1000) / 10 : 0,
+      ebitda_ytd:           Math.round(sumA('ebitda')),
+      declarabiliteit_pct:  worked > 0 ? Math.round(declarable / worked * 1000) / 10 : null,
+      latest_estimate_fy_omzet:  Math.round(fyLe('netto_omzet')),
+      latest_estimate_fy_ebitda: Math.round(fyLe('ebitda')),
+      budget_fy_omzet:      Math.round(fyBud('netto_omzet')),
+    }
+  }
+
+  /** AI-duiding per BV: eerst de gecachte LE-leerlus-commentary, daarna een
+   *  live AI-call voor de ontbrekende BV's. Lukt de live-call niet (bv.
+   *  /api/chat niet bereikbaar in dev), dan vult de PowerPoint zelf een
+   *  automatische analyse in — elke per-BV slide bevat dus altijd duiding. */
+  const buildAiAnalyses = async (ds: ReportDataset, m: string): Promise<AiAnalysisEntry[]> => {
+    const bvs: EntityName[] = ['Consultancy', 'Projects', 'Software']
+    const cache = useLeAiStore.getState().cache
+    const out: AiAnalysisEntry[] = []
+    const missing: EntityName[] = []
+    for (const bv of bvs) {
+      const entry = cache[`${m}::${bv}`]
+      if (entry?.status === 'success' && entry.result?.commentary) {
+        out.push({ bv, commentary: entry.result.commentary, retrievedAt: entry.result.retrievedAt })
+      } else {
+        missing.push(bv)
+      }
+    }
+    if (missing.length > 0) {
+      try {
+        const narratives = await requestReportNarratives(
+          m, missing.map(bv => ({ bv, metrics: buildBvMetrics(ds, bv, m) })),
+        )
+        for (const bv of missing) {
+          if (narratives[bv]) out.push({ bv, commentary: narratives[bv], retrievedAt: new Date().toISOString() })
+        }
+      } catch {
+        // Live AI niet beschikbaar — PowerPoint genereert zelf de analyse.
+      }
+    }
+    return out
+  }
   // Voor BV-locked users: alle BV-lijsten beperken tot de eigen BV. Module-
   // niveau `BVS_FULL` blijft de canonieke 4-BV lijst; binnen deze component
   // gebruiken we `BVS` (geshadowd) voor renders, totalen en validaties.
@@ -1631,6 +1746,7 @@ export function MaandTab({ filter: _filter }: Props) {
                 onClick={async () => {
                   if (exportMonths.length === 0) { showToast('Selecteer eerst een maand', 'r'); return }
                   try {
+                    const reportData = buildReportDataset()
                     for (const m of exportMonths) {
                       const mEntries = entries.filter(e => e.month === m)
                       await generateMonthPptx({
@@ -1640,6 +1756,8 @@ export function MaandTab({ filter: _filter }: Props) {
                         closingEntries: mEntries,
                         ohwData2026: useOhwStore.getState().data2026,
                         importRecords: importRecords,
+                        data: reportData,
+                        aiAnalyses: await buildAiAnalyses(reportData, m),
                       })
                     }
                     showToast(`Maandrapportage PPTX gegenereerd voor ${exportMonths.join(', ')}`, 'g')
@@ -1675,6 +1793,7 @@ export function MaandTab({ filter: _filter }: Props) {
                   const evidenceAll   = useEvidenceStore.getState().entries
                   const ohw2025       = useOhwStore.getState().data2025
                   const ohw2026       = useOhwStore.getState().data2026
+                  const reportData    = buildReportDataset()
 
                   for (const m of exportMonths) {
                     const mEntries = entries.filter(e => e.month === m)
@@ -1694,6 +1813,8 @@ export function MaandTab({ filter: _filter }: Props) {
                       generatedAt: new Date().toLocaleString('nl-NL'),
                       sections,
                       bvFilter: lockedBv ?? null,
+                      reportData,
+                      aiAnalyses: await buildAiAnalyses(reportData, m),
                     })
                     const bvSuffix = lockedBv ? `_${lockedBv}` : ''
                     downloadBlob(blob, `TPG_Volledig_Rapport_${m.replace(/\s+/g, '_')}${bvSuffix}.zip`)
