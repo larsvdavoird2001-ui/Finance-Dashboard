@@ -138,13 +138,21 @@ export interface TariffEntry {
   naam: string
   powerbiNaam: string
   stroming: string
-  tarief: number     // uurtarief
+  tarief: number     // actueel uurtarief (2026)
+  /** Vorig uurtarief (2025) — bewaard bij de 2026-tariefupdate zodat het
+   *  oude tarief zichtbaar blijft in het bewerk-scherm. undefined = geen
+   *  voorgaand tarief bekend (bv. nieuwe medewerker). */
+  tarief2025?: number
   fte: number | null
   functie: string
   leidingGevende: string
   manager: string
   powerbiNaam2: string
   team: string
+  /** Handmatig ingestelde vertical. Overschrijft de afgeleide vertical
+   *  (verticalForEmployeeId uit de Specificatie persoonsniveau). Leeg/
+   *  undefined = vertical afleiden uit de spec. */
+  vertical?: string
 }
 
 export interface GlobalFilter {

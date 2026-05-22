@@ -8,7 +8,9 @@ interface TariffStore {
   entries: TariffEntry[]
   loaded: boolean
   loadFromDb: () => Promise<void>
-  updateEntry: (id: string, patch: Partial<Omit<TariffEntry, 'id'>>) => void
+  /** Werkt een entry bij. `patch` mag ook een nieuw `id` bevatten — dan
+   *  wordt het werknemers-ID hernoemd (oude Supabase-rij wordt opgeruimd). */
+  updateEntry: (id: string, patch: Partial<TariffEntry>) => void
   addEntry: (entry: TariffEntry) => void
   removeEntry: (id: string) => void
   getByEmployeeId: (employeeId: string) => TariffEntry | undefined
@@ -25,12 +27,14 @@ async function fetchTariffs(): Promise<TariffEntry[]> {
     powerbiNaam: row.powerbi_naam ?? '',
     stroming: row.stroming ?? '',
     tarief: row.tarief ?? 0,
+    tarief2025: row.tarief_2025 ?? undefined,
     fte: row.fte ?? null,
     functie: row.functie ?? '',
     leidingGevende: row.leiding_gevende ?? '',
     manager: row.manager ?? '',
     powerbiNaam2: row.powerbi_naam2 ?? '',
     team: row.team ?? '',
+    vertical: row.vertical ?? '',
   }))
 }
 
@@ -43,12 +47,14 @@ async function upsertTariff(entry: TariffEntry): Promise<void> {
     powerbi_naam: entry.powerbiNaam,
     stroming: entry.stroming,
     tarief: entry.tarief,
+    tarief_2025: entry.tarief2025 ?? null,
     fte: entry.fte,
     functie: entry.functie,
     leiding_gevende: entry.leidingGevende,
     manager: entry.manager,
     powerbi_naam2: entry.powerbiNaam2,
     team: entry.team,
+    vertical: entry.vertical ?? '',
   }
   const { error } = await supabase.from('tariff_entries').upsert(row, { onConflict: 'id' })
   if (error) console.error('upsertTariff:', error)
@@ -63,12 +69,14 @@ async function upsertAllTariffs(entries: TariffEntry[]): Promise<void> {
     powerbi_naam: e.powerbiNaam,
     stroming: e.stroming,
     tarief: e.tarief,
+    tarief_2025: e.tarief2025 ?? null,
     fte: e.fte,
     functie: e.functie,
     leiding_gevende: e.leidingGevende,
     manager: e.manager,
     powerbi_naam2: e.powerbiNaam2,
     team: e.team,
+    vertical: e.vertical ?? '',
   }))
   const { error } = await supabase.from('tariff_entries').upsert(rows, { onConflict: 'id' })
   if (error) console.error('upsertAllTariffs:', error)
@@ -110,8 +118,12 @@ export const useTariffStore = create<TariffStore>()(
         set(s => ({
           entries: s.entries.map(e => e.id === id ? { ...e, ...patch } : e),
         }))
-        const entry = get().entries.find(e => e.id === id)
+        const newId = patch.id ?? id
+        const entry = get().entries.find(e => e.id === newId)
         if (entry) upsertTariff(entry)
+        // ID gewijzigd → de oude rij in Supabase opruimen (anders blijft
+        // er een wees-record achter onder het oude werknemers-ID).
+        if (patch.id && patch.id !== id) deleteTariff(id)
       },
 
       addEntry: (entry) => {

@@ -176,16 +176,21 @@ CREATE TABLE IF NOT EXISTS tariff_entries (
   naam text DEFAULT '',
   powerbi_naam text DEFAULT '',
   stroming text DEFAULT '',
-  tarief numeric DEFAULT 0,
+  tarief numeric DEFAULT 0,           -- actueel uurtarief (2026)
+  tarief_2025 numeric,                -- vorig uurtarief (2025), null = onbekend
   fte numeric,
   functie text DEFAULT '',
   leiding_gevende text DEFAULT '',
   manager text DEFAULT '',
   powerbi_naam2 text DEFAULT '',
   team text DEFAULT '',
+  vertical text DEFAULT '',           -- handmatige vertical-override
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
+-- Migratie voor bestaande databases (kolommen toegevoegd 2026-05):
+ALTER TABLE tariff_entries ADD COLUMN IF NOT EXISTS tarief_2025 numeric;
+ALTER TABLE tariff_entries ADD COLUMN IF NOT EXISTS vertical text DEFAULT '';
 
 -- ============================================================================
 -- Row Level Security (RLS) — open voor anonieme toegang (intern dashboard)

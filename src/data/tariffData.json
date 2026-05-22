@@ -1,17 +1,115 @@
 [
   {
+    "id": "11068",
+    "bedrijf": "Consultancy",
+    "naam": "Lara de Wit",
+    "powerbiNaam": "",
+    "stroming": "",
+    "tarief": 52,
+    "tarief2025": 54.81,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11134",
+    "bedrijf": "Consultancy",
+    "naam": "Jari Ros",
+    "powerbiNaam": "",
+    "stroming": "",
+    "tarief": 69,
+    "tarief2025": 68,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11177",
+    "bedrijf": "Consultancy",
+    "naam": "Mirkan Tankos",
+    "powerbiNaam": "",
+    "stroming": "",
+    "tarief": 73,
+    "tarief2025": 54,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11164",
+    "bedrijf": "Consultancy",
+    "naam": "Hamza Bougoussa",
+    "powerbiNaam": "",
+    "stroming": "",
+    "tarief": 96,
+    "tarief2025": 60,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "new-1778673890262",
+    "bedrijf": "Consultancy",
+    "naam": "Remco de Jong",
+    "powerbiNaam": "",
+    "stroming": "",
+    "tarief": 75,
+    "tarief2025": 54,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "10216",
+    "bedrijf": "Software",
+    "naam": "Eoin Scollard",
+    "powerbiNaam": "Scollard, Eoin",
+    "stroming": "",
+    "tarief": 79,
+    "tarief2025": 80,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ESCOLLARD",
+    "team": "",
+    "vertical": ""
+  },
+  {
     "id": "10299",
     "bedrijf": "Projects",
     "naam": "Bas ten Hove",
     "powerbiNaam": "ten Hove, Bas",
     "stroming": "C1",
-    "tarief": 75,
+    "tarief": 66,
+    "tarief2025": 75,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Dekkers",
     "manager": "Korper",
     "powerbiNaam2": "BTENHOVE",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10677",
@@ -19,13 +117,15 @@
     "naam": "Chris van den Akker",
     "powerbiNaam": "van den Akker, Chris",
     "stroming": "C1",
-    "tarief": 75,
+    "tarief": 56,
+    "tarief2025": 75,
     "fte": 1,
     "functie": "Schouwer",
     "leidingGevende": "Korper",
     "manager": "Korper",
     "powerbiNaam2": "CVANDENAKKER",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10004",
@@ -33,13 +133,15 @@
     "naam": "Cor van der Laan",
     "powerbiNaam": "van der Laan, Cor",
     "stroming": "C1",
-    "tarief": 75,
+    "tarief": 64,
+    "tarief2025": 75,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Jansen",
     "manager": "Korper",
     "powerbiNaam2": "CVANDERLAAN",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "11112",
@@ -47,13 +149,15 @@
     "naam": "Dave Pors",
     "powerbiNaam": "Pors, Dave",
     "stroming": "C1",
-    "tarief": 75,
+    "tarief": 62,
+    "tarief2025": 75,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Geerling",
     "manager": "Korper",
     "powerbiNaam2": "DPORS",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10070",
@@ -62,12 +166,14 @@
     "powerbiNaam": "van den Elzen, Gerrie",
     "stroming": "C1",
     "tarief": 75,
+    "tarief2025": 75,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Dekkers",
     "manager": "Korper",
     "powerbiNaam2": "GVANDENELZEN",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10005",
@@ -75,13 +181,15 @@
     "naam": "JanRoelof Slump",
     "powerbiNaam": "Slump, JanRoelof",
     "stroming": "C1",
-    "tarief": 75,
+    "tarief": 58,
+    "tarief2025": 75,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Jansen",
     "manager": "Korper",
     "powerbiNaam2": "JSLUMP",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10957",
@@ -90,12 +198,14 @@
     "powerbiNaam": "van den Heuvel, Stefan",
     "stroming": "C1",
     "tarief": 75,
+    "tarief2025": 75,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Dekkers",
     "manager": "Korper",
     "powerbiNaam2": "SVANDENHEUVEL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10167",
@@ -103,13 +213,15 @@
     "naam": "Geert Jan de Bruin",
     "powerbiNaam": "Jan de Bruin, Geert",
     "stroming": "C2",
-    "tarief": 69,
+    "tarief": 52,
+    "tarief2025": 69,
     "fte": 0.6,
     "functie": "Landmeter",
     "leidingGevende": "Dekkers",
     "manager": "Korper",
     "powerbiNaam2": "GJANDEBRUIN",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10002",
@@ -117,13 +229,15 @@
     "naam": "Jan Koreman",
     "powerbiNaam": "Koreman, Jan",
     "stroming": "C2",
-    "tarief": 69,
+    "tarief": 56,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Dekkers",
     "manager": "Korper",
     "powerbiNaam2": "JKOREMAN",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10381",
@@ -131,13 +245,15 @@
     "naam": "Jan Vos",
     "powerbiNaam": "Vos, Jan",
     "stroming": "C2",
-    "tarief": 69,
+    "tarief": 48,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Jansen",
     "manager": "Korper",
     "powerbiNaam2": "JVOS",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10580",
@@ -145,13 +261,15 @@
     "naam": "Michiel van Oost",
     "powerbiNaam": "van Oost, Michiel",
     "stroming": "C2",
-    "tarief": 69,
+    "tarief": 47,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Jansen",
     "manager": "Korper",
     "powerbiNaam2": "MVANOOST",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10096",
@@ -159,13 +277,15 @@
     "naam": "René van zandvoort",
     "powerbiNaam": "van zandvoort, René",
     "stroming": "C2",
-    "tarief": 69,
+    "tarief": 52,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Dekkers",
     "manager": "Korper",
     "powerbiNaam2": "RVANZANDVOORT",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10469",
@@ -173,13 +293,15 @@
     "naam": "Theo Agter",
     "powerbiNaam": "Agter, Theo",
     "stroming": "C2",
-    "tarief": 69,
+    "tarief": 55,
+    "tarief2025": 69,
     "fte": 1.05,
     "functie": "Landmeter",
     "leidingGevende": "Dekkers",
     "manager": "Korper",
     "powerbiNaam2": "TAGTER",
-    "team": "Landmeter"
+    "team": "Landmeter",
+    "vertical": ""
   },
   {
     "id": "10573",
@@ -188,12 +310,14 @@
     "powerbiNaam": "Janzen, Kevin",
     "stroming": "Telecom",
     "tarief": 39.2,
+    "tarief2025": 39.2,
     "fte": null,
     "functie": "Administratief medewerker",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "KJANZEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10794",
@@ -201,13 +325,15 @@
     "naam": "Richi Polman",
     "powerbiNaam": "Polman, Richi",
     "stroming": "Telecom",
-    "tarief": 42,
+    "tarief": 44,
+    "tarief2025": 42,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RPOLMAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10750",
@@ -215,13 +341,15 @@
     "naam": "Henriëtte Loo",
     "powerbiNaam": "Loo, Henriëtte",
     "stroming": "Telecom",
-    "tarief": 42.3,
+    "tarief": 64,
+    "tarief2025": 42.3,
     "fte": null,
     "functie": "Administratief medewerker",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HLOO",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10661",
@@ -230,12 +358,14 @@
     "powerbiNaam": "de Boer, Falco",
     "stroming": "Public",
     "tarief": 46,
+    "tarief2025": 46,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "FDEBOER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10702",
@@ -244,12 +374,14 @@
     "powerbiNaam": "Straver, Joyce",
     "stroming": "Public",
     "tarief": 47,
+    "tarief2025": 47,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JSTRAVER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10703",
@@ -258,12 +390,14 @@
     "powerbiNaam": "Akbari Lor, Maryam",
     "stroming": "Public",
     "tarief": 47,
+    "tarief2025": 47,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MAKBARILOR",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10684",
@@ -271,13 +405,15 @@
     "naam": "Thijs van Geffen",
     "powerbiNaam": "van Geffen, Thijs",
     "stroming": "Public",
-    "tarief": 48.1,
+    "tarief": 48,
+    "tarief2025": 48.1,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "TVANGEFFEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10543",
@@ -285,13 +421,15 @@
     "naam": "Nicole Stey",
     "powerbiNaam": "Stey, Nicole",
     "stroming": "Telecom",
-    "tarief": 48.6,
+    "tarief": 43,
+    "tarief2025": 48.6,
     "fte": null,
     "functie": "Plandesk medewerker",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "NSTEY",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10120",
@@ -299,13 +437,15 @@
     "naam": "Eddie Dekkers",
     "powerbiNaam": "Dekkers, Eddie",
     "stroming": "CT",
-    "tarief": 80,
+    "tarief": 64,
+    "tarief2025": 80,
     "fte": 1,
     "functie": "Teamleider",
     "leidingGevende": "Korper",
     "manager": "Korper",
     "powerbiNaam2": "EDEKKERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10024",
@@ -313,13 +453,15 @@
     "naam": "Sven Geerling",
     "powerbiNaam": "Geerling, Sven",
     "stroming": "CT",
-    "tarief": 80,
+    "tarief": 74,
+    "tarief2025": 80,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Jansen",
     "manager": "Korper",
     "powerbiNaam2": "SGEERLING",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "11096",
@@ -327,13 +469,15 @@
     "naam": "David Kluver",
     "powerbiNaam": "Kluver, David",
     "stroming": "E1",
-    "tarief": 75,
+    "tarief": 66,
+    "tarief2025": 75,
     "fte": 1,
     "functie": "Design Specialist",
     "leidingGevende": "Korper",
     "manager": "Korper",
     "powerbiNaam2": "DKLUVER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10960",
@@ -342,12 +486,14 @@
     "powerbiNaam": "Janssen, Fleur",
     "stroming": "E2",
     "tarief": 69,
+    "tarief2025": 69,
     "fte": 0.96,
     "functie": "Revision Specialist",
     "leidingGevende": "Regeling",
     "manager": "",
     "powerbiNaam2": "FJANSSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10045",
@@ -355,13 +501,15 @@
     "naam": "Tum Korper",
     "powerbiNaam": "Korper, Tum",
     "stroming": "E2",
-    "tarief": 69,
+    "tarief": 86,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Projectleider",
     "leidingGevende": "Artz",
     "manager": "Korper",
     "powerbiNaam2": "TKORPER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10238",
@@ -369,13 +517,15 @@
     "naam": "Bas Meulenbroeks",
     "powerbiNaam": "Meulenbroeks, Bas",
     "stroming": "E3",
-    "tarief": 69,
+    "tarief": 44,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Tekenaar",
     "leidingGevende": "Regeling",
     "manager": "Korper",
     "powerbiNaam2": "BMEULENBROEKS",
-    "team": "Energy GEN"
+    "team": "Energy GEN",
+    "vertical": ""
   },
   {
     "id": "10943",
@@ -383,13 +533,15 @@
     "naam": "Asow Omer",
     "powerbiNaam": "Omer, Asow",
     "stroming": "E3",
-    "tarief": 69,
+    "tarief": 64,
+    "tarief2025": 69,
     "fte": 0.88,
     "functie": "Revision Specialist",
     "leidingGevende": "Regeling",
     "manager": "Korper",
     "powerbiNaam2": "AOMER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10155",
@@ -397,13 +549,15 @@
     "naam": "Ivo van Wetering",
     "powerbiNaam": "van Wetering, Ivo",
     "stroming": "E3",
-    "tarief": 69,
+    "tarief": 51,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Tekenaar",
     "leidingGevende": "Pouw",
     "manager": "Korper",
     "powerbiNaam2": "IVANWETERING",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10250",
@@ -411,13 +565,15 @@
     "naam": "Stefan de Groot",
     "powerbiNaam": "de Groot, Stefan",
     "stroming": "E3",
-    "tarief": 69,
+    "tarief": 51,
+    "tarief2025": 69,
     "fte": 0.8,
     "functie": "Tekenaar",
     "leidingGevende": "Imanuel",
     "manager": "Korper",
     "powerbiNaam2": "SDEGROOT",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10955",
@@ -425,13 +581,15 @@
     "naam": "Luna Welter",
     "powerbiNaam": "Welter, Luna",
     "stroming": "Energy",
-    "tarief": 49.8,
+    "tarief": 34,
+    "tarief2025": 49.8,
     "fte": null,
     "functie": "Tekenaar",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "LWELTER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10166",
@@ -440,12 +598,14 @@
     "powerbiNaam": "de Bruïne, Sabrina",
     "stroming": "Telecom",
     "tarief": 49.8,
+    "tarief2025": 49.8,
     "fte": null,
     "functie": "Projectmedewerker",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "SDEBRUÏNE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10474",
@@ -453,13 +613,15 @@
     "naam": "Angélique Jekel",
     "powerbiNaam": "Jekel, Angélique",
     "stroming": "Telecom",
-    "tarief": 50.8,
+    "tarief": 48,
+    "tarief2025": 50.8,
     "fte": null,
     "functie": "Projectcoördinator",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "AJEKEL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10190",
@@ -468,12 +630,14 @@
     "powerbiNaam": "van Noort, Mark",
     "stroming": "Telecom",
     "tarief": 50.9,
+    "tarief2025": 50.9,
     "fte": null,
     "functie": "Landmeter",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MVANNOORT",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10755",
@@ -481,13 +645,15 @@
     "naam": "Dirk Wouters",
     "powerbiNaam": "Wouters, Dirk",
     "stroming": "Civil",
-    "tarief": 51.2,
+    "tarief": 46,
+    "tarief2025": 51.2,
     "fte": null,
     "functie": "Modelleur",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "DWOUTERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10924",
@@ -495,13 +661,15 @@
     "naam": "Roy Regeling",
     "powerbiNaam": "Regeling, Roy",
     "stroming": "ET",
-    "tarief": 91,
+    "tarief": 74,
+    "tarief2025": 91,
     "fte": 0.62,
     "functie": "Teamleider",
     "leidingGevende": "Korper",
     "manager": "Korper",
     "powerbiNaam2": "RREGELING",
-    "team": "Energy GEN"
+    "team": "Energy GEN",
+    "vertical": ""
   },
   {
     "id": "10159",
@@ -509,13 +677,15 @@
     "naam": "Guido Imanuel",
     "powerbiNaam": "Imanuel, Guido",
     "stroming": "ET",
-    "tarief": 91,
+    "tarief": 59,
+    "tarief2025": 91,
     "fte": 1,
     "functie": "Landmeter",
     "leidingGevende": "Korper",
     "manager": "Korper",
     "powerbiNaam2": "GIMANUEL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10845",
@@ -523,13 +693,15 @@
     "naam": "Willem van Haren",
     "powerbiNaam": "van Haren, Willem",
     "stroming": "I1",
-    "tarief": 80,
+    "tarief": 76,
+    "tarief2025": 80,
     "fte": 0.8,
     "functie": "Mechanical Engineer",
     "leidingGevende": "Artz",
     "manager": "Lammers",
     "powerbiNaam2": "WVANHAREN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "11098",
@@ -537,13 +709,15 @@
     "naam": "Levi Janse",
     "powerbiNaam": "Janse, Levi",
     "stroming": "Telecom",
-    "tarief": 51.7,
+    "tarief": 52,
+    "tarief2025": 51.7,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "LJANSE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10488",
@@ -552,12 +726,14 @@
     "powerbiNaam": "Haan, Henrico",
     "stroming": "Civil",
     "tarief": 52.1,
+    "tarief2025": 52.1,
     "fte": null,
     "functie": "Modelleur",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HHAAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10067",
@@ -565,13 +741,15 @@
     "naam": "Gerard Mous",
     "powerbiNaam": "Mous, Gerard",
     "stroming": "Telecom",
-    "tarief": 52.2,
+    "tarief": 53,
+    "tarief2025": 52.2,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "GMOUS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "11082",
@@ -579,13 +757,15 @@
     "naam": "Charlie van Rooijen",
     "powerbiNaam": "van Rooijen, Charlie",
     "stroming": "Public",
-    "tarief": 52.3,
+    "tarief": 50,
+    "tarief2025": 52.3,
     "fte": null,
     "functie": "Developer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "CVANROOIJEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10522",
@@ -593,13 +773,15 @@
     "naam": "Dick Vruggink",
     "powerbiNaam": "Vruggink, Dick",
     "stroming": "Telecom",
-    "tarief": 52.3,
+    "tarief": 46,
+    "tarief2025": 52.3,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "DVRUGGINK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10922",
@@ -607,13 +789,15 @@
     "naam": "Rob Kemmink",
     "powerbiNaam": "Kemmink, Rob",
     "stroming": "Telecom",
-    "tarief": 54.3,
+    "tarief": 60,
+    "tarief2025": 54.3,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RKEMMINK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10106",
@@ -621,13 +805,15 @@
     "naam": "Terry Vreedzaam",
     "powerbiNaam": "Vreedzaam, Terry",
     "stroming": "Telecom",
-    "tarief": 54.6,
+    "tarief": 64,
+    "tarief2025": 54.6,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "TVREEDZAAM",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10385",
@@ -635,13 +821,15 @@
     "naam": "Milan Bisschop",
     "powerbiNaam": "Bisschop, Milan",
     "stroming": "Telecom",
-    "tarief": 55.1,
+    "tarief": 59,
+    "tarief2025": 55.1,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MBISSCHOP",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10175",
@@ -649,13 +837,15 @@
     "naam": "Luuk Kuijs",
     "powerbiNaam": "Kuijs, Luuk",
     "stroming": "Telecom",
-    "tarief": 55.2,
+    "tarief": 64,
+    "tarief2025": 55.2,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "LKUIJS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10719",
@@ -663,13 +853,15 @@
     "naam": "David van Dijk",
     "powerbiNaam": "van Dijk, David",
     "stroming": "Telecom",
-    "tarief": 56,
+    "tarief": 49,
+    "tarief2025": 56,
     "fte": null,
     "functie": "Schouwer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "DVANDIJK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10723",
@@ -677,27 +869,31 @@
     "naam": "Hems Gerridzen",
     "powerbiNaam": "Gerridzen, Hems",
     "stroming": "O2",
-    "tarief": 104,
+    "tarief": 106,
+    "tarief2025": 104,
     "fte": 0.6,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HGERRIDZEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
-    "id": "11078",
+    "id": "11140",
     "bedrijf": "Projects",
     "naam": "Michael van den Berg",
     "powerbiNaam": "van den Berg, Michael",
     "stroming": "O2",
-    "tarief": 104,
+    "tarief": 86,
+    "tarief2025": 104,
     "fte": 1,
     "functie": "Teamleider",
     "leidingGevende": "Lammers",
     "manager": "Lammers",
     "powerbiNaam2": "MVANDENBERG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10956",
@@ -705,13 +901,15 @@
     "naam": "Sjoerd Lammers",
     "powerbiNaam": "Lammers, Sjoerd",
     "stroming": "O2",
-    "tarief": 104,
+    "tarief": 110,
+    "tarief2025": 104,
     "fte": 1,
     "functie": "Projectleider",
     "leidingGevende": "Artz",
     "manager": "Lammers",
     "powerbiNaam2": "SLAMMERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10087",
@@ -719,13 +917,15 @@
     "naam": "Ruud Meegdes",
     "powerbiNaam": "Meegdes, Ruud",
     "stroming": "Telecom",
-    "tarief": 56.3,
+    "tarief": 55,
+    "tarief2025": 56.3,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RMEEGDES",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10621",
@@ -733,13 +933,15 @@
     "naam": "Rayson Duque",
     "powerbiNaam": "Duque, Rayson",
     "stroming": "Telecom",
-    "tarief": 56.4,
+    "tarief": 51,
+    "tarief2025": 56.4,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RDUQUE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10436",
@@ -747,27 +949,31 @@
     "naam": "Mitchell Frodyma",
     "powerbiNaam": "Frodyma, Mitchell",
     "stroming": "Telecom",
-    "tarief": 56.5,
+    "tarief": 56,
+    "tarief2025": 56.5,
     "fte": null,
     "functie": "Projectcoördinator",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MFRODYMA",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
-    "id": "10882",
+    "id": "11179",
     "bedrijf": "Consultancy",
     "naam": "Kamil Erdogan",
     "powerbiNaam": "Erdogan, Kamil",
     "stroming": "Telecom",
-    "tarief": 56.6,
+    "tarief": 70,
+    "tarief2025": 56.6,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "KERDOGAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10630",
@@ -775,13 +981,15 @@
     "naam": "Erik Visser",
     "powerbiNaam": "Visser, Erik",
     "stroming": "Telecom",
-    "tarief": 57.3,
+    "tarief": 57,
+    "tarief2025": 57.3,
     "fte": null,
     "functie": "Schouwer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "EVISSER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10699",
@@ -789,13 +997,15 @@
     "naam": "Jos Blesgraaf",
     "powerbiNaam": "Blesgraaf, Jos",
     "stroming": "Telecom",
-    "tarief": 57.6,
+    "tarief": 61,
+    "tarief2025": 57.6,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JBLESGRAAF",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10188",
@@ -803,13 +1013,15 @@
     "naam": "Carmenlita Harkx",
     "powerbiNaam": "Harkx, Carmenlita",
     "stroming": "Telecom",
-    "tarief": 58.3,
+    "tarief": 59,
+    "tarief2025": 58.3,
     "fte": null,
     "functie": "Support&Service medewerker",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "CHARKX",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10836",
@@ -817,13 +1029,15 @@
     "naam": "Marnix Schenkel",
     "powerbiNaam": "Schenkel, Marnix",
     "stroming": "Industry",
-    "tarief": 58.5,
+    "tarief": 52,
+    "tarief2025": 58.5,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MSCHENKEL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10795",
@@ -831,13 +1045,15 @@
     "naam": "Willem Vreeling",
     "powerbiNaam": "Vreeling, Willem",
     "stroming": "Energy",
-    "tarief": 59,
+    "tarief": 61,
+    "tarief2025": 59,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "WVREELING",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10150",
@@ -845,13 +1061,15 @@
     "naam": "Mirte Janssen - de Jong",
     "powerbiNaam": "Janssen - de Jong, Mirte",
     "stroming": "Energy",
-    "tarief": 59.6,
+    "tarief": 44,
+    "tarief2025": 59.6,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MJANSSEN-DEJONG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10101",
@@ -859,13 +1077,15 @@
     "naam": "Santino Toppenberg",
     "powerbiNaam": "Toppenberg, Santino",
     "stroming": "Telecom",
-    "tarief": 59.6,
+    "tarief": 51,
+    "tarief2025": 59.6,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "STOPPENBERG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10951",
@@ -874,12 +1094,14 @@
     "powerbiNaam": "Geneste, Michael",
     "stroming": "Telecom",
     "tarief": 59.7,
+    "tarief2025": 59.7,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MGENESTE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10055",
@@ -887,13 +1109,15 @@
     "naam": "Joan de Vor",
     "powerbiNaam": "de Vor, Joan",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 59,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Design Specialist",
     "leidingGevende": "van der Horst Linders",
     "manager": "Schilder",
     "powerbiNaam2": "JDEVOR",
-    "team": "Energy Design"
+    "team": "Energy Design",
+    "vertical": ""
   },
   {
     "id": "10531",
@@ -901,13 +1125,15 @@
     "naam": "Paul Nekeman",
     "powerbiNaam": "Nekeman, Paul",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 60,
+    "tarief2025": 69,
     "fte": 0.8,
     "functie": "Design Specialist",
     "leidingGevende": "Burghouts",
     "manager": "Burghouts",
     "powerbiNaam2": "PNEKEMAN",
-    "team": "Energy Design"
+    "team": "Energy Design",
+    "vertical": ""
   },
   {
     "id": "10437",
@@ -915,13 +1141,15 @@
     "naam": "Philip Meelhuysen",
     "powerbiNaam": "Meelhuysen, Philip",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 52,
+    "tarief2025": 69,
     "fte": 0.86,
     "functie": "Design Specialist",
     "leidingGevende": "Imanuel",
     "manager": "Korper",
     "powerbiNaam2": "PMEELHUYSEN",
-    "team": "Energy Design"
+    "team": "Energy Design",
+    "vertical": ""
   },
   {
     "id": "10050",
@@ -929,13 +1157,15 @@
     "naam": "Raymond Oonincx",
     "powerbiNaam": "Oonincx, Raymond",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 68,
+    "tarief2025": 69,
     "fte": 0.9,
     "functie": "Projectcoördinator",
     "leidingGevende": "Schilder",
     "manager": "Schilder",
     "powerbiNaam2": "ROONINCX",
-    "team": "Energy Design"
+    "team": "Energy Design",
+    "vertical": ""
   },
   {
     "id": "10140",
@@ -943,13 +1173,15 @@
     "naam": "Roland Flier",
     "powerbiNaam": "Flier, Roland",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 72,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Design Specialist",
     "leidingGevende": "van der Horst Linders",
     "manager": "Schilder",
     "powerbiNaam2": "RFLIER",
-    "team": "Energy Design"
+    "team": "Energy Design",
+    "vertical": ""
   },
   {
     "id": "10433",
@@ -957,13 +1189,15 @@
     "naam": "Lindi van der Voort",
     "powerbiNaam": "van der Voort, Lindi",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 51,
+    "tarief2025": 69,
     "fte": 0.8,
     "functie": "Design Specialist",
     "leidingGevende": "van der Horst Linders",
     "manager": "Schilder",
     "powerbiNaam2": "LVANDERVOORT",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "11114",
@@ -971,13 +1205,15 @@
     "naam": "Quinten Schouten",
     "powerbiNaam": "Schouten, Quinten",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 46,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Engineer",
     "leidingGevende": "Lammers",
     "manager": "Lammers",
     "powerbiNaam2": "QSCHOUTEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10428",
@@ -985,13 +1221,15 @@
     "naam": "Richard Jansen",
     "powerbiNaam": "Jansen, Richard",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 64,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Design Specialist",
     "leidingGevende": "Burghouts",
     "manager": "Burghouts",
     "powerbiNaam2": "RJANSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10214",
@@ -999,13 +1237,15 @@
     "naam": "Ruud van den Hurk",
     "powerbiNaam": "van den Hurk, Ruud",
     "stroming": "T1",
-    "tarief": 69,
+    "tarief": 63,
+    "tarief2025": 69,
     "fte": 0.9,
     "functie": "Design Specialist",
     "leidingGevende": "van der Horst Linders",
     "manager": "Schilder",
     "powerbiNaam2": "RVANDENHURK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10184",
@@ -1013,13 +1253,15 @@
     "naam": "Kadira Klimentic",
     "powerbiNaam": "Klimentic, Kadira",
     "stroming": "T2",
-    "tarief": 64,
+    "tarief": 56,
+    "tarief2025": 64,
     "fte": 1,
     "functie": "Revision Specialist",
     "leidingGevende": "Bontekoe",
     "manager": "Lammers",
     "powerbiNaam2": "KKLIMENTIC",
-    "team": "Energy GEN"
+    "team": "Energy GEN",
+    "vertical": ""
   },
   {
     "id": "10471",
@@ -1027,13 +1269,15 @@
     "naam": "Ahmad Al Hariri",
     "powerbiNaam": "Al Hariri, Ahmad",
     "stroming": "T2",
-    "tarief": 64,
+    "tarief": 46,
+    "tarief2025": 64,
     "fte": 1,
     "functie": "Revision Specialist",
     "leidingGevende": "Bontekoe",
     "manager": "Lammers",
     "powerbiNaam2": "AALHARIRI",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10258",
@@ -1041,13 +1285,15 @@
     "naam": "Aleksandra Rys",
     "powerbiNaam": "Rys, Aleksandra",
     "stroming": "T2",
-    "tarief": 64,
+    "tarief": 52,
+    "tarief2025": 64,
     "fte": 0.8,
     "functie": "Revision Specialist",
     "leidingGevende": "Stuurman",
     "manager": "Schilder",
     "powerbiNaam2": "ARYS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10961",
@@ -1056,12 +1302,14 @@
     "powerbiNaam": "Conijnenberg, Darryl",
     "stroming": "T2",
     "tarief": 64,
+    "tarief2025": 64,
     "fte": 1.02,
     "functie": "Revision Specialist",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "DCONIJNENBERG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10638",
@@ -1069,13 +1317,15 @@
     "naam": "Elena Sharipo",
     "powerbiNaam": "Sharipo, Elena",
     "stroming": "T2",
-    "tarief": 64,
+    "tarief": 51,
+    "tarief2025": 64,
     "fte": 0.8,
     "functie": "Revision Specialist",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "ESHARIPO",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10867",
@@ -1083,13 +1333,15 @@
     "naam": "Marcel van Dongen",
     "powerbiNaam": "van Dongen, Marcel",
     "stroming": "T2",
-    "tarief": 64,
+    "tarief": 47,
+    "tarief2025": 64,
     "fte": 0.8,
     "functie": "Revision Specialist",
     "leidingGevende": "Bontekoe",
     "manager": "Lammers",
     "powerbiNaam2": "MVANDONGEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10934",
@@ -1097,13 +1349,15 @@
     "naam": "Santy Naiel Santiago D'Almeida",
     "powerbiNaam": "Naiel Santiago D'Almeida, Santy",
     "stroming": "T2",
-    "tarief": 64,
+    "tarief": 51,
+    "tarief2025": 64,
     "fte": 1,
     "functie": "Revision Specialist",
     "leidingGevende": "Bontekoe",
     "manager": "Lammers",
     "powerbiNaam2": "SNAIELSANTIAGOD'ALMEIDA",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10930",
@@ -1111,13 +1365,15 @@
     "naam": "Nick van Iersel",
     "powerbiNaam": "van Iersel, Nick",
     "stroming": "T3",
-    "tarief": 69,
+    "tarief": 66,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Revision Specialist",
     "leidingGevende": "Bontekoe",
     "manager": "Lammers",
     "powerbiNaam2": "NVANIERSEL",
-    "team": "Energy GEN"
+    "team": "Energy GEN",
+    "vertical": ""
   },
   {
     "id": "10021",
@@ -1125,13 +1381,15 @@
     "naam": "Angelique Jonkers",
     "powerbiNaam": "Jonkers, Angelique",
     "stroming": "T3",
-    "tarief": 69,
+    "tarief": 79,
+    "tarief2025": 69,
     "fte": 0.8,
     "functie": "Revision Specialist",
     "leidingGevende": "van der Horst Linders",
     "manager": "Schilder",
     "powerbiNaam2": "AJONKERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10776",
@@ -1139,13 +1397,15 @@
     "naam": "Dylan Kouwenberg",
     "powerbiNaam": "Kouwenberg, Dylan",
     "stroming": "T3",
-    "tarief": 69,
+    "tarief": 56,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Revision Specialist",
     "leidingGevende": "Bontekoe",
     "manager": "Lammers",
     "powerbiNaam2": "DKOUWENBERG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10384",
@@ -1153,13 +1413,15 @@
     "naam": "Rainier Bakkenhoven",
     "powerbiNaam": "Bakkenhoven, Rainier",
     "stroming": "T3",
-    "tarief": 69,
+    "tarief": 58,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Revision Specialist",
     "leidingGevende": "Bontekoe",
     "manager": "Lammers",
     "powerbiNaam2": "RBAKKENHOVEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10098",
@@ -1167,13 +1429,15 @@
     "naam": "Robin Smits",
     "powerbiNaam": "Smits, Robin",
     "stroming": "T3",
-    "tarief": 69,
+    "tarief": 55,
+    "tarief2025": 69,
     "fte": 0.51,
     "functie": "Design Specialist",
     "leidingGevende": "Stuurman",
     "manager": "Schilder",
     "powerbiNaam2": "RSMITS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10059",
@@ -1181,13 +1445,15 @@
     "naam": "Andre van Dalsem",
     "powerbiNaam": "van Dalsem, Andre",
     "stroming": "T4",
-    "tarief": 69,
+    "tarief": 56,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Revision Specialist",
     "leidingGevende": "Stuurman",
     "manager": "Schilder",
     "powerbiNaam2": "AVANDALSEM",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10051",
@@ -1195,13 +1461,15 @@
     "naam": "Erwin Stuurman",
     "powerbiNaam": "Stuurman, Erwin",
     "stroming": "T4",
-    "tarief": 69,
+    "tarief": 64,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Teamleider",
     "leidingGevende": "Schilder",
     "manager": "Schilder",
     "powerbiNaam2": "ESTUURMAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10114",
@@ -1209,13 +1477,15 @@
     "naam": "Irene Larssen",
     "powerbiNaam": "Larssen, Irene",
     "stroming": "T4",
-    "tarief": 69,
+    "tarief": 47,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Revision Specialist",
     "leidingGevende": "Stuurman",
     "manager": "Schilder",
     "powerbiNaam2": "ILARSSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10193",
@@ -1223,13 +1493,15 @@
     "naam": "Laurence Kromhout van der Meer",
     "powerbiNaam": "Kromhout van der Meer, Laurence",
     "stroming": "T4",
-    "tarief": 69,
+    "tarief": 54,
+    "tarief2025": 69,
     "fte": 1,
     "functie": "Design Specialist",
     "leidingGevende": "Stuurman",
     "manager": "Schilder",
     "powerbiNaam2": "LKROMHOUTVANDERMEER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10889",
@@ -1237,13 +1509,15 @@
     "naam": "Serina Dekkers",
     "powerbiNaam": "Dekkers, Serina",
     "stroming": "T4",
-    "tarief": 69,
+    "tarief": 54,
+    "tarief2025": 69,
     "fte": 0.4,
     "functie": "Teamleider",
     "leidingGevende": "Stuurman",
     "manager": "Schilder",
     "powerbiNaam2": "SDEKKERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10856",
@@ -1251,13 +1525,15 @@
     "naam": "Teun Segers",
     "powerbiNaam": "Segers, Teun",
     "stroming": "T4",
-    "tarief": 69,
+    "tarief": 56,
+    "tarief2025": 69,
     "fte": 0.6,
     "functie": "Revision Specialist",
     "leidingGevende": "Stuurman",
     "manager": "Schilder",
     "powerbiNaam2": "TSEGERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10173",
@@ -1265,13 +1541,15 @@
     "naam": "Tom den Boer",
     "powerbiNaam": "den Boer, Tom",
     "stroming": "T4",
-    "tarief": 69,
+    "tarief": 55,
+    "tarief2025": 69,
     "fte": 0.8,
     "functie": "Tekenaar",
     "leidingGevende": "Imanuel",
     "manager": "Korper",
     "powerbiNaam2": "TDENBOER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10732",
@@ -1279,13 +1557,15 @@
     "naam": "Ali Al Theeb",
     "powerbiNaam": "Al Theeb, Ali",
     "stroming": "Telecom",
-    "tarief": 60.6,
+    "tarief": 61,
+    "tarief2025": 60.6,
     "fte": null,
     "functie": "Tekenaar",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "AALTHEEB",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10038",
@@ -1293,13 +1573,15 @@
     "naam": "Hanneke Sieljes - Visser",
     "powerbiNaam": "Sieljes - Visser, Hanneke",
     "stroming": "Telecom",
-    "tarief": 61.1,
+    "tarief": 56,
+    "tarief2025": 61.1,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HSIELJES-VISSER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10658",
@@ -1307,13 +1589,15 @@
     "naam": "Martin Reugebrink",
     "powerbiNaam": "Reugebrink, Martin",
     "stroming": "Telecom",
-    "tarief": 62.3,
+    "tarief": 64,
+    "tarief2025": 62.3,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MREUGEBRINK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10642",
@@ -1321,13 +1605,15 @@
     "naam": "Koen Aalbersberg",
     "powerbiNaam": "Aalbersberg, Koen",
     "stroming": "Energy",
-    "tarief": 62.7,
+    "tarief": 59,
+    "tarief2025": 62.7,
     "fte": null,
     "functie": "Tekenaar",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "KAALBERSBERG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10662",
@@ -1335,13 +1621,15 @@
     "naam": "Davies Peeten",
     "powerbiNaam": "Peeten, Davies",
     "stroming": "Telecom",
-    "tarief": 62.8,
+    "tarief": 66,
+    "tarief2025": 62.8,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "DPEETEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10757",
@@ -1349,13 +1637,15 @@
     "naam": "Christiaan Janssen",
     "powerbiNaam": "Janssen, Christiaan",
     "stroming": "Telecom",
-    "tarief": 62.9,
+    "tarief": 60,
+    "tarief2025": 62.9,
     "fte": null,
     "functie": "Projectcoördinator",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "CJANSSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10138",
@@ -1363,13 +1653,15 @@
     "naam": "Pascal Bouten",
     "powerbiNaam": "Bouten, Pascal",
     "stroming": "Telecom",
-    "tarief": 63.4,
+    "tarief": 65,
+    "tarief2025": 63.4,
     "fte": null,
     "functie": "Planner",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "PBOUTEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10827",
@@ -1377,13 +1669,15 @@
     "naam": "Kai Grijff",
     "powerbiNaam": "Grijff, Kai",
     "stroming": "Industry",
-    "tarief": 63.7,
+    "tarief": 55,
+    "tarief2025": 63.7,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "KGRIJFF",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10860",
@@ -1391,13 +1685,15 @@
     "naam": "Jean-Pierre Kasanwidjojo",
     "powerbiNaam": "Kasanwidjojo, Jean-Pierre",
     "stroming": "Telecom",
-    "tarief": 64.1,
+    "tarief": 60,
+    "tarief2025": 64.1,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JKASANWIDJOJO",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10074",
@@ -1405,13 +1701,15 @@
     "naam": "Martin Wijnhoud",
     "powerbiNaam": "Wijnhoud, Martin",
     "stroming": "Telecom",
-    "tarief": 64.7,
+    "tarief": 66,
+    "tarief2025": 64.7,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MWIJNHOUD",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10404",
@@ -1420,12 +1718,14 @@
     "powerbiNaam": "van der Vet, Bas",
     "stroming": "Civil",
     "tarief": 64.8,
+    "tarief2025": 64.8,
     "fte": null,
     "functie": "Ontwerper",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "BVANDERVET",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10835",
@@ -1434,12 +1734,14 @@
     "powerbiNaam": "Aalbers - Hermsen, Lex",
     "stroming": "Industry",
     "tarief": 65,
+    "tarief2025": 65,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "LAALBERS-HERMSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10567",
@@ -1447,13 +1749,15 @@
     "naam": "Pascal Hammink",
     "powerbiNaam": "Hammink, Pascal",
     "stroming": "Telecom",
-    "tarief": 65.2,
+    "tarief": 64,
+    "tarief2025": 65.2,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "PHAMMINK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10740",
@@ -1461,13 +1765,15 @@
     "naam": "Jamie Rutjens",
     "powerbiNaam": "Rutjens, Jamie",
     "stroming": "Energy",
-    "tarief": 66.3,
+    "tarief": 68,
+    "tarief2025": 66.3,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JRUTJENS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10027",
@@ -1475,13 +1781,15 @@
     "naam": "Tjibbe Hazenberg",
     "powerbiNaam": "Hazenberg, Tjibbe",
     "stroming": "Telecom",
-    "tarief": 66.8,
+    "tarief": 62,
+    "tarief2025": 66.8,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "THAZENBERG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10952",
@@ -1490,12 +1798,14 @@
     "powerbiNaam": "le Sage, Gidion",
     "stroming": "Energy",
     "tarief": 67.3,
+    "tarief2025": 67.3,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "GLESAGE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "11094",
@@ -1503,27 +1813,31 @@
     "naam": "Bram Kok",
     "powerbiNaam": "Kok, Bram",
     "stroming": "Public",
-    "tarief": 67.9,
+    "tarief": 53,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "BKOK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
-    "id": "99906",
+    "id": "11130",
     "bedrijf": "Consultancy",
     "naam": "Joep Lommers",
     "powerbiNaam": "Lommers, Joep",
     "stroming": "Public",
-    "tarief": 67.9,
+    "tarief": 64,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JLOMMERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "99908",
@@ -1532,12 +1846,14 @@
     "powerbiNaam": "Sans, Teun",
     "stroming": "Public",
     "tarief": 67.9,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "Projectcoördinator",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "TSANS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10334",
@@ -1545,41 +1861,31 @@
     "naam": "Eric Janssen",
     "powerbiNaam": "Janssen, Eric",
     "stroming": "Telecom",
-    "tarief": 67.9,
+    "tarief": 72,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "EJANSSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
-    "id": "99902",
+    "id": "11122",
     "bedrijf": "Consultancy",
     "naam": "Ismail Er",
     "powerbiNaam": "Er, Ismail",
     "stroming": "Telecom",
-    "tarief": 67.9,
+    "tarief": 55,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "IER",
-    "team": ""
-  },
-  {
-    "id": "99907",
-    "bedrijf": "Consultancy",
-    "naam": "Jaromir Ros",
-    "powerbiNaam": "Ros, Jaromir",
-    "stroming": "Telecom",
-    "tarief": 67.9,
-    "fte": null,
-    "functie": "GIS Consultant",
-    "leidingGevende": "",
-    "manager": "",
-    "powerbiNaam2": "JROS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "99903",
@@ -1588,54 +1894,62 @@
     "powerbiNaam": "Streutger, Jordy",
     "stroming": "Telecom",
     "tarief": 67.9,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "Administratief medewerker",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JSTREUTGER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
-    "id": "99905",
+    "id": "11136",
     "bedrijf": "Consultancy",
     "naam": "Marc ten Cate",
     "powerbiNaam": "ten Cate, Marc",
     "stroming": "Telecom",
-    "tarief": 67.9,
+    "tarief": 60,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MTENCATE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
-    "id": "99904",
+    "id": "11126",
     "bedrijf": "Consultancy",
     "naam": "Tesfai Ghebremariam",
     "powerbiNaam": "Ghebremariam, Tesfai",
     "stroming": "Telecom",
-    "tarief": 67.9,
+    "tarief": 66,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "TGHEBREMARIAM",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
-    "id": "99901",
+    "id": "11107",
     "bedrijf": "Consultancy",
     "naam": "Tommy Korthouwer",
     "powerbiNaam": "Korthouwer, Tommy",
     "stroming": "Telecom",
-    "tarief": 67.9,
+    "tarief": 74,
+    "tarief2025": 67.9,
     "fte": null,
     "functie": "Administratief medewerker",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "TKORTHOUWER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10743",
@@ -1643,13 +1957,15 @@
     "naam": "Anneroos Diender",
     "powerbiNaam": "Diender, Anneroos",
     "stroming": "Telecom",
-    "tarief": 68.5,
+    "tarief": 69,
+    "tarief2025": 68.5,
     "fte": null,
     "functie": "Projectcoördinator",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "ADIENDER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10768",
@@ -1657,13 +1973,15 @@
     "naam": "Asha Barendregt",
     "powerbiNaam": "Barendregt, Asha",
     "stroming": "Public",
-    "tarief": 68.8,
+    "tarief": 60,
+    "tarief2025": 68.8,
     "fte": null,
     "functie": "GIS Analist",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "ABARENDREGT",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10832",
@@ -1671,13 +1989,15 @@
     "naam": "Henk Soonius",
     "powerbiNaam": "Soonius, Henk",
     "stroming": "Industry",
-    "tarief": 70,
+    "tarief": 64,
+    "tarief2025": 70,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HSOONIUS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10839",
@@ -1685,13 +2005,15 @@
     "naam": "Niels Jansen",
     "powerbiNaam": "Jansen, Niels",
     "stroming": "Industry",
-    "tarief": 70,
+    "tarief": 62,
+    "tarief2025": 70,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "NJANSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "11090",
@@ -1700,12 +2022,14 @@
     "powerbiNaam": "van der Kuij, Jan",
     "stroming": "Telecom",
     "tarief": 70,
+    "tarief2025": 70,
     "fte": null,
     "functie": "Schouwer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JVANDERKUIJ",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10057",
@@ -1713,13 +2037,15 @@
     "naam": "Arie Migchelsen",
     "powerbiNaam": "Migchelsen, Arie",
     "stroming": "Telecom",
-    "tarief": 70.1,
+    "tarief": 64,
+    "tarief2025": 70.1,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "AMIGCHELSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10963",
@@ -1727,13 +2053,15 @@
     "naam": "Bart Janssen",
     "powerbiNaam": "Janssen, Bart",
     "stroming": "Telecom",
-    "tarief": 71.1,
+    "tarief": 57,
+    "tarief2025": 71.1,
     "fte": null,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "BJANSSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10053",
@@ -1742,12 +2070,14 @@
     "powerbiNaam": "Hol, Mitch",
     "stroming": "Telecom",
     "tarief": 71.1,
+    "tarief2025": 71.1,
     "fte": null,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MHOL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10773",
@@ -1755,13 +2085,15 @@
     "naam": "Rob Scheurwater",
     "powerbiNaam": "Scheurwater, Rob",
     "stroming": "Telecom",
-    "tarief": 71.7,
+    "tarief": 62,
+    "tarief2025": 71.7,
     "fte": null,
     "functie": "Schouwer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RSCHEURWATER",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10023",
@@ -1769,13 +2101,15 @@
     "naam": "Gino Sahuleka",
     "powerbiNaam": "Sahuleka, Gino",
     "stroming": "Civil",
-    "tarief": 72.1,
+    "tarief": 65,
+    "tarief2025": 72.1,
     "fte": null,
     "functie": "Modelleur",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "GSAHULEKA",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10831",
@@ -1783,13 +2117,15 @@
     "naam": "Harmen Weites",
     "powerbiNaam": "Weites, Harmen",
     "stroming": "Industry",
-    "tarief": 72.1,
+    "tarief": 69,
+    "tarief2025": 72.1,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HWEITES",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10841",
@@ -1797,13 +2133,15 @@
     "naam": "Pim Kroeze",
     "powerbiNaam": "Kroeze, Pim",
     "stroming": "Industry",
-    "tarief": 72.1,
+    "tarief": 65,
+    "tarief2025": 72.1,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "PKROEZE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10432",
@@ -1812,12 +2150,14 @@
     "powerbiNaam": "Boutaleb, Senna",
     "stroming": "Energy",
     "tarief": 73.2,
+    "tarief2025": 73.2,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "SBOUTALEB",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10966",
@@ -1825,27 +2165,31 @@
     "naam": "Benjamin Vergil",
     "powerbiNaam": "Vergil, Benjamin",
     "stroming": "Public",
-    "tarief": 73.2,
+    "tarief": 64,
+    "tarief2025": 73.2,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "BVERGIL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
-    "id": "10964",
+    "id": "11076",
     "bedrijf": "Consultancy",
     "naam": "Arjan Wollrabe",
     "powerbiNaam": "Wollrabe, Arjan",
     "stroming": "Telecom",
-    "tarief": 73.2,
+    "tarief": 70,
+    "tarief2025": 73.2,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "AWOLLRABE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10470",
@@ -1853,13 +2197,15 @@
     "naam": "Roelof Dijkman",
     "powerbiNaam": "Dijkman, Roelof",
     "stroming": "Telecom",
-    "tarief": 73.8,
+    "tarief": 74,
+    "tarief2025": 73.8,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RDIJKMAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10252",
@@ -1868,12 +2214,14 @@
     "powerbiNaam": "Veenstra, Paul",
     "stroming": "Civil",
     "tarief": 74.2,
+    "tarief2025": 74.2,
     "fte": null,
     "functie": "Ontwerper",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "PVEENSTRA",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10805",
@@ -1881,13 +2229,15 @@
     "naam": "Raoul van den Berg",
     "powerbiNaam": "van den Berg, Raoul",
     "stroming": "Telecom",
-    "tarief": 74.4,
+    "tarief": 65,
+    "tarief2025": 74.4,
     "fte": null,
     "functie": "Werkvoorbereider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RVANDENBERG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10411",
@@ -1895,13 +2245,15 @@
     "naam": "Hans Cornelissen",
     "powerbiNaam": "Cornelissen, Hans",
     "stroming": "Telecom",
-    "tarief": 74.7,
+    "tarief": 69,
+    "tarief2025": 74.7,
     "fte": null,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HCORNELISSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10783",
@@ -1910,12 +2262,14 @@
     "powerbiNaam": "Notermans, Ruud",
     "stroming": "Civil",
     "tarief": 75.2,
+    "tarief2025": 75.2,
     "fte": null,
     "functie": "Ontwerper",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RNOTERMANS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10069",
@@ -1923,13 +2277,15 @@
     "naam": "Sonny Thio",
     "powerbiNaam": "Thio, Sonny",
     "stroming": "Civil",
-    "tarief": 75.2,
+    "tarief": 82,
+    "tarief2025": 75.2,
     "fte": null,
     "functie": "Modelleur",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "STHIO",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10042",
@@ -1937,13 +2293,15 @@
     "naam": "Randy van der Geugten",
     "powerbiNaam": "van der Geugten, Randy",
     "stroming": "Telecom",
-    "tarief": 75.8,
+    "tarief": 70,
+    "tarief2025": 75.8,
     "fte": null,
     "functie": "Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RVANDERGEUGTEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10161",
@@ -1952,12 +2310,14 @@
     "powerbiNaam": "Aerssens, Koen",
     "stroming": "Public",
     "tarief": 76,
+    "tarief2025": 76,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "KAERSSENS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10842",
@@ -1965,13 +2325,15 @@
     "naam": "Remko Jacobi",
     "powerbiNaam": "Jacobi, Remko",
     "stroming": "Industry",
-    "tarief": 76.2,
+    "tarief": 74,
+    "tarief2025": 76.2,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RJACOBI",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10817",
@@ -1979,13 +2341,15 @@
     "naam": "André van Zaane",
     "powerbiNaam": "van Zaane, André",
     "stroming": "Industry",
-    "tarief": 76.4,
+    "tarief": 73,
+    "tarief2025": 76.4,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "AVANZAANE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10466",
@@ -1994,12 +2358,14 @@
     "powerbiNaam": "Gunnewijk, Ben",
     "stroming": "Public",
     "tarief": 77.6,
+    "tarief2025": 77.6,
     "fte": null,
     "functie": "Consultant (bijv. GIS of CAD)",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "BGUNNEWIJK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10333",
@@ -2007,13 +2373,15 @@
     "naam": "Peter Henzen",
     "powerbiNaam": "Henzen, Peter",
     "stroming": "Civil",
-    "tarief": 79.4,
+    "tarief": 73,
+    "tarief2025": 79.4,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "PHENZEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10958",
@@ -2021,13 +2389,15 @@
     "naam": "Derck Horvers",
     "powerbiNaam": "Horvers, Derck",
     "stroming": "Telecom",
-    "tarief": 81.5,
+    "tarief": 68,
+    "tarief2025": 81.5,
     "fte": null,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "DHORVERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10738",
@@ -2035,13 +2405,15 @@
     "naam": "Yellie Pieren",
     "powerbiNaam": "Pieren, Yellie",
     "stroming": "Telecom",
-    "tarief": 82,
+    "tarief": 59,
+    "tarief2025": 82,
     "fte": null,
     "functie": "Assistent projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "YPIEREN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10825",
@@ -2049,13 +2421,15 @@
     "naam": "Henk Tenhagen",
     "powerbiNaam": "Tenhagen, Henk",
     "stroming": "Industry",
-    "tarief": 82.7,
+    "tarief": 78,
+    "tarief2025": 82.7,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HTENHAGEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10230",
@@ -2063,13 +2437,15 @@
     "naam": "Jarmo Bontekoe",
     "powerbiNaam": "Bontekoe, Jarmo",
     "stroming": "TT",
-    "tarief": 80,
+    "tarief": 66,
+    "tarief2025": 80,
     "fte": 1,
     "functie": "Teamleider",
     "leidingGevende": "Lammers",
     "manager": "Lammers",
     "powerbiNaam2": "JBONTEKOE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10142",
@@ -2077,13 +2453,15 @@
     "naam": "Joyce van der Horst bijgenaamd Linders",
     "powerbiNaam": "van der Horst bijgenaamd Linders, Joyce",
     "stroming": "TT",
-    "tarief": 80,
+    "tarief": 48,
+    "tarief2025": 80,
     "fte": 1,
     "functie": "Teamleider",
     "leidingGevende": "Schilder",
     "manager": "Schilder",
     "powerbiNaam2": "JVANDERHORSTBIJGENAAMDLINDERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10838",
@@ -2092,12 +2470,14 @@
     "powerbiNaam": "Schuite, Matthew",
     "stroming": "Industry",
     "tarief": 82.7,
+    "tarief2025": 82.7,
     "fte": null,
     "functie": "Mechanical Engineer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MSCHUITE",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10405",
@@ -2106,12 +2486,14 @@
     "powerbiNaam": "Randewijk, André",
     "stroming": "Telecom",
     "tarief": 83.6,
+    "tarief2025": 83.6,
     "fte": null,
     "functie": "Uitvoerder",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "ARANDEWIJK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "11092",
@@ -2119,13 +2501,15 @@
     "naam": "Féron van Hoeven",
     "powerbiNaam": "van Hoeven, Féron",
     "stroming": "Civil",
-    "tarief": 84.9,
+    "tarief": 68,
+    "tarief2025": 84.9,
     "fte": null,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "FVANHOEVEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10657",
@@ -2133,13 +2517,15 @@
     "naam": "Jacco Neutel",
     "powerbiNaam": "Neutel, Jacco",
     "stroming": "Telecom",
-    "tarief": 86.9,
+    "tarief": 70,
+    "tarief2025": 86.9,
     "fte": null,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JNEUTEL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10618",
@@ -2147,13 +2533,15 @@
     "naam": "Joren Droogh",
     "powerbiNaam": "Droogh, Joren",
     "stroming": "Telecom",
-    "tarief": 88.8,
+    "tarief": 77,
+    "tarief2025": 88.8,
     "fte": null,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JDROOGH",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10798",
@@ -2161,13 +2549,15 @@
     "naam": "Arjan van den Boogaart",
     "powerbiNaam": "van den Boogaart, Arjan",
     "stroming": "",
-    "tarief": 117,
+    "tarief": 109,
+    "tarief2025": 117,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "AVANDENBOOGAART",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10513",
@@ -2175,13 +2565,15 @@
     "naam": "Christian de Leeuw",
     "powerbiNaam": "de Leeuw, Christian",
     "stroming": "",
-    "tarief": 96,
+    "tarief": 86,
+    "tarief2025": 96,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "CDELEEUW",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10426",
@@ -2190,26 +2582,14 @@
     "powerbiNaam": "Koeman, Daniel",
     "stroming": "Public",
     "tarief": 89.9,
+    "tarief2025": 89.9,
     "fte": null,
     "functie": "GIS Consultant",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "DKOEMAN",
-    "team": ""
-  },
-  {
-    "id": "10216",
-    "bedrijf": "Software",
-    "naam": "Eoin Scollard",
-    "powerbiNaam": "Scollard, Eoin",
-    "stroming": "",
-    "tarief": 80,
-    "fte": null,
-    "functie": "",
-    "leidingGevende": "",
-    "manager": "",
-    "powerbiNaam2": "ESCOLLARD",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10097",
@@ -2217,13 +2597,15 @@
     "naam": "Marcel Flinsenberg",
     "powerbiNaam": "Flinsenberg, Marcel",
     "stroming": "Civil",
-    "tarief": 92.4,
+    "tarief": 73,
+    "tarief2025": 92.4,
     "fte": null,
     "functie": "Ontwerper",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MFLINSENBERG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10712",
@@ -2232,12 +2614,14 @@
     "powerbiNaam": "van Werkhoven, Johan",
     "stroming": "Telecom",
     "tarief": 92.4,
+    "tarief2025": 92.4,
     "fte": null,
     "functie": "Business Developer",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JVANWERKHOVEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10280",
@@ -2245,13 +2629,15 @@
     "naam": "Tony Vonk",
     "powerbiNaam": "Vonk, Tony",
     "stroming": "Telecom",
-    "tarief": 93,
+    "tarief": 86,
+    "tarief2025": 93,
     "fte": null,
     "functie": "Projectmanager",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "TVONK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10296",
@@ -2259,13 +2645,15 @@
     "naam": "Hans van den Hudding",
     "powerbiNaam": "van den Hudding, Hans",
     "stroming": "Telecom",
-    "tarief": 96.4,
+    "tarief": 94,
+    "tarief2025": 96.4,
     "fte": null,
     "functie": "Projectmanager",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HVANDENHUDDING",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10446",
@@ -2273,13 +2661,15 @@
     "naam": "Jeroen Klein",
     "powerbiNaam": "Klein, Jeroen",
     "stroming": "",
-    "tarief": 79,
+    "tarief": 99,
+    "tarief2025": 79,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JKLEIN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10673",
@@ -2287,13 +2677,15 @@
     "naam": "Sjoerd Jansen",
     "powerbiNaam": "Jansen, Sjoerd",
     "stroming": "Telecom",
-    "tarief": 98.6,
+    "tarief": 91,
+    "tarief2025": 98.6,
     "fte": null,
     "functie": "Projectleider",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "SJANSEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10208",
@@ -2301,13 +2693,15 @@
     "naam": "Jonathan Immink",
     "powerbiNaam": "Immink, Jonathan",
     "stroming": "",
-    "tarief": 87,
+    "tarief": 84,
+    "tarief2025": 87,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JIMMINK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10910",
@@ -2315,13 +2709,15 @@
     "naam": "Kotryna Tiggelman",
     "powerbiNaam": "Tiggelman, Kotryna",
     "stroming": "",
-    "tarief": 96,
+    "tarief": 101,
+    "tarief2025": 96,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "KTIGGELMAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10396",
@@ -2329,13 +2725,15 @@
     "naam": "Lysanne van Hunen",
     "powerbiNaam": "van Hunen, Lysanne",
     "stroming": "",
-    "tarief": 69,
+    "tarief": 66,
+    "tarief2025": 69,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "LVANHUNEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10309",
@@ -2343,13 +2741,15 @@
     "naam": "Herman van den Dool",
     "powerbiNaam": "van den Dool, Herman",
     "stroming": "Telecom",
-    "tarief": 99.4,
+    "tarief": 95,
+    "tarief2025": 99.4,
     "fte": null,
     "functie": "Projectmanager",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "HVANDENDOOL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10499",
@@ -2357,13 +2757,15 @@
     "naam": "Marck Niehof",
     "powerbiNaam": "Niehof, Marck",
     "stroming": "",
-    "tarief": 98,
+    "tarief": 89,
+    "tarief2025": 98,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MNIEHOF",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10079",
@@ -2371,13 +2773,15 @@
     "naam": "Marco Helleman",
     "powerbiNaam": "Helleman, Marco",
     "stroming": "",
-    "tarief": 74,
+    "tarief": 69,
+    "tarief2025": 74,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MHELLEMAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10639",
@@ -2385,13 +2789,15 @@
     "naam": "Michael Hernández",
     "powerbiNaam": "Hernández, Michael",
     "stroming": "",
-    "tarief": 113,
+    "tarief": 109,
+    "tarief2025": 113,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MHERNÁNDEZ",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10850",
@@ -2399,13 +2805,15 @@
     "naam": "Mirko Willigenburg",
     "powerbiNaam": "Willigenburg, Mirko",
     "stroming": "",
-    "tarief": 100,
+    "tarief": 94,
+    "tarief2025": 100,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MWILLIGENBURG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10020",
@@ -2413,13 +2821,15 @@
     "naam": "Paul Haffmans",
     "powerbiNaam": "Haffmans, Paul",
     "stroming": "",
-    "tarief": 69,
+    "tarief": 101,
+    "tarief2025": 69,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "PHAFFMANS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10688",
@@ -2427,13 +2837,15 @@
     "naam": "Johan Datema",
     "powerbiNaam": "Datema, Johan",
     "stroming": "Telecom",
-    "tarief": 108.7,
+    "tarief": 109,
+    "tarief2025": 108.7,
     "fte": null,
     "functie": "Projectmanager",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "JDATEMA",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10247",
@@ -2441,13 +2853,15 @@
     "naam": "Raul Santisteban",
     "powerbiNaam": "Santisteban, Raul",
     "stroming": "",
-    "tarief": 129,
+    "tarief": 111,
+    "tarief2025": 129,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RSANTISTEBAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10039",
@@ -2456,12 +2870,14 @@
     "powerbiNaam": "Rahangmetan, Reli",
     "stroming": "",
     "tarief": 80,
+    "tarief2025": 80,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RRAHANGMETAN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10443",
@@ -2470,12 +2886,14 @@
     "powerbiNaam": "van Zanten, Elwyn",
     "stroming": "Public",
     "tarief": 109.7,
+    "tarief2025": 109.7,
     "fte": null,
     "functie": "Consultant (bijv. GIS of CAD)",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "EVANZANTEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10701",
@@ -2483,13 +2901,15 @@
     "naam": "Marco Schreuders",
     "powerbiNaam": "Schreuders, Marco",
     "stroming": "Telecom",
-    "tarief": 113.7,
+    "tarief": 105,
+    "tarief2025": 113.7,
     "fte": null,
     "functie": "Manager",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "MSCHREUDERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10627",
@@ -2497,13 +2917,15 @@
     "naam": "Roel Drijvers",
     "powerbiNaam": "Drijvers, Roel",
     "stroming": "",
-    "tarief": 89,
+    "tarief": 84,
+    "tarief2025": 89,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RDRIJVERS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10570",
@@ -2511,13 +2933,15 @@
     "naam": "Roel Hospel",
     "powerbiNaam": "Hospel, Roel",
     "stroming": "",
-    "tarief": 77,
+    "tarief": 73,
+    "tarief2025": 77,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RHOSPEL",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10542",
@@ -2525,13 +2949,15 @@
     "naam": "Rowin Versteeg",
     "powerbiNaam": "Versteeg, Rowin",
     "stroming": "",
-    "tarief": 117,
+    "tarief": 111,
+    "tarief2025": 117,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "RVERSTEEG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10255",
@@ -2539,13 +2965,15 @@
     "naam": "Sieger-Rink de Jong",
     "powerbiNaam": "de Jong, Sieger-Rink",
     "stroming": "Telecom",
-    "tarief": 114.1,
+    "tarief": 117,
+    "tarief2025": 114.1,
     "fte": null,
     "functie": "Projectmanager",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "SDEJONG",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10959",
@@ -2553,13 +2981,15 @@
     "naam": "Stijn Beukers - Roozen",
     "powerbiNaam": "Beukers - Roozen, Stijn",
     "stroming": "",
-    "tarief": 81,
+    "tarief": 72,
+    "tarief2025": 81,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "SBEUKERS-ROOZEN",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10147",
@@ -2568,12 +2998,14 @@
     "powerbiNaam": "Melnyk, Tetiana",
     "stroming": "",
     "tarief": 90,
+    "tarief2025": 90,
     "fte": null,
     "functie": "",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "TMELNYK",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10546",
@@ -2581,13 +3013,15 @@
     "naam": "Bart Swierts",
     "powerbiNaam": "Swierts, Bart",
     "stroming": "Telecom",
-    "tarief": 122.1,
+    "tarief": 92.5,
+    "tarief2025": 122.1,
     "fte": null,
     "functie": "Projectmanager",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "BSWIERTS",
-    "team": ""
+    "team": "",
+    "vertical": ""
   },
   {
     "id": "10512",
@@ -2596,11 +3030,778 @@
     "powerbiNaam": "Burghouts, Peter",
     "stroming": "Telecom",
     "tarief": 129.6,
+    "tarief2025": 129.6,
     "fte": null,
     "functie": "Projectmanager",
     "leidingGevende": "",
     "manager": "",
     "powerbiNaam2": "PBURGHOUTS",
-    "team": ""
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-001",
+    "bedrijf": "Consultancy",
+    "naam": "Ahmet Turkucu",
+    "powerbiNaam": "Turkucu, Ahmet",
+    "stroming": "",
+    "tarief": 62,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ATURKUCU",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-002",
+    "bedrijf": "Spanje",
+    "naam": "Alberto Corcoles",
+    "powerbiNaam": "Corcoles, Alberto",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ACORCOLES",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-003",
+    "bedrijf": "Consultancy",
+    "naam": "Ali Sarikus",
+    "powerbiNaam": "Sarikus, Ali",
+    "stroming": "",
+    "tarief": 79.98,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ASARIKUS",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-004",
+    "bedrijf": "Consultancy",
+    "naam": "Alin Beliciu",
+    "powerbiNaam": "Beliciu, Alin",
+    "stroming": "",
+    "tarief": 84,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ABELICIU",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-005",
+    "bedrijf": "Spanje",
+    "naam": "Ana María Olmos Carbonell",
+    "powerbiNaam": "María Olmos Carbonell, Ana",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "AMARÍAOLMOSCARBONELL",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-006",
+    "bedrijf": "Consultancy",
+    "naam": "Anne van der Pas",
+    "powerbiNaam": "van der Pas, Anne",
+    "stroming": "",
+    "tarief": 90.56,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "AVANDERPAS",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "10072",
+    "bedrijf": "Software",
+    "naam": "Anneliese Brouwer",
+    "powerbiNaam": "Brouwer, Anneliese",
+    "stroming": "",
+    "tarief": 86,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ABROUWER",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-007",
+    "bedrijf": "Consultancy",
+    "naam": "Bart Kroeze",
+    "powerbiNaam": "Kroeze, Bart",
+    "stroming": "",
+    "tarief": 84,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "BKROEZE",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-008",
+    "bedrijf": "Consultancy",
+    "naam": "Benito Naarden",
+    "powerbiNaam": "Naarden, Benito",
+    "stroming": "",
+    "tarief": 80,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "BNAARDEN",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11118",
+    "bedrijf": "Software",
+    "naam": "Bin Wong",
+    "powerbiNaam": "Wong, Bin",
+    "stroming": "",
+    "tarief": 60,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "BWONG",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-009",
+    "bedrijf": "Spanje",
+    "naam": "Bryan Moreira",
+    "powerbiNaam": "Moreira, Bryan",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "BMOREIRA",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-010",
+    "bedrijf": "Spanje",
+    "naam": "Carlos Gonzalez Sanchez",
+    "powerbiNaam": "Gonzalez Sanchez, Carlos",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "CGONZALEZSANCHEZ",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-011",
+    "bedrijf": "Spanje",
+    "naam": "Carlos Micó Slaguero",
+    "powerbiNaam": "Micó Slaguero, Carlos",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "CMICÓSLAGUERO",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11066",
+    "bedrijf": "Projects",
+    "naam": "Chris Evers",
+    "powerbiNaam": "Evers, Chris",
+    "stroming": "",
+    "tarief": 52,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "CEVERS",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-012",
+    "bedrijf": "Consultancy",
+    "naam": "Ciprian Liviu RUSU",
+    "powerbiNaam": "Liviu RUSU, Ciprian",
+    "stroming": "",
+    "tarief": 129,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "CLIVIURUSU",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11166",
+    "bedrijf": "Projects",
+    "naam": "Coen Hijmans",
+    "powerbiNaam": "Hijmans, Coen",
+    "stroming": "",
+    "tarief": 99,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "CHIJMANS",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "10152",
+    "bedrijf": "Software",
+    "naam": "Corno Rense",
+    "powerbiNaam": "Rense, Corno",
+    "stroming": "",
+    "tarief": 94,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "CRENSE",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-013",
+    "bedrijf": "Software",
+    "naam": "Dennis de Kruijf",
+    "powerbiNaam": "de Kruijf, Dennis",
+    "stroming": "",
+    "tarief": 100,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "DDEKRUIJF",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-014",
+    "bedrijf": "Consultancy",
+    "naam": "Dennis Geurtsen",
+    "powerbiNaam": "Geurtsen, Dennis",
+    "stroming": "",
+    "tarief": 85,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "DGEURTSEN",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "10249",
+    "bedrijf": "Software",
+    "naam": "Derk Nouwens",
+    "powerbiNaam": "Nouwens, Derk",
+    "stroming": "",
+    "tarief": 84,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "DNOUWENS",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-015",
+    "bedrijf": "Consultancy",
+    "naam": "Erhan Bayram",
+    "powerbiNaam": "Bayram, Erhan",
+    "stroming": "",
+    "tarief": 74.65,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "EBAYRAM",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-016",
+    "bedrijf": "Consultancy",
+    "naam": "Erik Porsius",
+    "powerbiNaam": "Porsius, Erik",
+    "stroming": "",
+    "tarief": 52.5,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "EPORSIUS",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-017",
+    "bedrijf": "Consultancy",
+    "naam": "Fouad Ararraz",
+    "powerbiNaam": "Ararraz, Fouad",
+    "stroming": "",
+    "tarief": 52.5,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "FARARRAZ",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-018",
+    "bedrijf": "Consultancy",
+    "naam": "Fikri Karabey",
+    "powerbiNaam": "Karabey, Fikri",
+    "stroming": "",
+    "tarief": 62,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "FKARABEY",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-019",
+    "bedrijf": "Consultancy",
+    "naam": "Hans Toonen",
+    "powerbiNaam": "Toonen, Hans",
+    "stroming": "",
+    "tarief": 58,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "HTOONEN",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11162",
+    "bedrijf": "Consultancy",
+    "naam": "Henk Baas",
+    "powerbiNaam": "Baas, Henk",
+    "stroming": "",
+    "tarief": 64,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "HBAAS",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-020",
+    "bedrijf": "Consultancy",
+    "naam": "Ibo Cam",
+    "powerbiNaam": "Cam, Ibo",
+    "stroming": "",
+    "tarief": 77.25,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ICAM",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "10078",
+    "bedrijf": "Software",
+    "naam": "Ingeborg Hoogenberg",
+    "powerbiNaam": "Hoogenberg, Ingeborg",
+    "stroming": "",
+    "tarief": 76,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "IHOOGENBERG",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-021",
+    "bedrijf": "Consultancy",
+    "naam": "Jaap de Vries",
+    "powerbiNaam": "de Vries, Jaap",
+    "stroming": "",
+    "tarief": 47.5,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "JDEVRIES",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-022",
+    "bedrijf": "Consultancy",
+    "naam": "Jan Tromp",
+    "powerbiNaam": "Tromp, Jan",
+    "stroming": "",
+    "tarief": 62,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "JTROMP",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11168",
+    "bedrijf": "Projects",
+    "naam": "Jelle Wassenberg",
+    "powerbiNaam": "Wassenberg, Jelle",
+    "stroming": "",
+    "tarief": 47,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "JWASSENBERG",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-023",
+    "bedrijf": "Spanje",
+    "naam": "Jorge Cristóbal Ascaso",
+    "powerbiNaam": "Cristóbal Ascaso, Jorge",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "JCRISTÓBALASCASO",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-024",
+    "bedrijf": "Spanje",
+    "naam": "Jorge Gomez",
+    "powerbiNaam": "Gomez, Jorge",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "JGOMEZ",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-025",
+    "bedrijf": "Spanje",
+    "naam": "López Yubero",
+    "powerbiNaam": "Yubero, López",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "LYUBERO",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-026",
+    "bedrijf": "Spanje",
+    "naam": "Manuel Navarro Pérez",
+    "powerbiNaam": "Navarro Pérez, Manuel",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "MNAVARROPÉREZ",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-027",
+    "bedrijf": "Consultancy",
+    "naam": "Marcel Menting",
+    "powerbiNaam": "Menting, Marcel",
+    "stroming": "",
+    "tarief": 163.62,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "MMENTING",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-028",
+    "bedrijf": "Spanje",
+    "naam": "Melchor Ballesta Honrubia",
+    "powerbiNaam": "Ballesta Honrubia, Melchor",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "MBALLESTAHONRUBIA",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11156",
+    "bedrijf": "Projects",
+    "naam": "Milan van Opstal",
+    "powerbiNaam": "van Opstal, Milan",
+    "stroming": "",
+    "tarief": 51,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "MVANOPSTAL",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-029",
+    "bedrijf": "Consultancy",
+    "naam": "Muhammed Apaydin",
+    "powerbiNaam": "Apaydin, Muhammed",
+    "stroming": "",
+    "tarief": 60,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "MAPAYDIN",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11132",
+    "bedrijf": "Projects",
+    "naam": "Mustapha Aghbal",
+    "powerbiNaam": "Aghbal, Mustapha",
+    "stroming": "",
+    "tarief": 46,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "MAGHBAL",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-030",
+    "bedrijf": "Consultancy",
+    "naam": "Nikki Jansen",
+    "powerbiNaam": "Jansen, Nikki",
+    "stroming": "",
+    "tarief": 62,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "NJANSEN",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-031",
+    "bedrijf": "Consultancy",
+    "naam": "Nikolay Nikolov",
+    "powerbiNaam": "Nikolov, Nikolay",
+    "stroming": "",
+    "tarief": 70,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "NNIKOLOV",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-032",
+    "bedrijf": "Spanje",
+    "naam": "Óscar Planells",
+    "powerbiNaam": "Planells, Óscar",
+    "stroming": "",
+    "tarief": 35,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ÓPLANELLS",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-033",
+    "bedrijf": "Consultancy",
+    "naam": "Pierre Driessen",
+    "powerbiNaam": "Driessen, Pierre",
+    "stroming": "",
+    "tarief": 58,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "PDRIESSEN",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-034",
+    "bedrijf": "Consultancy",
+    "naam": "Robert Stefan",
+    "powerbiNaam": "Stefan, Robert",
+    "stroming": "",
+    "tarief": 45.9,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "RSTEFAN",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11138",
+    "bedrijf": "Projects",
+    "naam": "Sam Ernst",
+    "powerbiNaam": "Ernst, Sam",
+    "stroming": "",
+    "tarief": 46,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "SERNST",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-035",
+    "bedrijf": "Consultancy",
+    "naam": "Stefan Lucian Vasilica",
+    "powerbiNaam": "Lucian Vasilica, Stefan",
+    "stroming": "",
+    "tarief": 41,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "SLUCIANVASILICA",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11171",
+    "bedrijf": "Projects",
+    "naam": "Walter van den Berg",
+    "powerbiNaam": "van den Berg, Walter",
+    "stroming": "Energy",
+    "tarief": 72,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "WVANDENBERG",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "11143",
+    "bedrijf": "Software",
+    "naam": "Willem Ploegstra",
+    "powerbiNaam": "Ploegstra, Willem",
+    "stroming": "",
+    "tarief": 60,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "WPLOEGSTRA",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "10215",
+    "bedrijf": "Consultancy",
+    "naam": "Wouter Spaak",
+    "powerbiNaam": "Spaak, Wouter",
+    "stroming": "",
+    "tarief": 101,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "WSPAAK",
+    "team": "",
+    "vertical": ""
+  },
+  {
+    "id": "ic2026-036",
+    "bedrijf": "Consultancy",
+    "naam": "Zaman Mohammed",
+    "powerbiNaam": "Mohammed, Zaman",
+    "stroming": "",
+    "tarief": 52,
+    "fte": null,
+    "functie": "",
+    "leidingGevende": "",
+    "manager": "",
+    "powerbiNaam2": "ZMOHAMMED",
+    "team": "",
+    "vertical": ""
   }
 ]

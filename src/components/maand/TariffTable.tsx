@@ -3,7 +3,7 @@ import { useTariffStore } from '../../store/useTariffStore'
 import type { TariffEntry } from '../../data/types'
 import { useToast } from '../../hooks/useToast'
 import { Toast } from '../common/Toast'
-import { verticalForEmployeeId, VERTICAL_COLORS, VERTICALS } from '../../lib/verticals'
+import { verticalForEmployeeId, normalizeVertical, VERTICAL_COLORS, VERTICALS } from '../../lib/verticals'
 import { PERSON_SPEC_SNAPSHOT_DATE } from '../../data/personSpec'
 
 const BV_COLORS: Record<string, string> = {
@@ -37,10 +37,15 @@ export function TariffTable() {
 
   const hasMissingTariff = (e: TariffEntry) => !e.tarief || e.tarief <= 0
 
+  /** Vertical voor een entry: handmatige override heeft voorrang, anders
+   *  afgeleid uit de Specificatie persoonsniveau. */
+  const verticalOf = (e: TariffEntry): string | null =>
+    e.vertical && e.vertical.trim() ? e.vertical.trim() : verticalForEmployeeId(e.id)
+
   const filtered = entries.filter(e => {
     if (filterBv !== 'all' && e.bedrijf !== filterBv) return false
     if (filterVertical !== 'all') {
-      const v = verticalForEmployeeId(e.id)
+      const v = verticalOf(e)
       if (filterVertical === '__none__') {
         if (v !== null) return false
       } else if (v !== filterVertical) return false
@@ -51,7 +56,6 @@ export function TariffTable() {
       return (e.naam?.toLowerCase() ?? '').includes(s) ||
              (e.id ?? '').includes(s) ||
              (e.functie?.toLowerCase() ?? '').includes(s) ||
-             (e.team?.toLowerCase() ?? '').includes(s) ||
              (e.powerbiNaam?.toLowerCase() ?? '').includes(s) ||
              (e.powerbiNaam2?.toLowerCase() ?? '').includes(s)
     }
@@ -85,10 +89,17 @@ export function TariffTable() {
       showToast('BV is verplicht', 'r')
       return
     }
-    // Commit alle velden
-    const { id, ...patch } = draft
-    void id
-    updateEntry(editingId, patch)
+    const newId = draft.id?.trim() ?? ''
+    if (!newId) {
+      showToast('ID is verplicht', 'r')
+      return
+    }
+    if (newId !== editingId && entries.some(e => e.id === newId)) {
+      showToast(`ID "${newId}" bestaat al bij een andere medewerker`, 'r')
+      return
+    }
+    // Commit alle velden, inclusief een eventueel gewijzigd werknemers-ID
+    updateEntry(editingId, { ...draft, id: newId })
     setNewEntryIds(prev => {
       const next = new Set(prev)
       next.delete(editingId)
@@ -125,12 +136,13 @@ export function TariffTable() {
       bedrijf: filterBv !== 'all' ? filterBv : 'Consultancy',
       naam: '', powerbiNaam: '', stroming: '',
       tarief: 0, fte: null, functie: '', leidingGevende: '', manager: '',
-      powerbiNaam2: '', team: '',
+      powerbiNaam2: '', team: '', vertical: '',
     }
     addEntry(entry)
     setNewEntryIds(prev => new Set(prev).add(id))
     setEditingId(id)
-    setDraft({ ...entry })
+    // Start met een leeg ID-veld zodat de gebruiker het echte werknemers-ID invult
+    setDraft({ ...entry, id: '' })
     // Scroll naar boven — nieuwe entries verschijnen meestal onderaan
     setTimeout(() => {
       const row = document.getElementById(`tariff-row-${id}`)
@@ -150,8 +162,17 @@ export function TariffTable() {
     if (!draft) return null
     return (
       <tr key={entry.id} id={`tariff-row-${entry.id}`} style={{ background: 'rgba(0,169,224,0.08)' }}>
-        <td style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t3)', padding: '4px 8px' }}>
-          {newEntryIds.has(entry.id) ? 'NIEUW' : entry.id}
+        <td style={{ padding: '4px 6px' }}>
+          <input
+            style={{ ...inputStyle, fontFamily: 'var(--mono)', fontSize: 10 }}
+            value={draft.id}
+            placeholder="Werknemer-ID"
+            onChange={e => patchDraft({ id: e.target.value })}
+            title="Werknemers-ID — aanpasbaar"
+          />
+          {newEntryIds.has(entry.id) && (
+            <div style={{ fontSize: 8, color: 'var(--blue)', fontWeight: 700, marginTop: 2 }}>NIEUW</div>
+          )}
         </td>
         <td style={{ padding: '4px 6px' }}>
           <select
@@ -170,18 +191,6 @@ export function TariffTable() {
             onChange={e => patchDraft({ naam: e.target.value })}
             autoFocus
           />
-          <input
-            style={{ ...inputStyle, marginTop: 3, fontSize: 10, color: 'var(--t3)' }}
-            value={draft.powerbiNaam}
-            placeholder="PowerBI-naam (bv. 'Janzen, Kevin')"
-            onChange={e => patchDraft({ powerbiNaam: e.target.value })}
-          />
-          <input
-            style={{ ...inputStyle, marginTop: 3, fontSize: 10, color: 'var(--t3)' }}
-            value={draft.powerbiNaam2}
-            placeholder="SAP alias (bv. 'KJANZEN')"
-            onChange={e => patchDraft({ powerbiNaam2: e.target.value })}
-          />
         </td>
         <td style={{ padding: '4px 6px' }}>
           <input
@@ -194,43 +203,48 @@ export function TariffTable() {
         <td style={{ padding: '4px 6px' }}>
           <input
             style={inputStyle}
-            value={draft.team}
-            placeholder="Team"
-            onChange={e => patchDraft({ team: e.target.value })}
-          />
-        </td>
-        <td style={{ padding: '4px 6px' }}>
-          <input
-            style={inputStyle}
             value={draft.stroming}
             placeholder="Stroming"
             onChange={e => patchDraft({ stroming: e.target.value })}
           />
         </td>
-        <td style={{ padding: '4px 6px' }} title="Vertical wordt afgeleid uit Specificatie persoonsniveau (kolom O) en is hier alleen-lezen">
-          {(() => {
-            const v = verticalForEmployeeId(entry.id)
-            if (!v) return <span style={{ color: 'var(--t3)', fontSize: 10 }}>—</span>
-            return (
-              <span style={{
-                fontSize: 10, padding: '2px 6px', borderRadius: 3, fontWeight: 600,
-                background: VERTICAL_COLORS[v] + '22',
-                color: VERTICAL_COLORS[v],
-              }}>{v}</span>
-            )
-          })()}
+        <td style={{ padding: '4px 6px' }}>
+          <select
+            style={{ ...inputStyle, cursor: 'pointer' }}
+            value={draft.vertical ?? ''}
+            onChange={e => patchDraft({ vertical: e.target.value })}
+            title="Vertical — leeg laten = afleiden uit Specificatie persoonsniveau"
+          >
+            <option value="">— (afleiden)</option>
+            {VERTICALS.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
         </td>
         <td className="r" style={{ padding: '4px 6px' }}>
-          <input
-            style={{ ...inputStyle, textAlign: 'right', fontFamily: 'var(--mono)' }}
-            value={String(draft.tarief ?? '')}
-            placeholder="€/uur"
-            onChange={e => {
-              const v = parseFloat(e.target.value.replace(',', '.'))
-              patchDraft({ tarief: isNaN(v) ? 0 : v })
-            }}
-            onKeyDown={e => { if (e.key === 'Enter') saveEdit(); else if (e.key === 'Escape') cancelEdit() }}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 9, color: 'var(--t3)', width: 30, textAlign: 'right' }}>2025</span>
+              <span style={{
+                fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--t3)',
+                background: 'var(--bg3)', border: '1px solid var(--bd3)', borderRadius: 4,
+                padding: '3px 6px', width: 66, textAlign: 'right', boxSizing: 'border-box',
+              }} title="Vorig tarief — alleen-lezen">
+                {draft.tarief2025 != null ? `€ ${draft.tarief2025}` : '—'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 9, color: 'var(--blue)', fontWeight: 700, width: 30, textAlign: 'right' }}>2026</span>
+              <input
+                style={{ ...inputStyle, textAlign: 'right', fontFamily: 'var(--mono)', width: 66 }}
+                value={String(draft.tarief ?? '')}
+                placeholder="€/uur"
+                onChange={e => {
+                  const v = parseFloat(e.target.value.replace(',', '.'))
+                  patchDraft({ tarief: isNaN(v) ? 0 : v })
+                }}
+                onKeyDown={e => { if (e.key === 'Enter') saveEdit(); else if (e.key === 'Escape') cancelEdit() }}
+              />
+            </div>
+          </div>
         </td>
         <td className="r" style={{ padding: '4px 6px' }}>
           <input
@@ -296,18 +310,22 @@ export function TariffTable() {
         )}
       </td>
       <td style={{ color: 'var(--t2)' }}>{entry.functie || '—'}</td>
-      <td style={{ color: 'var(--t3)' }}>{entry.team || '—'}</td>
       <td style={{ color: 'var(--t3)' }}>{entry.stroming || '—'}</td>
       <td>
         {(() => {
-          const v = verticalForEmployeeId(entry.id)
+          const v = verticalOf(entry)
           if (!v) return <span style={{ color: 'var(--t3)', fontSize: 10 }}>—</span>
+          const nv = normalizeVertical(v)
+          const manual = !!(entry.vertical && entry.vertical.trim())
           return (
-            <span style={{
-              fontSize: 10, padding: '2px 6px', borderRadius: 3, fontWeight: 600,
-              background: VERTICAL_COLORS[v] + '22',
-              color: VERTICAL_COLORS[v],
-            }}>{v}</span>
+            <span
+              title={manual ? 'Handmatig ingesteld' : 'Afgeleid uit Specificatie persoonsniveau'}
+              style={{
+                fontSize: 10, padding: '2px 6px', borderRadius: 3, fontWeight: 600,
+                background: VERTICAL_COLORS[nv] + '22',
+                color: VERTICAL_COLORS[nv],
+              }}
+            >{v}</span>
           )
         })()}
       </td>
@@ -316,6 +334,11 @@ export function TariffTable() {
         color: entry.tarief > 0 ? 'var(--t1)' : 'var(--red)',
       }}>
         {entry.tarief > 0 ? `€ ${entry.tarief.toFixed(2)}` : '— (geen tarief)'}
+        {entry.tarief2025 != null && (
+          <div style={{ fontSize: 9, fontWeight: 400, color: 'var(--t3)', marginTop: 1 }}>
+            2025: € {entry.tarief2025.toFixed(2)}
+          </div>
+        )}
       </td>
       <td className="mono r" style={{ color: 'var(--t3)' }}>
         {entry.fte != null ? entry.fte : '—'}
@@ -376,11 +399,11 @@ export function TariffTable() {
         >
           <option value="all">Alle verticals</option>
           {VERTICALS.map(v => {
-            const c = entries.filter(e => verticalForEmployeeId(e.id) === v).length
+            const c = entries.filter(e => verticalOf(e) === v).length
             if (c === 0) return null
             return <option key={v} value={v}>{v} ({c})</option>
           })}
-          <option value="__none__">— niet in spec ({entries.filter(e => verticalForEmployeeId(e.id) === null).length})</option>
+          <option value="__none__">— geen vertical ({entries.filter(e => verticalOf(e) === null).length})</option>
         </select>
         <span style={{ fontSize: 11, color: 'var(--t3)' }}>{filtered.length} medewerker{filtered.length === 1 ? '' : 's'}</span>
         <button
@@ -446,21 +469,20 @@ export function TariffTable() {
           <table className="tbl" style={{ fontSize: 11 }}>
             <thead>
               <tr>
-                <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 60 }}>ID</th>
+                <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 90 }}>ID</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 120 }}>BV</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 200 }}>Naam + aliases</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 120 }}>Functie</th>
-                <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 100 }}>Team</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 100 }}>Stroming</th>
-                <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 90 }} title={`Vertical uit Specificatie persoonsniveau (snapshot ${PERSON_SPEC_SNAPSHOT_DATE})`}>Vertical</th>
-                <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 90 }}>Tarief</th>
+                <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 90 }} title={`Vertical — handmatig of afgeleid uit Specificatie persoonsniveau (snapshot ${PERSON_SPEC_SNAPSHOT_DATE})`}>Vertical</th>
+                <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 110 }}>Tarief</th>
                 <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 60 }}>FTE</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, width: 70 }}></th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--t3)', padding: 20 }}>Geen medewerkers gevonden</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--t3)', padding: 20 }}>Geen medewerkers gevonden</td></tr>
               )}
               {filtered.map(entry =>
                 editingId === entry.id ? renderEditRow(entry) : renderDisplayRow(entry)
