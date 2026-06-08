@@ -61,7 +61,12 @@ function snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {
 export async function fetchClosingEntries(): Promise<ClosingEntry[]> {
   if (!supabaseEnabled) return []
   const { data, error } = await supabase.from('closing_entries').select('*')
-  if (error) { console.error('fetchClosingEntries:', error); return [] }
+  // GOOI bij een echte fout (i.p.v. [] terug te geven): anders ziet de
+  // reconcile-laag in loadFromDb de DB als "leeg" en pusht álle lokale entries
+  // terug naar Supabase — bij een aanhoudende lees-fout (RLS/sessie/netwerk)
+  // herhaalt dat elke 30s-poll → continue save-fouten. De caller vangt de
+  // throw op en behoudt lokale state.
+  if (error) throw new Error(`fetchClosingEntries: ${error.message ?? error}`)
   return (data ?? []).map(row => snakeToCamel(row) as unknown as ClosingEntry)
 }
 
@@ -85,7 +90,8 @@ export async function upsertAllClosingEntries(entries: ClosingEntry[]): Promise<
 export async function fetchFteEntries(): Promise<FteEntry[]> {
   if (!supabaseEnabled) return []
   const { data, error } = await supabase.from('fte_entries').select('*')
-  if (error) { console.error('fetchFteEntries:', error); return [] }
+  // Throw bij echte fout — zie fetchClosingEntries: voorkomt reconcile-push-loop.
+  if (error) throw new Error(`fetchFteEntries: ${error.message ?? error}`)
   return (data ?? []).map(row => snakeToCamel(row) as unknown as FteEntry)
 }
 
@@ -217,7 +223,9 @@ export async function fetchOhwEntities(year: string): Promise<OhwEntityData[]> {
     .select('*')
     .eq('year', year)
     .order('entity')
-  if (error) { console.error('fetchOhwEntities:', error); return [] }
+  // Throw bij echte fout — zie fetchClosingEntries: anders pusht de OHW-
+  // reconcile bij elke poll alle entities terug → continue save-fouten.
+  if (error) throw new Error(`fetchOhwEntities(${year}): ${error.message ?? error}`)
   return (data ?? []).map(row => row.data as OhwEntityData)
 }
 
