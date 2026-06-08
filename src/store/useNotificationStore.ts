@@ -10,12 +10,21 @@
 //   - approver finaliseert een Maandafsluiting → notificatie naar editors
 //     én approvers ("Mar-26 definitief afgesloten")
 //
-// Persistentie: localStorage (zustand persist) — multi-device sync via
-// Supabase volgt later via een aparte `notifications` tabel.
+// Persistentie: Supabase (tabel `notifications`) + localStorage als cache.
+// Door de gedeelde Supabase-tabel ziet elke gebruiker meteen dezelfde inbox —
+// een melding van user A verschijnt via Supabase Realtime direct bij user B.
+// `read_by` is een array van emails zodat per-user gelezen-status individueel
+// blijft terwijl de melding zelf gedeeld is.
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Role } from '../lib/permissions'
+import {
+  fetchNotifications,
+  upsertNotification,
+  deleteNotification,
+  deleteNotificationsByDedupe,
+} from '../lib/db'
 
 export type NotificationCategory =
   | 'import-pending'         // editor heeft import geüpload, wacht op approval
@@ -39,16 +48,20 @@ export interface Notification {
   link?: { tab: NotificationTab; month?: string }
   /** ISO-timestamp — wanneer ontstaan. */
   createdAt: string
-  /** Welke users hebben deze al gelezen? — opgeslagen als email-set. */
+  /** Welke users hebben deze al gelezen? — opgeslagen als email-lijst. */
   readBy: string[]
   /** Optionele dedupe-key. Notificaties met dezelfde key worden niet
    *  dubbel toegevoegd (handig voor periodieke triggers zoals "maand
-   *  is begonnen — start afsluiting Apr-26"). */
+   *  is begonnen — start afsluiting Apr-26"). Een partial UNIQUE index in
+   *  Postgres dwingt dit ook DB-side af. */
   dedupeKey?: string
 }
 
 interface NotificationStore {
   notifications: Notification[]
+  loaded: boolean
+  /** Laad uit Supabase + merge met lokale state (DB wint per id). */
+  loadFromDb: () => Promise<void>
   /** Voeg een notificatie toe (of skip als dedupeKey al bestaat). */
   addNotification: (n: Omit<Notification, 'id' | 'createdAt' | 'readBy'> & {
     id?: string
@@ -60,6 +73,8 @@ interface NotificationStore {
   markAllRead: (email: string, audienceFilter?: Role) => void
   /** Verwijder een notificatie. */
   remove: (id: string) => void
+  /** Verwijder alle notificaties met deze dedupe-key (bv. clear pending). */
+  removeByDedupe: (dedupeKey: string) => void
   /** Notificaties zichtbaar voor een rol, gesorteerd op nieuwste eerst. */
   visibleFor: (role: Role | null) => Notification[]
   /** Alleen ongelezen notificaties voor (rol, email). */
@@ -74,10 +89,39 @@ export const useNotificationStore = create<NotificationStore>()(
   persist(
     (set, get) => ({
       notifications: [],
+      loaded: false,
+
+      loadFromDb: async () => {
+        // Merge-load: lokale state als basis (voor offline-recovery), DB wint
+        // per id zodat read_by-arrays van andere users binnenkomen. Notificaties
+        // die alleen lokaal bestaan worden naar DB gepusht — beschermt tegen
+        // verlies wanneer Supabase tijdens een vorige insert offline was.
+        let dbRows: Notification[] = []
+        try {
+          dbRows = await fetchNotifications()
+        } catch (e) {
+          console.warn('[useNotificationStore] fetch failed — keeping local state:', e)
+          set({ loaded: true })
+          return
+        }
+        const local = get().notifications
+        const byId = new Map<string, Notification>()
+        for (const n of local) byId.set(n.id, n)
+        for (const n of dbRows) byId.set(n.id, n) // DB wint
+        const merged = Array.from(byId.values())
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 500)
+        set({ notifications: merged, loaded: true })
+        // Reconcile: push local-only notifications (server kent ze nog niet)
+        const dbIds = new Set(dbRows.map(n => n.id))
+        for (const n of local) {
+          if (!dbIds.has(n.id)) upsertNotification(n)
+        }
+      },
 
       addNotification: (n) => {
-        // Skip silent als dedupe-key al bestaat (en niet al gelezen). Zo
-        // krijgen 'maand begonnen'-triggers niet 30 keer dezelfde regel.
+        // Skip silent als dedupe-key al bestaat. Zo krijgen 'maand begonnen'-
+        // triggers niet 30 keer dezelfde regel.
         if (n.dedupeKey && get().notifications.some(x => x.dedupeKey === n.dedupeKey)) return
         const fresh: Notification = {
           id: n.id ?? nextId(),
@@ -90,33 +134,51 @@ export const useNotificationStore = create<NotificationStore>()(
           readBy: [],
           dedupeKey: n.dedupeKey,
         }
-        set(s => ({ notifications: [fresh, ...s.notifications].slice(0, 200) }))
+        set(s => ({ notifications: [fresh, ...s.notifications].slice(0, 500) }))
+        // Sync naar Supabase (fire-and-forget). De partial UNIQUE op
+        // dedupe_key vangt race-conditions tussen clients af.
+        upsertNotification(fresh)
       },
 
       markRead: (id, email) => {
         const norm = email.trim().toLowerCase()
+        let changed: Notification | null = null
         set(s => ({
-          notifications: s.notifications.map(n =>
-            n.id === id && !n.readBy.includes(norm)
-              ? { ...n, readBy: [...n.readBy, norm] }
-              : n,
-          ),
+          notifications: s.notifications.map(n => {
+            if (n.id !== id || n.readBy.includes(norm)) return n
+            const updated = { ...n, readBy: [...n.readBy, norm] }
+            changed = updated
+            return updated
+          }),
         }))
+        if (changed) upsertNotification(changed)
       },
 
       markAllRead: (email, audienceFilter) => {
         const norm = email.trim().toLowerCase()
+        const toSync: Notification[] = []
         set(s => ({
           notifications: s.notifications.map(n => {
             const inAudience = audienceFilter ? n.audience.includes(audienceFilter) : true
             if (!inAudience) return n
             if (n.readBy.includes(norm)) return n
-            return { ...n, readBy: [...n.readBy, norm] }
+            const updated = { ...n, readBy: [...n.readBy, norm] }
+            toSync.push(updated)
+            return updated
           }),
         }))
+        for (const n of toSync) upsertNotification(n)
       },
 
-      remove: (id) => set(s => ({ notifications: s.notifications.filter(n => n.id !== id) })),
+      remove: (id) => {
+        set(s => ({ notifications: s.notifications.filter(n => n.id !== id) }))
+        deleteNotification(id)
+      },
+
+      removeByDedupe: (dedupeKey) => {
+        set(s => ({ notifications: s.notifications.filter(n => n.dedupeKey !== dedupeKey) }))
+        deleteNotificationsByDedupe(dedupeKey)
+      },
 
       visibleFor: (role) => {
         if (!role) return []
@@ -156,10 +218,7 @@ export function notifyImportPending(slotLabel: string, month: string, byEmail: s
 /** Aanroepen wanneer een approver een import goedkeurt. Wist de pending-
  *  notificatie zodat de inbox schoon blijft. */
 export function clearImportPendingFor(slotLabel: string, month: string): void {
-  const dedupe = `import-pending|${slotLabel}|${month}`
-  useNotificationStore.setState(s => ({
-    notifications: s.notifications.filter(n => n.dedupeKey !== dedupe),
-  }))
+  useNotificationStore.getState().removeByDedupe(`import-pending|${slotLabel}|${month}`)
 }
 
 /** Aanroepen bij start van een nieuwe kalendermaand om editors te triggeren
@@ -180,10 +239,7 @@ export function notifyMaandStart(targetMonth: string): void {
 export function notifyMaandFinalized(month: string, byEmail: string): void {
   // Wist eerst de openstaande start-melding voor deze maand zodat hij niet
   // blijft hangen.
-  const startDedupe = `maand-start|${month}`
-  useNotificationStore.setState(s => ({
-    notifications: s.notifications.filter(n => n.dedupeKey !== startDedupe),
-  }))
+  useNotificationStore.getState().removeByDedupe(`maand-start|${month}`)
   useNotificationStore.getState().addNotification({
     category: 'maand-finalized',
     audience: ['editor', 'approver', 'admin'],

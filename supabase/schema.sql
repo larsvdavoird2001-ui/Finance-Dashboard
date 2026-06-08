@@ -469,6 +469,77 @@ CREATE OR REPLACE TRIGGER trg_reflections_updated BEFORE UPDATE ON closing_refle
 CREATE OR REPLACE TRIGGER trg_internal_hours_upd  BEFORE UPDATE ON internal_hours      FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ============================================================================
+-- 11. Notificaties — gedeelde bell-inbox tussen editors/approvers/admins.
+--     Triggers vanuit de app: import uploaded, IC-tarieven klaar, maand-start,
+--     maand-finalized, LE-leerlus open. Zonder deze tabel staan notificaties
+--     alleen in localStorage — dan ziet user B een melding niet wanneer user A
+--     hem aanmaakt.
+--     - audience is een jsonb array met role-strings (viewer/editor/approver/admin).
+--     - read_by is een jsonb array van email-adressen die de melding al hebben
+--       gezien; per-user gelezen-status blijft dus per user verschillend.
+--     - dedupe_key voorkomt dat dezelfde melding (bv. "Mar-26 maand-start")
+--       twee keer verschijnt; partial unique index dwingt dit DB-side af zodat
+--       gelijktijdige inserts van twee clients niet alsnog duplicaten geven.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS notifications (
+  id text PRIMARY KEY,
+  category text NOT NULL,
+  audience jsonb NOT NULL DEFAULT '[]',
+  title text NOT NULL,
+  body text,
+  link_tab text,
+  link_month text,
+  dedupe_key text,
+  read_by jsonb NOT NULL DEFAULT '[]',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_notifications_dedupe
+  ON notifications (dedupe_key)
+  WHERE dedupe_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
+
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all on notifications" ON notifications;
+CREATE POLICY "Allow all on notifications" ON notifications FOR ALL USING (true) WITH CHECK (true);
+
+CREATE OR REPLACE TRIGGER trg_notifications_updated BEFORE UPDATE ON notifications
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================================
+-- 12. Voorspelling huidige maand — partial-month upload-totalen + OHW-schatting.
+--     Gescheiden van de Maandafsluiting-tabellen zodat een prognose-upload (bv.
+--     factuurvolume YTD halverwege de maand) géén OHW-rijen of import_records
+--     muteert. Pure prognose-input: de forecastEngine leest deze data, blendt
+--     met de LE-forecast en levert een maandeind-voorspelling.
+--     - id = `${month}::${slot}` voor BV-agnostische slots (factuurvolume,
+--       geschreven_uren, interne_uren) en `${month}::${slot}::${bv}` voor
+--       slots die per BV opgeslagen worden (ohw_estimate).
+--     - payload bevat de gestandaardiseerde totalen (perBv map, hours-entries,
+--       OHW row-mutatie) zoals geleverd door parseImportFile.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS forecast_inputs (
+  id text PRIMARY KEY,
+  month text NOT NULL,
+  slot text NOT NULL,
+  bv text,
+  payload jsonb NOT NULL DEFAULT '{}',
+  file_name text,
+  uploaded_by text,
+  uploaded_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_forecast_inputs_month ON forecast_inputs(month);
+CREATE INDEX IF NOT EXISTS idx_forecast_inputs_slot  ON forecast_inputs(month, slot);
+
+ALTER TABLE forecast_inputs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all on forecast_inputs" ON forecast_inputs;
+CREATE POLICY "Allow all on forecast_inputs" ON forecast_inputs FOR ALL USING (true) WITH CHECK (true);
+
+CREATE OR REPLACE TRIGGER trg_forecast_inputs_updated BEFORE UPDATE ON forecast_inputs
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================================
 -- Realtime / live sync — CRUCIAAL voor "iedereen ziet meteen de laatste data".
 -- ----------------------------------------------------------------------------
 -- De app abonneert zich via Supabase Realtime op onderstaande tabellen
@@ -488,19 +559,27 @@ BEGIN
     'closing_entries', 'closing_finalized', 'fte_entries', 'import_records',
     'import_raw_data', 'ohw_entities', 'tariff_entries', 'budget_overrides',
     'ohw_evidence', 'hours_entries', 'hours_week_entries', 'cost_breakdowns',
-    'closing_reflections', 'internal_hours'
+    'closing_reflections', 'internal_hours', 'notifications', 'user_profiles',
+    'forecast_inputs'
   ] LOOP
     -- to_regclass-check: sla tabellen over die (nog) niet bestaan, zodat het
     -- blok niet crasht op een database die nog niet volledig gemigreerd is.
-    IF to_regclass('public.' || t) IS NOT NULL
-       AND NOT EXISTS (
-      SELECT 1 FROM pg_publication_tables
-      WHERE pubname = 'supabase_realtime'
-        AND schemaname = 'public'
-        AND tablename = t
-    ) THEN
-      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
-      RAISE NOTICE 'Realtime ingeschakeld voor tabel %', t;
+    IF to_regclass('public.' || t) IS NOT NULL THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime'
+          AND schemaname = 'public'
+          AND tablename = t
+      ) THEN
+        EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+        RAISE NOTICE 'Realtime ingeschakeld voor tabel %', t;
+      END IF;
+      -- REPLICA IDENTITY FULL: zorgt dat UPDATE-events de volledige OLD-rij
+      -- meesturen, niet alleen de PK-kolom. Belangrijk voor PostgREST/Supabase
+      -- Realtime zodat de client bij elke wijziging genoeg context heeft om
+      -- diffs lokaal toe te passen (anders verschijnt bv. een leeg payload bij
+      -- UPDATE en moet de client volledig refetchen).
+      EXECUTE format('ALTER TABLE public.%I REPLICA IDENTITY FULL', t);
     END IF;
   END LOOP;
 END$$;

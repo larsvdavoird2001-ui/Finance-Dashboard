@@ -37,6 +37,13 @@ export function TariffTable() {
 
   const hasMissingTariff = (e: TariffEntry) => !e.tarief || e.tarief <= 0
 
+  // Fictief verkooptarief = IC-tarief × 1,14. Vast bepaald (read-only) en
+  // gebruikt door de Missing Hours-upload (uren × verkooptarief × 0,9). De
+  // platte IC-tarief blijft de basis voor de IC-verrekening tussen BV's.
+  const SALES_TARIEF_FACTOR = 1.14
+  const salesTariefOf = (e: TariffEntry): number | null =>
+    e.tarief > 0 ? e.tarief * SALES_TARIEF_FACTOR : null
+
   /** Vertical voor een entry: handmatige override heeft voorrang, anders
    *  afgeleid uit de Specificatie persoonsniveau. */
   const verticalOf = (e: TariffEntry): string | null =>
@@ -246,6 +253,10 @@ export function TariffTable() {
             </div>
           </div>
         </td>
+        <td className="r mono" style={{ padding: '4px 6px', fontWeight: 600, color: draft.tarief > 0 ? 'var(--blue)' : 'var(--t3)' }}
+            title="Fictief verkooptarief = IC-tarief × 1,14 (vast bepaald, niet bewerkbaar)">
+          {draft.tarief > 0 ? `€ ${(draft.tarief * SALES_TARIEF_FACTOR).toFixed(2)}` : '—'}
+        </td>
         <td className="r" style={{ padding: '4px 6px' }}>
           <input
             style={{ ...inputStyle, textAlign: 'right', fontFamily: 'var(--mono)' }}
@@ -339,6 +350,10 @@ export function TariffTable() {
             2025: € {entry.tarief2025.toFixed(2)}
           </div>
         )}
+      </td>
+      <td className="mono r" style={{ fontWeight: 600, color: salesTariefOf(entry) != null ? 'var(--blue)' : 'var(--t3)' }}
+          title="Fictief verkooptarief = IC-tarief × 1,14 (vast bepaald)">
+        {(() => { const s = salesTariefOf(entry); return s != null ? `€ ${s.toFixed(2)}` : '—' })()}
       </td>
       <td className="mono r" style={{ color: 'var(--t3)' }}>
         {entry.fte != null ? entry.fte : '—'}
@@ -461,8 +476,8 @@ export function TariffTable() {
         <div className="card-hdr">
           <span className="card-title">IC Tarieven 2026</span>
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t3)' }}>
-            Tarieven worden gebruikt bij Missing Hours berekening (× uren × 0,9) ·
-            Klik op ✎ om te bewerken
+            IC-tarief = basis voor IC-verrekening tussen BV's · Verkooptarief (IC × 1,14)
+            wordt gebruikt bij Missing Hours (× uren × 0,9) · Klik op ✎ om te bewerken
           </span>
         </div>
         <div style={{ overflowX: 'auto', maxHeight: 550, overflowY: 'auto' }}>
@@ -475,14 +490,15 @@ export function TariffTable() {
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 120 }}>Functie</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 100 }}>Stroming</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 90 }} title={`Vertical — handmatig of afgeleid uit Specificatie persoonsniveau (snapshot ${PERSON_SPEC_SNAPSHOT_DATE})`}>Vertical</th>
-                <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 110 }}>Tarief</th>
+                <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 110 }}>Tarief (IC)</th>
+                <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 120 }} title="Fictief verkooptarief = IC-tarief × 1,14. Vast bepaald en gebruikt voor de Missing Hours-upload.">Verkooptarief (×1,14)</th>
                 <th className="r" style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, minWidth: 60 }}>FTE</th>
                 <th style={{ position: 'sticky', top: 0, background: 'var(--bg3)', zIndex: 2, width: 70 }}></th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--t3)', padding: 20 }}>Geen medewerkers gevonden</td></tr>
+                <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--t3)', padding: 20 }}>Geen medewerkers gevonden</td></tr>
               )}
               {filtered.map(entry =>
                 editingId === entry.id ? renderEditRow(entry) : renderDisplayRow(entry)

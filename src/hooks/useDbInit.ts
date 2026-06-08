@@ -12,6 +12,8 @@ import { useHoursWeekStore } from '../store/useHoursWeekStore'
 import { useCostBreakdownStore } from '../store/useCostBreakdownStore'
 import { useReflectionStore } from '../store/useReflectionStore'
 import { useInternalHoursStore } from '../store/useInternalHoursStore'
+import { useNotificationStore } from '../store/useNotificationStore'
+import { useForecastStore } from '../store/useForecastStore'
 
 /** Maximale wachttijd voor de db-init voordat we de UI sowieso vrijgeven.
  *  Voorkomt dat een hangende Supabase-call de hele app onbruikbaar maakt. */
@@ -41,6 +43,8 @@ export function useDbInit() {
   const loadCostBreakdown = useCostBreakdownStore(s => s.loadFromDb)
   const loadReflection = useReflectionStore(s => s.loadFromDb)
   const loadInternalHours = useInternalHoursStore(s => s.loadFromDb)
+  const loadNotifications = useNotificationStore(s => s.loadFromDb)
+  const loadForecast = useForecastStore(s => s.loadFromDb)
 
   useEffect(() => {
     let cancelled = false
@@ -73,6 +77,8 @@ export function useDbInit() {
           loadCostBreakdown(),
           loadReflection(),
           loadInternalHours(),
+          loadNotifications(),
+          loadForecast(),
         ])
         didFinish = true
         if (!cancelled) setReady(true)

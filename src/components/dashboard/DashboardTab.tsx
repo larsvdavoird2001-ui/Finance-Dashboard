@@ -12,7 +12,7 @@ import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { useLatestEstimate } from '../../hooks/useLatestEstimate'
 import { useOhwStore } from '../../store/useOhwStore'
 import { useBudgetStore, BUDGET_MONTHS_2026 } from '../../store/useBudgetStore'
-import { useFinStore } from '../../store/useFinStore'
+import { useFinStore, BASE_ACTUAL_MONTHS_2026 } from '../../store/useFinStore'
 import { useFteStore } from '../../store/useFteStore'
 import { useHoursStore } from '../../store/useHoursStore'
 import { useNavStore } from '../../store/useNavStore'
@@ -77,7 +77,12 @@ function BvFilterPill({ active, color, label, sub, onClick }: BvFilterPillProps)
   )
 }
 
-const ACTUAL_PERIODS_2026 = ['Jan-26', 'Feb-26', 'Mar-26']
+// Autoritatieve actual-maanden komen uit useFinStore (in-code gedeelde lijst),
+// zodat élke gebruiker — ook een vers account zonder lokale finalized-state —
+// exact dezelfde maanden in de Executive Overview ziet. Voorheen stond dit hard
+// op Jan–Mrt, waardoor April alleen verscheen bij wie April lokaal had
+// afgesloten. De dynamische set hieronder voegt later-afgesloten maanden toe.
+const ACTUAL_PERIODS_2026 = BASE_ACTUAL_MONTHS_2026
 
 interface KpiCardProps {
   label: string
@@ -213,12 +218,17 @@ export function DashboardTab({ filter, onNav, onFilterChange }: Props) {
   // hoogste dynamische periode). 2025 is fully closed → Dec-25.
   const pickDefaultDashboardPeriod = (year2025: boolean): string => {
     if (year2025) return 'Dec-25'
+    // Land op de meest recente actual-maand = hoogste van (in-code gedeelde
+    // basis-actuals ∪ afgesloten maanden). Door de basis-actuals altijd mee te
+    // nemen landt élke gebruiker — ook een vers account zonder April in zijn
+    // lokale finalized-state — op dezelfde laatste maand i.p.v. terug te vallen
+    // op de auto-geseede Jan/Feb.
     const fin26 = useFinStore.getState().finalized
       .map(f => f.month)
       .filter(m => m.endsWith('-26'))
+    const all = [...new Set([...ACTUAL_PERIODS_2026, ...fin26])]
       .sort((a, b) => monthSortKey(a) - monthSortKey(b))
-    if (fin26.length > 0) return fin26[fin26.length - 1]
-    return ACTUAL_PERIODS_2026[ACTUAL_PERIODS_2026.length - 1] ?? 'Mar-26'
+    return all[all.length - 1] ?? 'Mar-26'
   }
 
   const [period, setPeriod] = useState<string>(() => pickDefaultDashboardPeriod(is2025))

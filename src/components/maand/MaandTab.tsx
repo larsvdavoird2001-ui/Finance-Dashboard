@@ -86,6 +86,7 @@ import { ImportApprovalModal } from './ImportApprovalModal'
 import { useNavStore } from '../../store/useNavStore'
 import { TariffTable } from './TariffTable'
 import { FteTab } from './FteTab'
+import { ForecastTab } from './ForecastTab'
 import { useCostBreakdownStore } from '../../store/useCostBreakdownStore'
 import { useHoursStore } from '../../store/useHoursStore'
 import { useInternalHoursStore } from '../../store/useInternalHoursStore'
@@ -135,7 +136,7 @@ const UPLOAD_SLOTS: UploadSlot[] = [
   // ── Maandafsluiting ────────────────────────────────────────────────────
   { id: 'factuurvolume',   label: 'Factuurvolume',    icon: '🧾', description: 'SAP facturenlijst — gefactureerde omzet per BV (alle BVs)', appliesTo: ['factuurvolume'] },
   { id: 'uren_lijst',      label: 'NTF Uren',         icon: '📋', description: 'Alle BVs — Nog Te Factureren nettowaarde per BV → OHW-regel "U-Projecten met tarief" per BV', appliesTo: [], targetRowByBv: { Consultancy: 'c_ul', Projects: 'p1', Software: 's_ul' } },
-  { id: 'd_lijst',         label: 'D Lijst',          icon: '📊', description: 'Alleen Consultancy — vult OHW-regel "D facturatie"', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c1', targetEntity: 'Consultancy' },
+  { id: 'd_lijst',         label: 'D Lijst',          icon: '📊', description: 'Alle BVs — D-facturatie nettowaarde per BV → OHW-regel "D facturatie" per BV', appliesTo: [], targetRowByBv: { Consultancy: 'c1', Projects: 'p_d', Software: 's_d' } },
   { id: 'conceptfacturen', label: 'Conceptfacturen',  icon: '📄', description: 'Alleen Projects — vult OHW-regel "E-Projecten (concept facturen) wachtend op inkooporder"', appliesTo: [], targetBv: 'Projects', targetRowId: 'p4', targetEntity: 'Projects' },
   { id: 'missing_hours',   label: 'Missing Hours',    icon: '⚠', description: 'Alleen Consultancy — berekent missing hours × tarief × 0,9 → OHW', appliesTo: [], targetBv: 'Consultancy', targetRowId: 'c4', targetEntity: 'Consultancy' },
   { id: 'ohw',             label: 'OHW Excel',        icon: '🏗', description: 'Alleen Projects — vult OHW-regel "Onderhanden projecten (OHW Excel)"', appliesTo: [], targetBv: 'Projects', targetRowId: 'p10', targetEntity: 'Projects' },
@@ -407,7 +408,7 @@ export function MaandTab({ filter: _filter }: Props) {
     return CLOSING_MONTHS[CLOSING_MONTHS.length - 1]
   }
   const [month, setMonth] = useState<string>(pickDefaultMonth)
-  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'fte' | 'bijlagen' | 'ic_facturatie'>('afsluiting')
+  const [activeSection, setActiveSection] = useState<'afsluiting' | 'import' | 'export' | 'tarieven' | 'fte' | 'bijlagen' | 'ic_facturatie' | 'forecast'>('afsluiting')
   const [expandedCosts, setExpandedCosts] = useState<Set<CostSectionId>>(new Set())
   const toggleCostSection = (id: CostSectionId) =>
     setExpandedCosts(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
@@ -519,7 +520,11 @@ export function MaandTab({ filter: _filter }: Props) {
   // Bouw multi-key lookup voor missing hours parser — ALLEEN Consultancy
   // medewerkers; werknemer kan worden gematcht op werknemernr, SAP alias
   // (powerbiNaam2), "Achternaam, Voornaam" (powerbiNaam) of volledige naam.
-  const tariffLookup = buildTariffLookup(tariffEntries, 'Consultancy')
+  // Multiplier 1,14: Missing Hours gebruikt het fictieve verkooptarief
+  // (IC-tarief × 1,14), niet het platte IC-tarief. De platte IC-verrekening
+  // tussen BV's (parseIcFacturatie) bouwt zijn eigen lookup zonder multiplier.
+  const MISSING_HOURS_TARIEF_MULTIPLIER = 1.14
+  const tariffLookup = buildTariffLookup(tariffEntries, 'Consultancy', MISSING_HOURS_TARIEF_MULTIPLIER)
   // FTE/Headcount zit nu in FteTab (eigen subtab). Geen inline gebruik meer.
 
   const monthEntries = entries.filter(e => e.month === month)
@@ -1273,7 +1278,7 @@ export function MaandTab({ filter: _filter }: Props) {
     werknemerCol: string
     urenCol: string
     bedrijfCol?: string
-    bedrijfFilter?: string
+    bedrijfFilter?: string[]
   }) => {
     if (!wizardState) return
     const slot = UPLOAD_SLOTS.find(s => s.id === 'missing_hours')!
@@ -1476,6 +1481,7 @@ export function MaandTab({ filter: _filter }: Props) {
               )}
             </button>
             <button className={`tab${activeSection === 'ic_facturatie' ? ' active' : ''}`} onClick={() => setActiveSection('ic_facturatie')} title="Upload IC facturatie-bestanden (CO/PR/SW) — vult automatisch de IC verrekening in OHW Overzicht">🔁 IC Facturatie</button>
+            <button className={`tab${activeSection === 'forecast' ? ' active' : ''}`} onClick={() => setActiveSection('forecast')} title="Voorspelling huidige maand op basis van YTD-uploads + LE + OHW">🔮 Voorspelling huidige maand</button>
             <button className={`tab${activeSection === 'export' ? ' active' : ''}`} onClick={() => setActiveSection('export')}>Export & Log</button>
             <button className={`tab${activeSection === 'tarieven' ? ' active' : ''}`} onClick={() => setActiveSection('tarieven')}>IC Tarieven</button>
             <button className={`tab${activeSection === 'fte' ? ' active' : ''}`} onClick={() => setActiveSection('fte')}>FTE &amp; Headcount</button>
@@ -2137,6 +2143,95 @@ export function MaandTab({ filter: _filter }: Props) {
                 })}
               </div>
             </div>
+
+            {/* ── Opstelling per BV: alle IC-verrekeningsregels uit de uploads ──
+                Zo zie je per BV exact waaruit de IC-verrekening voor deze maand
+                is opgebouwd (welke werknemer, welke klant, van→naar, bedrag). */}
+            {(() => {
+              const bvs = ['Consultancy', 'Projects', 'Software'] as const
+              // Verzamel per BV de ic_facturatie-rijen met een waarde in uploadMonth
+              const perBvRows = bvs.map(bv => {
+                const ent = ohwData2026.entities.find(e => e.entity === bv)
+                const rows = (ent?.icVerrekening ?? []).filter(r =>
+                  r.sourceSlot === 'ic_facturatie' &&
+                  r.values?.[uploadMonth] != null && r.values[uploadMonth] !== 0,
+                )
+                const subtotal = rows.reduce((s, r) => s + (r.values[uploadMonth] ?? 0), 0)
+                return { bv, rows, subtotal }
+              })
+              const hasAny = perBvRows.some(g => g.rows.length > 0)
+              if (!hasAny) return null
+              return (
+                <div className="card" style={{ padding: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>Opstelling IC-verrekening per BV — {uploadMonth}</span>
+                    <span style={{ fontSize: 10, color: 'var(--t3)', marginLeft: 'auto' }}>
+                      Min = kost (deze BV betaalt) · Plus = opbrengst (deze BV levert) · platte IC-tarief × uren
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 10 }}>
+                    {perBvRows.map(({ bv, rows, subtotal }) => (
+                      <div key={bv} style={{ border: `1px solid ${BV_COLORS[bv]}44`, borderRadius: 8, overflow: 'hidden' }}>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px',
+                          background: `${BV_COLORS[bv]}14`, borderBottom: `1px solid ${BV_COLORS[bv]}33`,
+                        }}>
+                          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: BV_COLORS[bv] }} />
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>{bv}</span>
+                          <span style={{ fontSize: 10, color: 'var(--t3)' }}>{rows.length} regel{rows.length === 1 ? '' : 's'}</span>
+                          <span style={{
+                            marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700,
+                            color: subtotal >= 0 ? 'var(--green)' : 'var(--red)',
+                          }}>
+                            {subtotal >= 0 ? '+' : ''}{fmt(subtotal)}
+                          </span>
+                        </div>
+                        {rows.length === 0 ? (
+                          <div style={{ padding: '10px', fontSize: 11, color: 'var(--t3)', textAlign: 'center' }}>
+                            Geen IC-regels voor {bv} in {uploadMonth}
+                          </div>
+                        ) : (
+                          <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+                            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                              <thead style={{ position: 'sticky', top: 0, background: 'var(--bg3)' }}>
+                                <tr style={{ color: 'var(--t3)' }}>
+                                  <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>Werknemer — Klant</th>
+                                  <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>Van→Naar</th>
+                                  <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>Bedrag</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map(r => {
+                                  const v = r.values[uploadMonth] ?? 0
+                                  return (
+                                    <tr key={r.id} style={{ borderTop: '1px solid var(--bd2)' }}>
+                                      <td style={{ padding: '4px 8px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description}>
+                                        {r.description}
+                                      </td>
+                                      <td style={{ padding: '4px 8px', color: 'var(--t3)', whiteSpace: 'nowrap' }}>
+                                        {r.icToBv && r.icFromBv
+                                          ? `${r.icToBv.slice(0, 4)}→${r.icFromBv.slice(0, 4)}`
+                                          : '—'}
+                                      </td>
+                                      <td style={{
+                                        padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 600,
+                                        color: v >= 0 ? 'var(--green)' : 'var(--red)',
+                                      }}>
+                                        {v >= 0 ? '+' : ''}{fmt(v)}
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
             </fieldset>
           </div>
         )}
@@ -2154,6 +2249,11 @@ export function MaandTab({ filter: _filter }: Props) {
             closingMonths={CLOSING_MONTHS}
             onMonthChange={setUploadMonth}
           />
+        )}
+
+        {/* ── VOORSPELLING HUIDIGE MAAND ──────────────────────────────────── */}
+        {activeSection === 'forecast' && (
+          <ForecastTab currentUserEmail={currentUserEmail} />
         )}
 
         {/* ── AFSLUITING ──────────────────────────────────────────────────── */}

@@ -9,6 +9,7 @@ import {
   getMissingHoursSlotConfig,
   perColumnTariffMatches,
   getUnmatchedSamplesForColumn,
+  getDistinctColumnValues,
   type TariffLookup,
   type MissingHoursComputeConfig,
 } from '../../lib/parseImport'
@@ -47,7 +48,11 @@ interface Props {
     werknemerCol: string
     urenCol: string
     bedrijfCol?: string
-    bedrijfFilter?: string
+    /** Multi-select: één of meerdere bedrijf-waarden waarop wordt gefilterd.
+     *  Lege array = geen filter (alle bedrijven). Legacy callers kunnen
+     *  ook een enkele string accepteren — die wordt door computeMissingHours
+     *  ook geaccepteerd. */
+    bedrijfFilter?: string[]
   }) => void
   onCancel: () => void
   /** Wordt aangeroepen als de gebruiker een ontbrekend IC-tarief invult in
@@ -116,10 +121,10 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
   const [werknemerCol, setWerknemerCol] = useState<string>('')
   const [urenCol, setUrenCol] = useState<string>('')
   const [bedrijfCol, setBedrijfCol] = useState<string>('')
-  // Default: GEEN bedrijfsfilter. De tarieventabel filtert Consultancy al.
-  // Gebruiker zet filter handmatig aan als ze echt op bedrijfkolom willen
-  // filteren (zoals bij een multi-BV export).
-  const [bedrijfFilter, setBedrijfFilter] = useState<string>('')
+  // Multi-select bedrijfsfilter. Lege array = geen filter actief. Vroeger was
+  // dit een single string ('Consultancy') maar dat dekte multi-BV bestanden
+  // niet (Forecast-tab heeft Cons + Proj + Soft tegelijk nodig).
+  const [bedrijfFilter, setBedrijfFilter] = useState<string[]>([])
 
   // Voor de geselecteerde werknemerCol: lijst onbekende waarden
   const unmatchedSamples = useMemo(() => {
@@ -129,7 +134,9 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
     // die toch nooit zouden meetellen (0 uren, credits, andere BV).
     return getUnmatchedSamplesForColumn(werknemerCol, dataRows, tariffs, 10, {
       bedrijfCol: bedrijfCol || undefined,
-      bedrijfFilter: bedrijfCol && bedrijfFilter ? bedrijfFilter : undefined,
+      // getUnmatchedSamplesForColumn verwacht string — pak eerste filter als
+      // er één is, anders geen filter (alle bedrijven worden meegenomen).
+      bedrijfFilter: bedrijfCol && bedrijfFilter.length === 1 ? bedrijfFilter[0] : undefined,
       urenCol: urenCol || undefined,
     })
   }, [werknemerCol, urenCol, dataRows, tariffs, bedrijfCol, bedrijfFilter])
@@ -139,10 +146,10 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
     setWerknemerCol(suggested.werknemerCol)
     setUrenCol(suggested.urenCol)
     setBedrijfCol(suggested.bedrijfCol)
-    // Zet filter alleen default aan als suggested.bedrijfCol is gevonden
-    // (d.w.z. de kolom bevat daadwerkelijk Consultancy-waarden). Anders
-    // blijft filter leeg zodat niets per ongeluk wordt uitgefilterd.
-    setBedrijfFilter(suggested.bedrijfCol ? 'Consultancy' : '')
+    // Default: geen filter actief — gebruiker kiest zelf welke bedrijfs-
+    // waarden meedoen via de checkbox-lijst in stap 3. Voorheen werd
+    // automatisch 'Consultancy' aangezet wat multi-BV exports brak.
+    setBedrijfFilter([])
   }, [suggested.werknemerCol, suggested.urenCol, suggested.bedrijfCol])
 
   // Wanneer kolommen of filter wijzigen, reset exclusions (details van vorige
@@ -161,7 +168,7 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
         werknemerCol,
         urenCol,
         bedrijfCol: bedrijfCol || undefined,
-        bedrijfFilter: bedrijfCol && bedrijfFilter ? bedrijfFilter : undefined,
+        bedrijfFilter: bedrijfCol && bedrijfFilter.length > 0 ? bedrijfFilter : undefined,
         excludedEmployeeIds: step === 4 ? excludedIds : undefined,
         excludedRowIndices: step === 4 ? excludedRows : undefined,
       }
@@ -180,7 +187,7 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
         werknemerCol,
         urenCol,
         bedrijfCol: bedrijfCol || undefined,
-        bedrijfFilter: bedrijfCol && bedrijfFilter ? bedrijfFilter : undefined,
+        bedrijfFilter: bedrijfCol && bedrijfFilter.length > 0 ? bedrijfFilter : undefined,
       }
       const r = computeMissingHours(headers, dataRows, tariffs, cfg, getMissingHoursSlotConfig())
       return r.missingHoursDetails ?? []
@@ -205,7 +212,7 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
       werknemerCol,
       urenCol,
       bedrijfCol: bedrijfCol || undefined,
-      bedrijfFilter: bedrijfCol ? bedrijfFilter : undefined,
+      bedrijfFilter: bedrijfCol && bedrijfFilter.length > 0 ? bedrijfFilter : undefined,
     })
   }
 
@@ -509,31 +516,61 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
                   previewValues={dataRows.slice(0, 3).map(r => String(r[bedrijfCol] ?? ''))}
                   allowNone
                 />
-                {bedrijfCol && (
-                  <div style={{ paddingLeft: 12, borderLeft: '2px solid var(--amber)', fontSize: 11 }}>
-                    <div style={{ color: 'var(--t3)', marginBottom: 4 }}>Alleen rijen waarvan de bedrijfskolom matcht met:</div>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {['Consultancy', 'P15000', ''].map(f => (
+                {bedrijfCol && (() => {
+                  // Distinct waarden uit de gekozen bedrijfskolom — multi-select.
+                  // De gebruiker kan elk afzonderlijk aanklikken om de filter
+                  // op of uit te zetten. Lege selectie = geen filter (alles).
+                  const distinct = getDistinctColumnValues(bedrijfCol, dataRows, 30)
+                    .filter(d => d.value !== '')
+                  const allValues = distinct.map(d => d.value)
+                  const allSelected = allValues.length > 0 && allValues.every(v => bedrijfFilter.includes(v))
+                  const toggle = (v: string) => {
+                    setBedrijfFilter(prev =>
+                      prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v],
+                    )
+                  }
+                  return (
+                    <div style={{ paddingLeft: 12, borderLeft: '2px solid var(--amber)', fontSize: 11 }}>
+                      <div style={{ color: 'var(--t3)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span>Alleen rijen waarvan <strong>{bedrijfCol}</strong> matcht met (klik = aan/uit):</span>
+                        <span style={{ color: 'var(--t2)', fontSize: 10 }}>
+                          {bedrijfFilter.length === 0
+                            ? 'alle bedrijven actief'
+                            : `${bedrijfFilter.length} geselecteerd`}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                        {/* Quick-toggle alles aan/uit */}
                         <button
-                          key={f || 'none'}
-                          onClick={() => setBedrijfFilter(f)}
-                          className={`btn sm${bedrijfFilter === f ? ' primary' : ' ghost'}`}
-                          style={{ fontSize: 10 }}
+                          onClick={() => setBedrijfFilter(allSelected ? [] : allValues)}
+                          className="btn sm ghost"
+                          style={{ fontSize: 10, fontStyle: 'italic' }}
                         >
-                          {f || '(geen filter)'}
+                          {allSelected ? '✕ alles uit' : '✓ alles aan'}
                         </button>
-                      ))}
-                      <input
-                        type="text"
-                        placeholder="of typ een waarde..."
-                        value={bedrijfFilter}
-                        onChange={e => setBedrijfFilter(e.target.value)}
-                        className="ohw-inp"
-                        style={{ width: 140, marginLeft: 6, fontSize: 10 }}
-                      />
+                        {distinct.map(d => {
+                          const active = bedrijfFilter.includes(d.value)
+                          return (
+                            <button
+                              key={d.value}
+                              onClick={() => toggle(d.value)}
+                              className={`btn sm${active ? ' primary' : ' ghost'}`}
+                              style={{ fontSize: 10 }}
+                              title={`${d.count} rijen in bestand`}
+                            >
+                              {active && '✓ '}{d.value || '(leeg)'} ({d.count})
+                            </button>
+                          )
+                        })}
+                        {distinct.length === 0 && (
+                          <span style={{ color: 'var(--amber)', fontStyle: 'italic' }}>
+                            Geen waarden gevonden in deze kolom
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
               </div>
 
               {/* Live preview */}
@@ -573,9 +610,9 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
                       <RowAccountingTag label="Leeg / 0 uren" value={livePreview.missingHoursCounts.emptyOrZero} color="var(--t3)" />
                       <RowAccountingTag label="Negatief" value={livePreview.missingHoursCounts.negative} color="var(--t3)" />
                       <RowAccountingTag label="Totaalregels" value={livePreview.missingHoursCounts.totalRowsSkipped} color="var(--t3)" />
-                      {bedrijfCol && bedrijfFilter && (
+                      {bedrijfCol && bedrijfFilter.length > 0 && (
                         <RowAccountingTag
-                          label={`Bedrijfsfilter "${bedrijfFilter}"`}
+                          label={`Bedrijfsfilter (${bedrijfFilter.length}× actief)`}
                           value={livePreview.missingHoursCounts.bedrijfFiltered}
                           color="var(--amber)"
                           warn={livePreview.missingHoursCounts.bedrijfFiltered > livePreview.rowCount * 0.5}
@@ -720,7 +757,7 @@ export function MissingHoursWizard({ workbook, fileName, tariffs, onConfirm, onC
                       <th style={{ padding: '7px 10px', textAlign: 'left', color: 'var(--t2)', fontWeight: 600 }}>Werknemer</th>
                       <th style={{ padding: '7px 10px', textAlign: 'left', color: 'var(--t3)', fontWeight: 500, fontSize: 10 }}>Bron</th>
                       <th className="r" style={{ padding: '7px 10px', color: 'var(--t2)', fontWeight: 600 }}>Uren</th>
-                      <th className="r" style={{ padding: '7px 10px', color: 'var(--t2)', fontWeight: 600 }}>Tarief</th>
+                      <th className="r" style={{ padding: '7px 10px', color: 'var(--t2)', fontWeight: 600 }} title="Fictief verkooptarief = IC-tarief × 1,14. Het invoerveld bij ontbrekende tarieven verwacht het platte IC-tarief.">Verkooptarief (×1,14)</th>
                       <th className="r" style={{ padding: '7px 10px', color: 'var(--t2)', fontWeight: 600 }}>Bedrag</th>
                     </tr>
                   </thead>
@@ -1025,7 +1062,8 @@ function TariffInput({ employeeId, onSave }: TariffInputProps) {
     <input
       type="text"
       inputMode="decimal"
-      placeholder="€/uur"
+      placeholder="IC €/u"
+      title="Vul het platte IC-tarief in. Het verkooptarief (× 1,14) wordt automatisch berekend voor de Missing Hours."
       value={raw}
       onChange={e => setRaw(e.target.value)}
       onKeyDown={e => {

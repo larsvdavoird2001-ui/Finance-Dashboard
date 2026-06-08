@@ -65,12 +65,18 @@ export const useBudgetStore = create<BudgetState>()(
         // ABSOLUTE GARANTIE: deze functie wipet onder geen voorwaarde lokale
         // state. Bij elke fout / lege response blijft localStorage intact.
         //
-        // Merge-load met reconcile:
-        //  1. Haal Supabase-data op
+        // Merge-load:
+        //  1. Haal Supabase-data op (gooit bij netwerkfouten een Error)
         //  2. Merge met lokale state — Supabase wint bij conflict op
         //     (entity, maand, key). Local-only keys blijven staan.
-        //  3. Push local-only keys terug naar Supabase zodat ze gedeeld
-        //     worden (recovery na eerdere save-fouten).
+        //
+        // De reconcile-push die hier eerder zat is per ongeluk uitgegroeid
+        // tot een trigger voor honderden Failed-to-fetch toasts wanneer
+        // Supabase tijdelijk niet bereikbaar was: bij fetch-fouten kwamen
+        // er 0 rijen binnen, álle lokale keys leken "missing in DB", en
+        // werden in elke load-cyclus opnieuw gepusht. De `setValue`-flow
+        // schrijft al direct op edit, dus de auto-push was eigenlijk
+        // overbodig. Verwijderd om de flood te stoppen.
         let rows: Awaited<ReturnType<typeof fetchBudgetOverrides>> = []
         try {
           rows = await fetchBudgetOverrides()
@@ -115,26 +121,6 @@ export const useBudgetStore = create<BudgetState>()(
         }
         console.info(`[useBudgetStore] DB=${rows.length} rows, merged ${Object.values(merged).reduce((s,e)=>s+Object.values(e).reduce((ss,m)=>ss+Object.keys(m).length,0),0)} keys`)
         set({ overrides: merged, loaded: true })
-
-        // Reconcile: push local-only keys naar Supabase
-        const toPush: Array<{ entity: EntityName; month: string; plKey: string; value: number }> = []
-        for (const e of allEntities) {
-          for (const m of Object.keys(localOv[e] ?? {})) {
-            for (const k of Object.keys(localOv[e][m] ?? {})) {
-              const localVal = localOv[e][m][k]
-              const dbVal = dbOv[e]?.[m]?.[k]
-              if (dbVal === undefined && localVal !== undefined) {
-                toPush.push({ entity: e, month: m, plKey: k, value: localVal })
-              }
-            }
-          }
-        }
-        if (toPush.length > 0) {
-          console.info(`[useBudgetStore] reconcile: pushing ${toPush.length} local-only keys naar Supabase`)
-          for (const p of toPush) {
-            upsertBudgetOverride(p)  // fire-and-forget; errors → toast via dbEvents
-          }
-        }
       },
 
       setValue: (entity, month, key, val) => {

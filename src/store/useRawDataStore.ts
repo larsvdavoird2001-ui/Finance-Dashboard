@@ -25,7 +25,7 @@ export interface RawDataEntry {
   /** Voor missing_hours: het bedrijfs-kolomfilter uit de wizard. Nodig om
    *  bij een IC-tarief-update achteraf automatisch te kunnen herberekenen. */
   bedrijfCol?: string
-  bedrijfFilter?: string
+  bedrijfFilter?: string | string[]
 }
 
 interface RawDataStore {

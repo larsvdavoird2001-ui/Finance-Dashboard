@@ -12,6 +12,41 @@ function initYear(yearData: OhwYearData): OhwYearData {
   return { ...yearData, entities }
 }
 
+/** Injecteer locked source-slot seed-rijen (bv. de per-BV "D facturatie"
+ *  rijen p_d/s_d) in een entity die ze nog niet kent. Nodig omdat zowel
+ *  localStorage (zustand persist) als Supabase een oudere entity-versie
+ *  kunnen bevatten zónder deze nieuw toegevoegde rijen — en updateRowValue()
+ *  doet stilletjes niets als de doel-rij ontbreekt. Alleen rijen met een
+ *  `sourceSlot` (= automatisch gevuld door een upload) worden geïnjecteerd, en
+ *  nooit rijen die de gebruiker heeft verwijderd (tombstones). */
+function ensureSeedSourceRows(
+  entity: OhwEntityData,
+  seed: OhwEntityData | undefined,
+  tombstones: Set<string>,
+): OhwEntityData {
+  if (!seed) return entity
+  const existingIds = new Set<string>()
+  for (const sec of entity.onderhanden) for (const r of sec.rows) existingIds.add(r.id)
+  let changed = false
+  const onderhanden = entity.onderhanden.map(sec => {
+    const seedSec = seed.onderhanden.find(s => s.id === sec.id)
+    if (!seedSec) return sec
+    const missing = seedSec.rows.filter(r =>
+      r.sourceSlot && !existingIds.has(r.id) && !tombstones.has(r.id),
+    )
+    if (missing.length === 0) return sec
+    changed = true
+    return { ...sec, rows: [...sec.rows, ...missing] }
+  })
+  return changed ? { ...entity, onderhanden } : entity
+}
+
+/** Canonieke seed-entities per jaar, opgezocht op entity-naam. */
+function seedEntityFor(year: '2025' | '2026', entityName: string): OhwEntityData | undefined {
+  const src = year === '2025' ? ohwYearData2025 : ohwYearData2026
+  return src.entities.find(e => e.entity === entityName)
+}
+
 type BvName = 'Consultancy' | 'Projects' | 'Software'
 
 interface OhwStore {
@@ -142,14 +177,16 @@ export const useOhwStore = create<OhwStore>()(
             const toPush: OhwEntityData[] = []
             for (const localEnt of localData.entities) {
               const dbEnt = dbByName.get(localEnt.entity)
+              const seedEnt = seedEntityFor(year, localEnt.entity)
               if (dbEnt) {
-                const stripped = stripTombstones(dbEnt)
+                const stripped = ensureSeedSourceRows(stripTombstones(dbEnt), seedEnt, tombstones)
                 merged.push(recomputeEntity(stripped, localData.allMonths))
               } else if (hasEntityData(localEnt)) {
-                merged.push(localEnt)
-                toPush.push(localEnt)
+                const withSeed = ensureSeedSourceRows(localEnt, seedEnt, tombstones)
+                merged.push(withSeed)
+                toPush.push(withSeed)
               } else {
-                merged.push(localEnt) // default seed
+                merged.push(ensureSeedSourceRows(localEnt, seedEnt, tombstones)) // default seed
               }
             }
             if (toPush.length > 0) {
@@ -786,19 +823,26 @@ export const useOhwStore = create<OhwStore>()(
           state.icLockedMigrated = true
         }
 
+        // Injecteer nieuwe locked source-slot seed-rijen (bv. per-BV
+        // "D facturatie" p_d/s_d) in gepersist(eerd)e entities die ze nog niet
+        // kennen — anders zou een D-lijst upload voor Projects/Software
+        // stilletjes niets doen. Respecteert tombstones.
+        const tombstones = new Set(state.deletedRowIds ?? [])
         // Recompute afgeleide velden (mutatieOhw, mutatieVooruitgefactureerd,
         // nettoOmzet, etc) uit de ruwe rijen. Doet GEEN data-vernietiging —
         // alleen re-berekening van derived values met huidige calc-regels.
         if (state.data2025?.entities) {
           state.data2025 = {
             ...state.data2025,
-            entities: state.data2025.entities.map(e => recomputeEntity(e, state.data2025.allMonths)),
+            entities: state.data2025.entities.map(e =>
+              recomputeEntity(ensureSeedSourceRows(e, seedEntityFor('2025', e.entity), tombstones), state.data2025.allMonths)),
           }
         }
         if (state.data2026?.entities) {
           state.data2026 = {
             ...state.data2026,
-            entities: state.data2026.entities.map(e => recomputeEntity(e, state.data2026.allMonths)),
+            entities: state.data2026.entities.map(e =>
+              recomputeEntity(ensureSeedSourceRows(e, seedEntityFor('2026', e.entity), tombstones), state.data2026.allMonths)),
           }
         }
       },

@@ -1,0 +1,642 @@
+[
+  {
+    "month": "Jan-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1168958.9100000001,
+    "nettoOmzetExtern": 945201.91,
+    "nettoOmzetIc": 40179,
+    "nogTeFactExtern": 183578,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p1 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Jan-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 362965.34,
+    "nettoOmzetExtern": 414666.34,
+    "nettoOmzetIc": -40179,
+    "nogTeFactExtern": -11522,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p1 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Jan-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 270343.92,
+    "nettoOmzetExtern": 631224.86,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": -33162,
+    "vooruitgefactureerd": -327718.94,
+    "sourceFile": "Maandrapportage 2025 p1 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Jan-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0.09999999999990905,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p1 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Oct-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 15,
+    "nettoOmzetExtern": 1245446.28,
+    "nettoOmzetIc": 47090,
+    "nogTeFactExtern": -126372,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P10.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Oct-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 15,
+    "nettoOmzetExtern": 650267.27,
+    "nettoOmzetIc": -49122,
+    "nogTeFactExtern": -75780,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P10.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Oct-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 15,
+    "nettoOmzetExtern": 189339.36,
+    "nettoOmzetIc": 14032,
+    "nogTeFactExtern": 96695,
+    "vooruitgefactureerd": 62608.16,
+    "sourceFile": "P10.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Oct-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 15,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P10.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Nov-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1030349.31,
+    "nettoOmzetExtern": 858587.31,
+    "nettoOmzetIc": 31304,
+    "nogTeFactExtern": 140458,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P11.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Nov-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 531595.09,
+    "nettoOmzetExtern": 559249.09,
+    "nettoOmzetIc": -30803,
+    "nogTeFactExtern": 3149,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P11.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Nov-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 1480051.66,
+    "nettoOmzetExtern": 1339361.47,
+    "nettoOmzetIc": 11499,
+    "nogTeFactExtern": 157853,
+    "vooruitgefactureerd": -28661.809999999998,
+    "sourceFile": "P11.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Nov-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P11.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Dec-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 803883.27,
+    "nettoOmzetExtern": 893924.16,
+    "nettoOmzetIc": 31517.16,
+    "nogTeFactExtern": -121558.05,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P12.2025 - Maandrapportage - Resultaten (4).xlsx"
+  },
+  {
+    "month": "Dec-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 439404.32999999996,
+    "nettoOmzetExtern": 640017.49,
+    "nettoOmzetIc": -45077.16,
+    "nogTeFactExtern": -155536,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P12.2025 - Maandrapportage - Resultaten (4).xlsx"
+  },
+  {
+    "month": "Dec-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 401540.9600000001,
+    "nettoOmzetExtern": 1109773.11,
+    "nettoOmzetIc": 25560,
+    "nogTeFactExtern": -40098,
+    "vooruitgefactureerd": -693694.15,
+    "sourceFile": "P12.2025 - Maandrapportage - Resultaten (4).xlsx"
+  },
+  {
+    "month": "Dec-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P12.2025 - Maandrapportage - Resultaten (4).xlsx"
+  },
+  {
+    "month": "Feb-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1169025.4,
+    "nettoOmzetExtern": 1132302.4,
+    "nettoOmzetIc": 37686,
+    "nogTeFactExtern": -963,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p2 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Feb-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 349891.15,
+    "nettoOmzetExtern": 504265.15,
+    "nettoOmzetIc": -42789,
+    "nogTeFactExtern": -111585,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p2 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Feb-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 271040.35,
+    "nettoOmzetExtern": 294572.47,
+    "nettoOmzetIc": 5103,
+    "nogTeFactExtern": 15662,
+    "vooruitgefactureerd": -44297.12,
+    "sourceFile": "Maandrapportage 2025 p2 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Feb-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0.09999999999990905,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p2 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Mar-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1215690.65,
+    "nettoOmzetExtern": 1173011.65,
+    "nettoOmzetIc": 30421,
+    "nogTeFactExtern": 12258,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p3 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Mar-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 476782.74,
+    "nettoOmzetExtern": 717108.74,
+    "nettoOmzetIc": -35653,
+    "nogTeFactExtern": -204673,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p3 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Mar-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 324655.63,
+    "nettoOmzetExtern": 119395.84,
+    "nettoOmzetIc": 5232,
+    "nogTeFactExtern": 61259,
+    "vooruitgefactureerd": 138768.79,
+    "sourceFile": "Maandrapportage 2025 p3 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Mar-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0.09999999999990905,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p3 - Resultaten (controle variant).xlsx"
+  },
+  {
+    "month": "Apr-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1187812.15,
+    "nettoOmzetExtern": 1026836.15,
+    "nettoOmzetIc": 54732,
+    "nogTeFactExtern": 106244,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p4 - Resultaten.xlsx"
+  },
+  {
+    "month": "Apr-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 490446.28,
+    "nettoOmzetExtern": 354787.28,
+    "nettoOmzetIc": -23464,
+    "nogTeFactExtern": 159123,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p4 - Resultaten.xlsx"
+  },
+  {
+    "month": "Apr-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 254152.27000000002,
+    "nettoOmzetExtern": 290955.94,
+    "nettoOmzetIc": 42534,
+    "nogTeFactExtern": -42928,
+    "vooruitgefactureerd": -36409.67,
+    "sourceFile": "Maandrapportage 2025 p4 - Resultaten.xlsx"
+  },
+  {
+    "month": "Apr-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p4 - Resultaten.xlsx"
+  },
+  {
+    "month": "May-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1068678.44,
+    "nettoOmzetExtern": 1157405.44,
+    "nettoOmzetIc": 63833,
+    "nogTeFactExtern": -152560,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p5 - Resultaten.xlsx"
+  },
+  {
+    "month": "May-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 621913.98,
+    "nettoOmzetExtern": 611488.98,
+    "nettoOmzetIc": -67282,
+    "nogTeFactExtern": 77707,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p5 - Resultaten.xlsx"
+  },
+  {
+    "month": "May-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 322000.54,
+    "nettoOmzetExtern": 105802.51,
+    "nettoOmzetIc": 15449,
+    "nogTeFactExtern": 69260,
+    "vooruitgefactureerd": 131489.03,
+    "sourceFile": "Maandrapportage 2025 p5 - Resultaten.xlsx"
+  },
+  {
+    "month": "May-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "Maandrapportage 2025 p5 - Resultaten.xlsx"
+  },
+  {
+    "month": "Jun-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1034645.03,
+    "nettoOmzetExtern": 982531.03,
+    "nettoOmzetIc": 80729,
+    "nogTeFactExtern": -28615,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P6.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jun-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 556536.92,
+    "nettoOmzetExtern": 800482.92,
+    "nettoOmzetIc": -204176,
+    "nogTeFactExtern": -39770,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P6.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jun-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 345743.04,
+    "nettoOmzetExtern": 134507.08,
+    "nettoOmzetIc": 85645,
+    "nogTeFactExtern": -40772,
+    "vooruitgefactureerd": 166362.96,
+    "sourceFile": "P6.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jun-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P6.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jul-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1027382.61,
+    "nettoOmzetExtern": 930072.39,
+    "nettoOmzetIc": 56066,
+    "nogTeFactExtern": 41244.21999999997,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P7.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jul-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 495918.53,
+    "nettoOmzetExtern": 523508.53,
+    "nettoOmzetIc": -71300,
+    "nogTeFactExtern": 43710,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P7.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jul-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 334112.32000000007,
+    "nettoOmzetExtern": 245807.41,
+    "nettoOmzetIc": 41234,
+    "nogTeFactExtern": -10921,
+    "vooruitgefactureerd": 57991.91,
+    "sourceFile": "P7.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jul-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P7.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Aug-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 841853.38,
+    "nettoOmzetExtern": 749647.38,
+    "nettoOmzetIc": 85147,
+    "nogTeFactExtern": 7059,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P8.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Aug-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 454630.97,
+    "nettoOmzetExtern": 563713.97,
+    "nettoOmzetIc": -97187,
+    "nogTeFactExtern": -11896,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P8.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Aug-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 331976.42,
+    "nettoOmzetExtern": 101916.52,
+    "nettoOmzetIc": 24040,
+    "nogTeFactExtern": 71930,
+    "vooruitgefactureerd": 134089.9,
+    "sourceFile": "P8.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Aug-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P8.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Sep-25",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1096620.24,
+    "nettoOmzetExtern": 962812.28,
+    "nettoOmzetIc": 105826.96,
+    "nogTeFactExtern": 27981,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P9.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Sep-25",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 474797.68,
+    "nettoOmzetExtern": 532246.64,
+    "nettoOmzetIc": -111746.96,
+    "nogTeFactExtern": 54298,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P9.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Sep-25",
+    "bv": "Software",
+    "nettoOmzetTotaal": 336331.83999999997,
+    "nettoOmzetExtern": 199012.93,
+    "nettoOmzetIc": -36130,
+    "nogTeFactExtern": 97770,
+    "vooruitgefactureerd": 75678.91,
+    "sourceFile": "P9.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Sep-25",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P9.2025 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jan-26",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 948802.35,
+    "nettoOmzetExtern": 719769.71,
+    "nettoOmzetIc": 21434,
+    "nogTeFactExtern": 207598.64,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P01.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jan-26",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 509021.27,
+    "nettoOmzetExtern": 364790.27,
+    "nettoOmzetIc": -36067,
+    "nogTeFactExtern": 180298,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P01.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jan-26",
+    "bv": "Software",
+    "nettoOmzetTotaal": 350787.76999999996,
+    "nettoOmzetExtern": 493760.91,
+    "nettoOmzetIc": 26633,
+    "nogTeFactExtern": -27500,
+    "vooruitgefactureerd": -142106.14,
+    "sourceFile": "P01.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Jan-26",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P01.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Feb-26",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1003605.83,
+    "nettoOmzetExtern": 797454.19,
+    "nettoOmzetIc": 852,
+    "nogTeFactExtern": 205299.64,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P02.2026 - Maandrapportage - Resultaten (4).xlsx"
+  },
+  {
+    "month": "Feb-26",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 501181.74,
+    "nettoOmzetExtern": 419600.74,
+    "nettoOmzetIc": -26309,
+    "nogTeFactExtern": 107890,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P02.2026 - Maandrapportage - Resultaten (4).xlsx"
+  },
+  {
+    "month": "Feb-26",
+    "bv": "Software",
+    "nettoOmzetTotaal": 319550.35000000003,
+    "nettoOmzetExtern": 261030.27,
+    "nettoOmzetIc": 37457,
+    "nogTeFactExtern": -61965,
+    "vooruitgefactureerd": 83028.08,
+    "sourceFile": "P02.2026 - Maandrapportage - Resultaten (4).xlsx"
+  },
+  {
+    "month": "Feb-26",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": -4287.5,
+    "nettoOmzetExtern": -4287.5,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P02.2026 - Maandrapportage - Resultaten (4).xlsx"
+  },
+  {
+    "month": "Mar-26",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 1034894.16,
+    "nettoOmzetExtern": 1068055.52,
+    "nettoOmzetIc": 11187,
+    "nogTeFactExtern": -44348.36,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P03.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Mar-26",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 683688.48,
+    "nettoOmzetExtern": 698848.48,
+    "nettoOmzetIc": -29806,
+    "nogTeFactExtern": 14646,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P03.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Mar-26",
+    "bv": "Software",
+    "nettoOmzetTotaal": 346582.48,
+    "nettoOmzetExtern": 203629.88,
+    "nettoOmzetIc": 30619,
+    "nogTeFactExtern": 49665,
+    "vooruitgefactureerd": 62668.6,
+    "sourceFile": "P03.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Mar-26",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P03.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Apr-26",
+    "bv": "Consultancy",
+    "nettoOmzetTotaal": 975254.7699999999,
+    "nettoOmzetExtern": 1113614.13,
+    "nettoOmzetIc": 37233,
+    "nogTeFactExtern": -175592.36,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P04.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Apr-26",
+    "bv": "Projects",
+    "nettoOmzetTotaal": 588742.75,
+    "nettoOmzetExtern": 477025.75,
+    "nettoOmzetIc": -54345,
+    "nogTeFactExtern": 166062,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P04.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Apr-26",
+    "bv": "Software",
+    "nettoOmzetTotaal": 383605.5,
+    "nettoOmzetExtern": 272007.63,
+    "nettoOmzetIc": 29112,
+    "nogTeFactExtern": 110015,
+    "vooruitgefactureerd": -27529.13,
+    "sourceFile": "P04.2026 - Maandrapportage - Resultaten.xlsx"
+  },
+  {
+    "month": "Apr-26",
+    "bv": "Holdings",
+    "nettoOmzetTotaal": 0,
+    "nettoOmzetExtern": 0,
+    "nettoOmzetIc": 0,
+    "nogTeFactExtern": 0,
+    "vooruitgefactureerd": 0,
+    "sourceFile": "P04.2026 - Maandrapportage - Resultaten.xlsx"
+  }
+]

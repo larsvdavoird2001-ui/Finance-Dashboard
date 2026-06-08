@@ -36,6 +36,7 @@ interface SlotMeta {
 const SLOT_META: Record<string, SlotMeta> = {
   factuurvolume:           { id: 'factuurvolume',           label: 'Factuurvolume',           icon: '🧾', unit: 'eur' },
   geschreven_uren:         { id: 'geschreven_uren',         label: 'Werknemertijden YTD',     icon: '⏱',  unit: 'hours' },
+  interne_uren:            { id: 'interne_uren',            label: 'Interne uren YTD',        icon: '🧩', unit: 'hours' },
   // uren-lijst (slot-id stabiel om bestaande imports niet te breken): de
   // NTF-uren-lijst — Nog Te Factureren netto waarde (€) per BV → OHW.
   uren_lijst:              { id: 'uren_lijst',              label: 'NTF Uren',                icon: '📋', unit: 'eur' },
@@ -55,7 +56,7 @@ interface Props {
     headerRow: number
     amountCol: string
     bvCol?: string
-    bvFilter?: BvId
+    bvFilter?: BvId[]
   }) => void
   onCancel: () => void
 }
@@ -115,14 +116,17 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
 
   const [amountCol, setAmountCol] = useState<string>('')
   const [bvCol, setBvCol] = useState<string>('')
-  const [bvFilter, setBvFilter] = useState<BvId | ''>('')
+  // Multi-select BV-filter. Lege array = geen filter actief (alle herkende
+  // BV's tellen mee en worden per BV verdeeld). Voorheen single-select wat
+  // multi-BV bestanden (NTF Uren / D-lijst) onnodig op 0 liet uitkomen.
+  const [bvFilter, setBvFilter] = useState<BvId[]>([])
   // Meerdere kolom-filters (AND). Bv. D-lijst: BV-kolom + factuuraanvraag-kolom.
   const [filters, setFilters] = useState<Array<{ col: string; value: string }>>([])
 
   useEffect(() => {
     setAmountCol(suggested.amountCol)
     setBvCol(isSingleBv ? '' : suggested.bvCol)
-    setBvFilter(suggested.bvFilterSuggestion)
+    setBvFilter(suggested.bvFilterSuggestion ? [suggested.bvFilterSuggestion] : [])
     setFilters(suggested.filters.length > 0 ? suggested.filters : [])
   }, [suggested.amountCol, suggested.bvCol, suggested.bvFilterSuggestion, suggested.filters, isSingleBv])
 
@@ -168,7 +172,7 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
       const cfg: GenericImportConfig = {
         amountCol,
         bvCol: bvCol || undefined,
-        bvFilter: bvFilter || undefined,
+        bvFilter: bvFilter.length > 0 ? bvFilter : undefined,
         filters: activeFilters.length > 0 ? activeFilters : undefined,
         // BEWUST geen excludedRowIndices hier — exclusions worden in
         // livePreview goedkoop verrekend via de details.
@@ -238,12 +242,12 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
         const cfg: GenericImportConfig = {
           amountCol,
           bvCol: bvCol || undefined,
-          bvFilter: bvFilter || undefined,
+          bvFilter: bvFilter.length > 0 ? bvFilter : undefined,
           filters: activeFilters.length > 0 ? activeFilters : undefined,
           excludedRowIndices: excludedRows,
         }
         const r = computeGenericImport(headers, dataRows, slotId, cfg)
-        onConfirm(r, { sheetName, headerRow, amountCol, bvCol: bvCol || undefined, bvFilter: (bvFilter || undefined) as BvId | undefined })
+        onConfirm(r, { sheetName, headerRow, amountCol, bvCol: bvCol || undefined, bvFilter: bvFilter.length > 0 ? bvFilter : undefined })
       } catch (err) {
         console.error('[GenericImportWizard] compute fallback mislukt:', err)
         onCancel()
@@ -255,7 +259,7 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
       headerRow,
       amountCol,
       bvCol: bvCol || undefined,
-      bvFilter: (bvFilter || undefined) as BvId | undefined,
+      bvFilter: bvFilter.length > 0 ? bvFilter : undefined,
     })
   }
 
@@ -468,25 +472,44 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                   />
                 )}
 
-                {!isSingleBv && bvCol && (
-                  <div style={{ paddingLeft: 12, borderLeft: '2px solid var(--amber)', fontSize: 11 }}>
-                    <div style={{ color: 'var(--t3)', marginBottom: 4 }}>
-                      Optioneel: beperk tot één BV
-                    </div>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {(['', 'Consultancy', 'Projects', 'Software'] as Array<BvId | ''>).map(f => (
+                {!isSingleBv && bvCol && (() => {
+                  const allBvs: BvId[] = ['Consultancy', 'Projects', 'Software']
+                  const allSelected = allBvs.every(b => bvFilter.includes(b))
+                  const toggle = (b: BvId) =>
+                    setBvFilter(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b])
+                  return (
+                    <div style={{ paddingLeft: 12, borderLeft: '2px solid var(--amber)', fontSize: 11 }}>
+                      <div style={{ color: 'var(--t3)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span>Optioneel: beperk tot één of meerdere BV's (klik = aan/uit). Elke geselecteerde BV wordt apart herkend en per BV opgeteld.</span>
+                        <span style={{ color: 'var(--t2)', fontSize: 10 }}>
+                          {bvFilter.length === 0 ? 'alle BVs actief' : `${bvFilter.length} geselecteerd`}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                         <button
-                          key={f || 'none'}
-                          onClick={() => setBvFilter(f)}
-                          className={`btn sm${bvFilter === f ? ' primary' : ' ghost'}`}
-                          style={{ fontSize: 10 }}
+                          onClick={() => setBvFilter(allSelected || bvFilter.length === 0 ? [] : allBvs)}
+                          className="btn sm ghost"
+                          style={{ fontSize: 10, fontStyle: 'italic' }}
                         >
-                          {f || 'Alle BVs'}
+                          {bvFilter.length === 0 ? 'Alle BVs (actief)' : '✕ filter uit'}
                         </button>
-                      ))}
+                        {allBvs.map(b => {
+                          const active = bvFilter.includes(b)
+                          return (
+                            <button
+                              key={b}
+                              onClick={() => toggle(b)}
+                              className={`btn sm${active ? ' primary' : ' ghost'}`}
+                              style={{ fontSize: 10, ...(active ? { borderColor: BV_COLORS[b], color: BV_COLORS[b] } : {}) }}
+                            >
+                              {active && '✓ '}{b}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
 
                 {/* ── Extra kolom-filters (AND) — meerdere tegelijk mogelijk ── */}
                 <div style={{ background: 'var(--bg3)', borderRadius: 8, padding: '10px 12px', border: '1px solid var(--bd2)', borderLeftWidth: 3, borderLeftColor: 'var(--purple)' }}>
@@ -581,7 +604,7 @@ export function GenericImportWizard({ workbook, fileName, slotId, onConfirm, onC
                       <BucketTag label="Geen BV" value={livePreview.missingHoursCounts.unmatched} color="var(--amber)" />
                       <BucketTag label="Leeg / 0" value={livePreview.missingHoursCounts.emptyOrZero} color="var(--t3)" />
                       <BucketTag label="Totaalregels" value={livePreview.missingHoursCounts.totalRowsSkipped} color="var(--t3)" />
-                      {bvFilter && <BucketTag label={`Filter "${bvFilter}"`} value={livePreview.missingHoursCounts.bedrijfFiltered} color="var(--amber)" />}
+                      {bvFilter.length > 0 && <BucketTag label={`BV-filter (${bvFilter.length}× actief)`} value={livePreview.missingHoursCounts.bedrijfFiltered} color="var(--amber)" />}
                       {activeFilters.length > 0 && (livePreview.missingHoursCounts.filterColumnSkipped ?? 0) > 0 && (
                         <BucketTag
                           label={`Kolomfilters (${activeFilters.length})`}

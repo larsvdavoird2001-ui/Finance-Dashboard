@@ -255,8 +255,17 @@ export interface BudgetOverrideRow {
 
 export async function fetchBudgetOverrides(): Promise<BudgetOverrideRow[]> {
   if (!supabaseEnabled) return []
+  // Throw bij echte fouten zodat de caller (useBudgetStore.loadFromDb) ze
+  // via zijn try/catch kan opvangen en de reconcile-push kan overslaan.
+  // Voorheen retourneerden we [] bij fouten, waardoor lokale overrides ten
+  // onrechte als "missing in DB" werden gezien en in een loop terug werden
+  // gepusht — bij netwerkfouten (Supabase offline) gaf dat honderden
+  // "Failed to fetch"-toasts.
   const { data, error } = await supabase.from('budget_overrides').select('*')
-  if (error) { console.error('fetchBudgetOverrides:', error); return [] }
+  if (error) {
+    console.error('fetchBudgetOverrides:', error)
+    throw new Error(error.message ?? 'fetchBudgetOverrides failed')
+  }
   return (data ?? []).map(row => ({
     entity: row.entity,
     month: row.month,
@@ -631,4 +640,114 @@ export async function deleteAllInternalHours(): Promise<void> {
   if (!supabaseEnabled) return
   const { error } = await supabase.from('internal_hours').delete().neq('id', '')
   if (error) console.error('deleteAllInternalHours:', error)
+}
+
+// ── Notificaties (gedeelde bell-inbox) ──────────────────────────────────────
+// Alle clients lezen dezelfde notifications-tabel; via Supabase Realtime
+// verschijnt een nieuwe melding direct in de bell-inbox van elke ingelogde
+// gebruiker. Gelezen-status (`read_by`) is een array van emails — per-user
+// markeren-als-gelezen blijft individueel terwijl de melding zelf gedeeld is.
+import type { Notification } from '../store/useNotificationStore'
+
+export async function fetchNotifications(): Promise<Notification[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(500)
+  if (error) { console.error('fetchNotifications:', error); return [] }
+  return (data ?? []).map(row => ({
+    id:         String(row.id),
+    category:   row.category,
+    audience:   Array.isArray(row.audience) ? row.audience : [],
+    title:      String(row.title ?? ''),
+    body:       row.body ?? undefined,
+    link:       row.link_tab
+      ? { tab: row.link_tab, month: row.link_month ?? undefined }
+      : undefined,
+    createdAt:  String(row.created_at ?? ''),
+    readBy:     Array.isArray(row.read_by) ? row.read_by : [],
+    dedupeKey:  row.dedupe_key ?? undefined,
+  }) as Notification)
+}
+
+export async function upsertNotification(n: Notification): Promise<void> {
+  if (!supabaseEnabled) return
+  const row = {
+    id:         n.id,
+    category:   n.category,
+    audience:   n.audience,
+    title:      n.title,
+    body:       n.body ?? null,
+    link_tab:   n.link?.tab ?? null,
+    link_month: n.link?.month ?? null,
+    dedupe_key: n.dedupeKey ?? null,
+    read_by:    n.readBy,
+    created_at: n.createdAt,
+  }
+  await trackedWrite('notifications', () =>
+    supabase.from('notifications').upsert(row, { onConflict: 'id' }))
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('notifications').delete().eq('id', id)
+  if (error) console.error('deleteNotification:', error)
+}
+
+export async function deleteNotificationsByDedupe(dedupeKey: string): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('notifications').delete().eq('dedupe_key', dedupeKey)
+  if (error) console.error('deleteNotificationsByDedupe:', error)
+}
+
+// ── Forecast inputs (Voorspelling huidige maand) ───────────────────────────
+// Partial-month inputs (uploads + handmatige OHW-schatting + notes) die als
+// pure prognose-data gebruikt worden door de forecastEngine. Géén effect op
+// OHW Overzicht of import_records — de tabel is bewust geïsoleerd.
+import type { ForecastInputRecord } from '../store/useForecastStore'
+
+export async function fetchForecastInputs(): Promise<ForecastInputRecord[]> {
+  if (!supabaseEnabled) return []
+  const { data, error } = await supabase.from('forecast_inputs').select('*').order('updated_at', { ascending: false })
+  if (error) { console.error('fetchForecastInputs:', error); return [] }
+  return (data ?? []).map(row => ({
+    id:          String(row.id),
+    month:       String(row.month),
+    slot:        String(row.slot),
+    bv:          row.bv ?? null,
+    payload:     (row.payload ?? {}) as Record<string, unknown>,
+    fileName:    row.file_name ?? null,
+    uploadedBy:  row.uploaded_by ?? null,
+    uploadedAt:  String(row.uploaded_at ?? ''),
+  }))
+}
+
+export async function upsertForecastInput(rec: ForecastInputRecord): Promise<void> {
+  if (!supabaseEnabled) return
+  const row = {
+    id:          rec.id,
+    month:       rec.month,
+    slot:        rec.slot,
+    bv:          rec.bv,
+    payload:     rec.payload,
+    file_name:   rec.fileName,
+    uploaded_by: rec.uploadedBy,
+    uploaded_at: rec.uploadedAt,
+  }
+  await trackedWrite('forecast_inputs', () =>
+    supabase.from('forecast_inputs').upsert(row, { onConflict: 'id' }))
+}
+
+export async function deleteForecastInput(id: string): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('forecast_inputs').delete().eq('id', id)
+  if (error) console.error('deleteForecastInput:', error)
+}
+
+export async function deleteForecastInputsForMonth(month: string): Promise<void> {
+  if (!supabaseEnabled) return
+  const { error } = await supabase.from('forecast_inputs').delete().eq('month', month)
+  if (error) console.error('deleteForecastInputsForMonth:', error)
 }

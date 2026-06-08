@@ -106,6 +106,15 @@ const GROWTH_TREND_WEIGHT = 0.15
  *  voorkomen wanneer recente maanden uitschieters bevatten. */
 const GROWTH_TREND_CAP_PER_MONTH = 0.05
 
+/** EBITDA-marge cap: forecast EBITDA% per BV mag max factor × historische
+ *  mediaan (over recente closed maanden) UF historische mediaan + buffer-pp
+ *  (welke hoger is). Voorkomt dat een combinatie van laag-uitgevallen opex en
+ *  hoge revenue-driver per ongeluk een marge oplevert die nooit historisch is
+ *  waargemaakt (bv. Projects met YTD 17% EBITDA-marge dat zonder cap naar 27%
+ *  schoot via te lage opex-forecast). */
+const EBITDA_CAP_RELATIVE = 1.30                // max 30% relatief boven historische mediaan
+const EBITDA_CAP_ABSOLUTE_OVERHEAD = 0.05       // OR mediaan + 5 percentpunt (welke hoger is)
+
 /** Budget-anchor weight: hoe sterk een handmatig aangepast budget doorwerkt
  *  in de LE-forecast voor open maanden. 0 = pure driver (budget heeft geen
  *  invloed), 1 = LE = budget (driver vervalt). 0.5 = halverwege — een budget-
@@ -283,6 +292,33 @@ export function useLatestEstimate(currentDate?: Date) {
     return Math.pow(capped, distance * GROWTH_TREND_WEIGHT)
   }
 
+  // ── Historische EBITDA-marge baseline ────────────────────────────────
+  /** Mediaan EBITDA% over de window — robuust tegen één uitschieter-maand.
+   *  Levert null wanneer er onvoldoende basis is om een baseline te bouwen. */
+  const historicalEbitdaPct = (bv: EntityName, window: string[]): number | null => {
+    if (bv === 'Holdings') return null
+    const ratios: number[] = []
+    for (const m of window) {
+      const rev = rawActualRevenue(bv as BvId, m)
+      if (rev <= 0) continue
+      const ebitda = rawActual(bv, m, 'ebitda')
+      if (ebitda === 0) continue
+      ratios.push(ebitda / rev)
+    }
+    if (ratios.length === 0) return null
+    ratios.sort((a, b) => a - b)
+    return ratios[Math.floor(ratios.length / 2)]
+  }
+
+  /** EBITDA-cap-marge voor (bv, window): mediaan historisch + buffer.
+   *  Gebruikt de hogere van (mediaan × 1.30) en (mediaan + 5pp) zodat een
+   *  laag-marge-BV ook in absolute zin ruimte heeft voor stijging. */
+  const ebitdaCapPct = (bv: EntityName, window: string[]): number | null => {
+    const baseline = historicalEbitdaPct(bv, window)
+    if (baseline === null) return null
+    return Math.max(baseline * EBITDA_CAP_RELATIVE, baseline + EBITDA_CAP_ABSOLUTE_OVERHEAD)
+  }
+
   // ── Budget-anchor blend ────────────────────────────────────────────────
   /** Blendt een driver-forecast met de ingegeven budget-waarde. Behoudt
    *  bestaande edge-cases:
@@ -328,18 +364,27 @@ export function useLatestEstimate(currentDate?: Date) {
     const bvId = bv as BvId
     const window = recentClosedWindow(closedMonths, month, RECENCY_WINDOW)
 
-    // Verzamel rev/FTE/maand baseline over de window.
+    // Verzamel baseline over de window — nu werkdag-aware.
+    //   revSum         = totaal omzet over de window
+    //   fteWorkdaySum  = Σ (FTE × werkdagen) per maand
+    //   workdaySum     = Σ werkdagen per maand (voor pad 2)
+    // Door tussen rev/FTE en target rev te delen door werkdagen, corrigeren
+    // we voor maanden met afwijkende werkdag-aantallen (bv. augustus 21 vs
+    // april 22). Voorheen pakten we rev/FTE/maand, wat een 21-werkdagen-
+    // maand impliciet aan 22-werkdagen-niveau forecast'te.
     let revSum = 0
-    let revMonths = 0  // hoeveel maanden hadden meaningful revenue
-    let fteSum = 0
+    let revMonths = 0
+    let fteWorkdaySum = 0
+    let workdaySum = 0
     let leaveSum = 0
     for (const m of window) {
       if (hasReflectionFlag(bv, m, 'gefactureerde_omzet', 'one-off')) continue
       const rev = rawActualRevenue(bvId, m)
-      if (rev > 0) { revSum += rev; revMonths++ }
+      const wd = workdaysInMonth(m)
+      if (rev > 0) { revSum += rev; revMonths++; workdaySum += wd }
       const f = fteOfBv(bvId, m)
       if (f > 0 && rev > 0) {
-        fteSum += f
+        fteWorkdaySum += f * wd
         const h = hoursEntries.find(e => e.bv === bvId && e.month === m)
         leaveSum += h ? (h.vakantie ?? 0) + (h.ziekte ?? 0) : 0
       }
@@ -355,34 +400,47 @@ export function useLatestEstimate(currentDate?: Date) {
       return rawBudget(bv, month, 'gefactureerde_omzet') + rawBudget(bv, month, 'omzet_periode_allocatie')
     }
 
-    // FTE voor de forecast-maand (forward-fill via getFteLe).
+    // Werkdagen + FTE voor de forecast-maand.
     const fteForecast = fteOfBv(bvId, month)
+    const targetWorkdays = workdaysInMonth(month)
     const seasonal = seasonalFactor(bv, month, 'gefactureerde_omzet')
     // Engine self-correction: drift uit historie + growth-trend extrapolatie.
-    // Beide multiplicatief, met soft weights en caps in de helpers zelf.
     const drift = driftCorrection(bv, 'netto_omzet')
     const growth = growthTrendFactor(bv, month)
     const correction = drift * growth
 
-    // Pad 1 — FTE-aware: rev/FTE/maand × FTE_le × seasonal × leaveAdj × correction.
-    if (fteSum > 0 && fteForecast > 0) {
-      const revPerFteMonth = revSum / fteSum
-      const baselineLeavePerFte = leaveSum / fteSum
+    // Pad 1 — FTE-aware EN werkdag-aware:
+    //   revPerFteWorkday = revSum / Σ (FTE × werkdagen) over de window
+    //   forecast = fteForecast × revPerFteWorkday × targetWorkdays
+    //              × seasonal × leaveAdj × correction
+    if (fteWorkdaySum > 0 && fteForecast > 0 && targetWorkdays > 0) {
+      const revPerFteWorkday = revSum / fteWorkdaySum
+      const baselineLeavePerFteWorkday =
+        leaveSum / fteWorkdaySum  // verlofuren per (FTE × werkdag) in window
       let leaveAdj = 1
       const h = hoursEntries.find(e => e.bv === bvId && e.month === month)
       const plannedLeave = h ? (h.vakantie ?? 0) + (h.ziekte ?? 0) : 0
       if (plannedLeave > 0) {
-        const plannedLeavePerFte = plannedLeave / fteForecast
-        const excessLeavePerFte = Math.max(0, plannedLeavePerFte - baselineLeavePerFte)
-        const capacityPerFte = workdaysInMonth(month) * HOURS_PER_FTE_PER_DAY
-        if (capacityPerFte > 0) {
-          leaveAdj = 1 - Math.min(excessLeavePerFte / capacityPerFte, 0.5)
-        }
+        const plannedLeavePerFteWorkday =
+          plannedLeave / (fteForecast * targetWorkdays)
+        const excess = Math.max(0,
+          plannedLeavePerFteWorkday - baselineLeavePerFteWorkday)
+        // 8 uur per werkdag = capaciteit per (FTE × werkdag)
+        leaveAdj = 1 - Math.min(excess / HOURS_PER_FTE_PER_DAY, 0.5)
       }
-      return Math.round(fteForecast * revPerFteMonth * seasonal * leaveAdj * correction)
+      return Math.round(
+        fteForecast * revPerFteWorkday * targetWorkdays *
+        seasonal * leaveAdj * correction,
+      )
     }
 
-    // Pad 2 — geen FTE-koppeling beschikbaar: avg revenue per maand × seasonal.
+    // Pad 2 — geen FTE-koppeling: rev/werkdag × target werkdagen × seasonal.
+    if (workdaySum > 0 && targetWorkdays > 0) {
+      const revPerWorkday = revSum / workdaySum
+      return Math.round(revPerWorkday * targetWorkdays * seasonal * correction)
+    }
+
+    // Pad 3 — fallback wanneer ook geen werkdag-data: simpel maandgemiddelde.
     const avgPerMonthRev = revSum / Math.max(1, revMonths)
     return Math.round(avgPerMonthRev * seasonal * correction)
   }
@@ -529,14 +587,54 @@ export function useLatestEstimate(currentDate?: Date) {
       costDrift = Math.max(1 - DRIFT_CORRECTION_CAP, Math.min(1 + DRIFT_CORRECTION_CAP, costDrift))
     }
 
+    // Compute raw opex/A&A forecast volgens de huidige logica.
+    let rawCostForecast: number
     if (fteSum > 0 && bv !== 'Holdings') {
       const aggrPerFte = aggrSum / fteSum
       const fteForecast = fteOfBv(bv as BvId, month)
       if (fteForecast > 0) {
-        return blendWithBudget(aggrPerFte * fteForecast * seasonal * costDrift, budgetForAggr)
+        rawCostForecast = blendWithBudget(aggrPerFte * fteForecast * seasonal * costDrift, budgetForAggr)
+      } else {
+        rawCostForecast = blendWithBudget((aggrSum / n) * seasonal * costDrift, budgetForAggr)
+      }
+    } else {
+      rawCostForecast = blendWithBudget((aggrSum / n) * seasonal * costDrift, budgetForAggr)
+    }
+
+    // ── EBITDA-marge cap (alleen op operationele_kosten) ──────────────────
+    // Voorkomt dat een combinatie van laag-uitgevallen opex-driver + hoge
+    // revenue-forecast een EBITDA-marge oplevert die buiten historisch
+    // bereik valt (bv. Projects YTD 17% → forecast 27%). Cap = mediaan
+    // historische marge × 1.30 OF mediaan + 5pp (welke hoger is). Als de
+    // raw opex daaronder uitkomt, drukken we opex (méér negatief) zodat
+    // EBITDA exact op de cap landt.
+    if (aggrKey === 'operationele_kosten' && bv !== 'Holdings') {
+      const capPct = ebitdaCapPct(bv, window)
+      if (capPct !== null) {
+        const revForecast = forecastRevenueTotal(bv, month)
+        if (revForecast > 0) {
+          // Forecast brutomarge = revenue + forecast directe_kosten.
+          const directeKostenForecast = forecastAggregateCost(bv, month, 'directe_kosten', window)
+          const brutomargeForecast = revForecast + directeKostenForecast  // costs zijn negatief
+          // EBITDA als we de raw opex zouden gebruiken:
+          const impliedEbitda = brutomargeForecast + rawCostForecast
+          const impliedPct = impliedEbitda / revForecast
+          if (impliedPct > capPct) {
+            // Te hoog → bereken de opex die EBITDA naar exact cap brengt.
+            //   target_ebitda = revForecast × capPct
+            //   target_opex   = target_ebitda − brutomargeForecast
+            //                 (opex is negatief, dus target_opex < rawCostForecast)
+            const targetEbitda = revForecast * capPct
+            const targetOpex = targetEbitda - brutomargeForecast
+            // Veiligheid: cap mag opex niet positief maken (zou betekenen
+            // dat brutomarge al onder de marge-cap lag — dan niets cappen).
+            if (targetOpex < 0) return Math.round(targetOpex)
+          }
+        }
       }
     }
-    return blendWithBudget((aggrSum / n) * seasonal * costDrift, budgetForAggr)
+
+    return rawCostForecast
   }
 
   /** Forecast voor één cost-sub: aggregaat-forecast × historical share.
@@ -586,16 +684,19 @@ export function useLatestEstimate(currentDate?: Date) {
       if (bv === 'Holdings') return 0
       const bvId = bv as BvId
       const window = priorClosed.slice(-RECENCY_WINDOW)
-      // Zelfde gelaagde fallback als forecastRevenueTotal, maar met priorClosed
-      // als window (strikt vóór de target-maand) voor de pre-close LE.
-      let revSum = 0, revMonths = 0, fteSum = 0, leaveSum = 0
+      // Werkdag-aware baseline-aggregatie (zie forecastRevenueTotal). Voorheen
+      // pakten we rev/FTE per maand wat een 21-werkdagen-maand op 22-werkdagen-
+      // niveau forecast'te.
+      let revSum = 0, revMonths = 0
+      let fteWorkdaySum = 0, workdaySum = 0, leaveSum = 0
       for (const m of window) {
         if (hasReflectionFlag(bv, m, 'gefactureerde_omzet', 'one-off')) continue
         const rev = rawActualRevenue(bvId, m)
-        if (rev > 0) { revSum += rev; revMonths++ }
+        const wd = workdaysInMonth(m)
+        if (rev > 0) { revSum += rev; revMonths++; workdaySum += wd }
         const f = fteOfBv(bvId, m)
         if (f > 0 && rev > 0) {
-          fteSum += f
+          fteWorkdaySum += f * wd
           const h = hoursEntries.find(e => e.bv === bvId && e.month === m)
           leaveSum += h ? (h.vakantie ?? 0) + (h.ziekte ?? 0) : 0
         }
@@ -613,22 +714,25 @@ export function useLatestEstimate(currentDate?: Date) {
       }
 
       const fteForecast = fteOfBv(bvId, month)
+      const targetWorkdays = workdaysInMonth(month)
       let total: number
-      if (fteSum > 0 && fteForecast > 0) {
-        const revPerFteMonth = revSum / fteSum
-        const baselineLeavePerFte = leaveSum / fteSum
+      if (fteWorkdaySum > 0 && fteForecast > 0 && targetWorkdays > 0) {
+        const revPerFteWorkday = revSum / fteWorkdaySum
+        const baselineLeavePerFteWorkday = leaveSum / fteWorkdaySum
         let leaveAdj = 1
         const h = hoursEntries.find(e => e.bv === bvId && e.month === month)
         const plannedLeave = h ? (h.vakantie ?? 0) + (h.ziekte ?? 0) : 0
         if (plannedLeave > 0) {
-          const plannedLeavePerFte = plannedLeave / fteForecast
-          const excessLeavePerFte = Math.max(0, plannedLeavePerFte - baselineLeavePerFte)
-          const capacityPerFte = workdaysInMonth(month) * HOURS_PER_FTE_PER_DAY
-          if (capacityPerFte > 0) {
-            leaveAdj = 1 - Math.min(excessLeavePerFte / capacityPerFte, 0.5)
-          }
+          const plannedLeavePerFteWorkday = plannedLeave / (fteForecast * targetWorkdays)
+          const excess = Math.max(0, plannedLeavePerFteWorkday - baselineLeavePerFteWorkday)
+          leaveAdj = 1 - Math.min(excess / HOURS_PER_FTE_PER_DAY, 0.5)
         }
-        total = Math.round(fteForecast * revPerFteMonth * seasonal * leaveAdj)
+        total = Math.round(
+          fteForecast * revPerFteWorkday * targetWorkdays * seasonal * leaveAdj,
+        )
+      } else if (workdaySum > 0 && targetWorkdays > 0) {
+        const revPerWorkday = revSum / workdaySum
+        total = Math.round(revPerWorkday * targetWorkdays * seasonal)
       } else {
         const avgPerMonthRev = revSum / Math.max(1, revMonths)
         total = Math.round(avgPerMonthRev * seasonal)

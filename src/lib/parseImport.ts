@@ -91,10 +91,13 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     targetBv: 'Consultancy',
   },
   d_lijst: {
-    // D-lijst = declarabele uren Consultancy met tarief. We sommeren de
-    // NETTO WAARDE (€), niet de uren zelf. BV-kolom is optioneel — als ingesteld
-    // filtert de compute-logica naar alleen rijen waarvan de BV Consultancy is
-    // (voor gemengde SAP-exports).
+    // D-lijst = D-facturatie met tarief. We sommeren de NETTO WAARDE (€),
+    // niet de uren zelf. Multi-BV slot: per rij wordt de BV uit de BV-kolom
+    // gehaald en de waarde per BV opgeteld. De totalen per BV landen in een
+    // OHW-rij "D facturatie" per BV (zie UPLOAD_SLOTS.targetRowByBv in
+    // MaandTab → Consultancy: c1, Projects: p_d, Software: s_d). Met de
+    // multi-select BV-filter in de wizard kan de gebruiker kiezen welke BV's
+    // meedoen.
     amountCols: [
       'netto waarde', 'nettowaarde', 'netto bedrag', 'nettobedrag',
       'netto excl btw', 'netto excl. btw', 'netto',
@@ -115,9 +118,8 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     ],
     absoluteValue: false,
     positiveOnly: false,    // credit-regels (negatief) tellen mee voor correcte saldo
-    targetBv: 'Consultancy',
-    targetRowId: 'c1',
-    targetEntity: 'Consultancy',
+    // Geen targetBv/targetRowId meer — multi-BV (routing per BV via
+    // UPLOAD_SLOTS.targetRowByBv in MaandTab).
   },
   conceptfacturen: {
     // Conceptfacturen = E-Projecten (SAP-overzicht concept facturen) —
@@ -158,6 +160,20 @@ const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
     targetBv: 'Projects',
     targetRowId: 'p10',
     targetEntity: 'Projects',
+  },
+  interne_uren: {
+    // SAP-export "Interne uren" — gedetailleerd register van niet-declarabele
+    // uren per werknemer. Voor de Voorspelling-tab sommeert de generic wizard
+    // de uren-kolom per BV; de gedetailleerde categorisatie (leegloop /
+    // teamleiding / opleiding / sales / etc.) wordt door de aparte
+    // parseInternalHoursFile gedaan en is hier niet nodig — voor de prognose
+    // is alleen het BV-totaal interessant.
+    amountCols: [
+      'geregistreerde tijd', 'geregistreerde uren', 'registered time',
+      'uren', 'tijd', 'hours', 'totaal uren', 'totale tijd',
+    ],
+    bvCols: ['bedrijf', 'bv', 'company', 'organisatie', 'organization', 'entiteit', 'vennootschap'],
+    positiveOnly: true,
   },
 }
 
@@ -1242,13 +1258,21 @@ function candidateKeys(raw: unknown): string[] {
 export function buildTariffLookup(
   entries: Array<{ id: string; tarief: number; naam?: string; powerbiNaam?: string; powerbiNaam2?: string; bedrijf?: string }>,
   bvFilter?: string,
+  /** Vermenigvuldigt het IC-tarief vóór opslag in de lookup. Gebruikt door de
+   *  Missing Hours-flow met 1,14 om het fictieve verkooptarief (IC × 1,14) toe
+   *  te passen. De IC-verrekening tussen BV's gebruikt het platte tarief
+   *  (multiplier = 1, de default). */
+  tariefMultiplier = 1,
 ): TariffLookup {
   const byKey: Record<string, TariffValue> = {}
   const tokenList: Array<{ tokens: Set<string>; value: TariffValue }> = []
 
   for (const t of entries) {
     if (bvFilter && t.bedrijf !== bvFilter) continue
-    const value: TariffValue = { tarief: t.tarief, naam: t.naam || t.powerbiNaam || t.id, id: t.id }
+    // Tarief = 0 of leeg blijft 0 (anders zou × multiplier nog steeds 0 zijn —
+    // de "geen tarief"-detectie verderop blijft dus correct werken).
+    const adjustedTarief = (t.tarief ?? 0) * tariefMultiplier
+    const value: TariffValue = { tarief: adjustedTarief, naam: t.naam || t.powerbiNaam || t.id, id: t.id }
 
     // Exacte varianten: alle vier seeds worden als keys geregistreerd
     const seeds = [t.id, t.powerbiNaam2, t.powerbiNaam, t.naam].filter(Boolean) as string[]
@@ -1287,7 +1311,7 @@ export function buildTariffLookup(
  *  Veiligheid: cellen met maar één token (bv. alleen achternaam "Smit")
  *  worden niet via tokens gematcht tenzij de tariff ook maar één token heeft
  *  EN dat token minstens 5 tekens is (zodat generieke namen niet gokken). */
-function matchRowValue(
+export function matchRowValue(
   raw: unknown,
   lookup: TariffLookup,
 ): { tariff: TariffValue; key: string } | null {
@@ -2052,7 +2076,13 @@ export function suggestMissingHoursColumns(
 /** Filter-functie voor de bedrijfskolom: checkt of een cel-waarde bij het
  *  gevraagde bedrijf hoort (case-insensitief, accepteert SAP-codes zoals
  *  P15000 of bare "15000", en varianten als "Consultancy AK", "TPG-C"). */
-export function matchesBedrijf(val: unknown, filter: string): boolean {
+export function matchesBedrijf(val: unknown, filter: string | string[]): boolean {
+  // Multi-filter: rij matcht als ELKE van de filters matcht (OR-logica).
+  // Lege filter / lege array → geen filter actief, alles matcht.
+  if (Array.isArray(filter)) {
+    if (filter.length === 0) return true
+    return filter.some(f => matchesBedrijf(val, f))
+  }
   if (!filter) return true
   const s = String(val ?? '').toLowerCase().replace(/[-_\s]+/g, ' ').trim()
   if (!s) return false
@@ -2073,7 +2103,11 @@ export interface MissingHoursComputeConfig {
   werknemerCol: string
   urenCol: string
   bedrijfCol?: string
-  bedrijfFilter?: string  // bijv. "Consultancy"; leeg = geen filter
+  /** Filter op bedrijfs-waarden. Accepteert een enkele string (legacy) of een
+   *  array van strings voor multi-select (OR-logica: rij matcht als de
+   *  bedrijfskolom-waarde bij ÉNI van de filter-strings matcht). Leeg of
+   *  lege array = geen filter actief. */
+  bedrijfFilter?: string | string[]
   /** Werknemers die handmatig zijn uitgevinkt in stap "Verfijnen".
    *  Keys = werknemer-ID uit tarieftabel (stabiel). */
   excludedEmployeeIds?: Set<string>
@@ -2094,9 +2128,19 @@ export function computeMissingHours(
   const DECLARABILITEIT = 0.9
   const warnings: string[] = []
 
+  // Normaliseer bedrijfFilter naar string[] zodat de filterlogica één code-pad
+  // volgt. Lege array = geen filter actief.
+  const bedrijfFilterArr: string[] = Array.isArray(cfg.bedrijfFilter)
+    ? cfg.bedrijfFilter.filter(f => f && f.trim() !== '')
+    : cfg.bedrijfFilter && cfg.bedrijfFilter.trim() !== ''
+      ? [cfg.bedrijfFilter]
+      : []
+  const filterLabel = bedrijfFilterArr.length === 0 ? 'geen' :
+    bedrijfFilterArr.length === 1 ? bedrijfFilterArr[0] :
+    `${bedrijfFilterArr.length}× (${bedrijfFilterArr.join(', ')})`
   warnings.push(
     `Configuratie: werknemer="${cfg.werknemerCol}", uren="${cfg.urenCol}"` +
-    (cfg.bedrijfCol ? `, bedrijfskolom="${cfg.bedrijfCol}" (filter: "${cfg.bedrijfFilter ?? 'geen'}")` : '')
+    (cfg.bedrijfCol ? `, bedrijfskolom="${cfg.bedrijfCol}" (filter: ${filterLabel})` : '')
   )
   warnings.push(
     `Data: ${dataRows.length} rijen, lookup ${Object.keys(tariffs.byKey).length} keys + ${tariffs.nameTokens.length} tokensets`
@@ -2133,9 +2177,9 @@ export function computeMissingHours(
     // Handmatige rij-exclusion (uit wizard "Verfijnen" stap)
     if (cfg.excludedRowIndices?.has(rowIdx)) { manualExclusions++; continue }
 
-    // Bedrijfs-filter (indien opgegeven)
-    if (cfg.bedrijfCol && cfg.bedrijfFilter) {
-      if (!matchesBedrijf(row[cfg.bedrijfCol], cfg.bedrijfFilter)) {
+    // Bedrijfs-filter (multi-select). Lege array = geen filter actief.
+    if (cfg.bedrijfCol && bedrijfFilterArr.length > 0) {
+      if (!matchesBedrijf(row[cfg.bedrijfCol], bedrijfFilterArr)) {
         bedrijfFilteredOut++
         continue
       }
@@ -2293,8 +2337,10 @@ export interface GenericImportConfig {
    *  single-BV slots optioneel — als ingesteld wordt de kolom gebruikt om
    *  niet-matching rijen uit te filteren (i.p.v. ze blind toe te wijzen). */
   bvCol?: string
-  /** Alleen relevant voor multi-BV slots: beperk output tot één BV */
-  bvFilter?: BvId
+  /** Alleen relevant voor multi-BV slots: beperk output tot één of meerdere
+   *  BV's. Accepteert een enkele BvId (legacy) of een array (multi-select).
+   *  Leeg / lege array = geen filter (alle herkende BV's tellen mee). */
+  bvFilter?: BvId | BvId[]
   /** Extra kolom-filters (AND): een rij telt alleen mee als elke filter
    *  in deze lijst matcht. Bedoeld voor bv. D-lijst met zowel een BV-filter
    *  ("The People Group | Consultancy B.V.") als een factuuraanvraag-filter
@@ -2470,11 +2516,19 @@ export function computeGenericImport(
     .filter(f => f.col && f.value && f.value.trim())
     .map(f => ({ col: f.col, valueNorm: f.value.trim().toLowerCase() }))
 
+  // Normaliseer bvFilter naar BvId[] zodat de multi-select filterlogica één
+  // code-pad volgt. Lege array = geen filter (alle herkende BV's tellen mee).
+  const bvFilterArr: BvId[] = Array.isArray(cfg.bvFilter)
+    ? cfg.bvFilter.filter(Boolean)
+    : cfg.bvFilter ? [cfg.bvFilter] : []
+  const bvFilterLabel = bvFilterArr.length === 0 ? '' :
+    bvFilterArr.length === 1 ? bvFilterArr[0] : `${bvFilterArr.length}× (${bvFilterArr.join(', ')})`
+
   warnings.push(
     `Configuratie slot "${slotId}": bedrag="${cfg.amountCol}"` +
     (cfg.bvCol ? `, bv="${cfg.bvCol}"` : '') +
     (slotConfig.targetBv ? `, target-BV=${slotConfig.targetBv}` : '') +
-    (cfg.bvFilter ? `, filter=${cfg.bvFilter}` : '') +
+    (bvFilterArr.length > 0 ? `, filter=${bvFilterLabel}` : '') +
     (activeFilters.length > 0
       ? `, extra-filters=[${activeFilters.map(f => `"${f.col}"="${f.valueNorm}"`).join(', ')}]`
       : '')
@@ -2551,8 +2605,8 @@ export function computeGenericImport(
       continue
     }
 
-    // Optionele BV-filter
-    if (cfg.bvFilter && bv !== cfg.bvFilter) {
+    // Optionele BV-filter (multi-select). Lege array = geen filter actief.
+    if (bvFilterArr.length > 0 && !bvFilterArr.includes(bv)) {
       bvFilteredOut++
       continue
     }
@@ -2641,7 +2695,7 @@ export function computeGenericImport(
   }
   if (bvUndetected > 0) warnings.push(`${bvUndetected} rij(en) zonder herkende BV-waarde in "${cfg.bvCol}"`)
   if (bvFilteredOut > 0) {
-    const bvLabel = cfg.bvFilter ?? (slotConfig.targetBv ? `alleen ${slotConfig.targetBv}` : 'BV-filter')
+    const bvLabel = bvFilterArr.length > 0 ? bvFilterLabel : (slotConfig.targetBv ? `alleen ${slotConfig.targetBv}` : 'BV-filter')
     warnings.push(`${bvFilteredOut} rij(en) weggefilterd door BV-filter (${bvLabel})`)
   }
   if (filterColumnSkipped > 0) {

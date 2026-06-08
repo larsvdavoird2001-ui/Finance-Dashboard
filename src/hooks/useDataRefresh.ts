@@ -12,6 +12,8 @@ import { useHoursWeekStore } from '../store/useHoursWeekStore'
 import { useCostBreakdownStore } from '../store/useCostBreakdownStore'
 import { useReflectionStore } from '../store/useReflectionStore'
 import { useInternalHoursStore } from '../store/useInternalHoursStore'
+import { useNotificationStore } from '../store/useNotificationStore'
+import { useForecastStore } from '../store/useForecastStore'
 
 /** Geeft één functie terug die alle data-stores opnieuw uit Supabase laadt.
  *  Bedoeld voor:
@@ -33,6 +35,8 @@ export function useDataRefresh() {
   const loadCostBreakdown  = useCostBreakdownStore(s => s.loadFromDb)
   const loadReflection     = useReflectionStore(s => s.loadFromDb)
   const loadInternalHours  = useInternalHoursStore(s => s.loadFromDb)
+  const loadNotifications  = useNotificationStore(s => s.loadFromDb)
+  const loadForecast       = useForecastStore(s => s.loadFromDb)
 
   return useCallback(async () => {
     await Promise.all([
@@ -49,7 +53,10 @@ export function useDataRefresh() {
       loadCostBreakdown().catch(e => console.warn('[refresh] costBreakdown:', e)),
       loadReflection().catch(e => console.warn('[refresh] reflection:', e)),
       loadInternalHours().catch(e => console.warn('[refresh] internalHours:', e)),
+      loadNotifications().catch(e => console.warn('[refresh] notifications:', e)),
+      loadForecast().catch(e => console.warn('[refresh] forecast:', e)),
     ])
   }, [loadFin, loadFte, loadImport, loadRaw, loadOhw, loadTariff, loadEvidence, loadBudget,
-      loadHours, loadHoursWeek, loadCostBreakdown, loadReflection, loadInternalHours])
+      loadHours, loadHoursWeek, loadCostBreakdown, loadReflection, loadInternalHours,
+      loadNotifications, loadForecast])
 }

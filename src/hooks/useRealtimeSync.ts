@@ -13,6 +13,8 @@ import { useHoursWeekStore } from '../store/useHoursWeekStore'
 import { useCostBreakdownStore } from '../store/useCostBreakdownStore'
 import { useReflectionStore } from '../store/useReflectionStore'
 import { useInternalHoursStore } from '../store/useInternalHoursStore'
+import { useNotificationStore } from '../store/useNotificationStore'
+import { useForecastStore } from '../store/useForecastStore'
 
 /** Live sync — zorgt dat iedere ingelogde gebruiker altijd de laatste data
  *  ziet. Drie elkaar aanvullende mechanismen:
@@ -43,6 +45,8 @@ export function useRealtimeSync(enabled: boolean) {
   const loadCostBreakdown  = useCostBreakdownStore(s => s.loadFromDb)
   const loadReflection     = useReflectionStore(s => s.loadFromDb)
   const loadInternalHours  = useInternalHoursStore(s => s.loadFromDb)
+  const loadNotifications  = useNotificationStore(s => s.loadFromDb)
+  const loadForecast       = useForecastStore(s => s.loadFromDb)
 
   useEffect(() => {
     if (!supabaseEnabled || !enabled) return
@@ -73,6 +77,8 @@ export function useRealtimeSync(enabled: boolean) {
       debouncedRefetch('costBreakdown', loadCostBreakdown)
       debouncedRefetch('reflection', loadReflection)
       debouncedRefetch('internalHours', loadInternalHours)
+      debouncedRefetch('notifications', loadNotifications)
+      debouncedRefetch('forecast', loadForecast)
     }
 
     // ── 1. Supabase Realtime — directe push per gewijzigde tabel ──
@@ -92,6 +98,8 @@ export function useRealtimeSync(enabled: boolean) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cost_breakdowns' }, () => debouncedRefetch('costBreakdown', loadCostBreakdown))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'closing_reflections' }, () => debouncedRefetch('reflection', loadReflection))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'internal_hours' }, () => debouncedRefetch('internalHours', loadInternalHours))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => debouncedRefetch('notifications', loadNotifications))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'forecast_inputs' }, () => debouncedRefetch('forecast', loadForecast))
       .subscribe(status => {
         if (status === 'SUBSCRIBED') console.info('[livesync] Realtime verbonden')
       })

@@ -11,43 +11,16 @@ import {
   type FinalizedMonth,
 } from '../lib/db'
 
-// ── Afsluitbare maanden ───────────────────────────────────────────────────
-// De Maandafsluiting-tab toont elke maand t/m de vorige kalendermaand (de
-// maand die net is afgelopen en dus afgesloten kan worden). De lijst groeit
-// automatisch mee zodra een nieuwe kalendermaand begint — eerder stond deze
-// hard op Jan–Apr, waardoor nieuwe maanden niet in de tab verschenen terwijl
-// de Maandafsluiting-notificatie ze wél aankondigde.
-//   Ondergrens: Apr-26 (de maanden met hardgecodeerde Q1+April-actuals blijven
-//   altijd zichtbaar). Bovengrens: Dec-26.
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const APP_YEAR = 2026
-const MIN_CLOSING_IDX = 3 // t/m Apr-26
-
-function computeClosingMonths(now: Date = new Date()): string[] {
-  let lastIdx: number
-  if (now.getFullYear() > APP_YEAR) lastIdx = 11               // app-jaar voorbij → hele jaar afsluitbaar
-  else if (now.getFullYear() < APP_YEAR) lastIdx = MIN_CLOSING_IDX
-  else lastIdx = now.getMonth() - 1                            // vorige kalendermaand
-  lastIdx = Math.min(11, Math.max(MIN_CLOSING_IDX, lastIdx))
-  return MONTH_ABBR.slice(0, lastIdx + 1).map(m => `${m}-26`)
-}
-
-export const CLOSING_MONTHS = computeClosingMonths()
-
 // Financieel resultaat & vennootschapsbelasting per BV/maand — bekende
-// actuals-waardes uit de P&L (plData 2026). Jan-Apr worden voor-ingevuld
-// zodat de user ze alleen hoeft te bevestigen / aanpassen.
-const FIN_RES_JAN: Record<ClosingBv, number> = { Consultancy: -512,   Projects: -242,   Software: -102,    Holdings: -37559  }
-const FIN_RES_FEB: Record<ClosingBv, number> = { Consultancy: -382,   Projects: -196,   Software: -7431,   Holdings: -37135  }
-const FIN_RES_MAR: Record<ClosingBv, number> = { Consultancy: -3700,  Projects: -2632,  Software: 6848,    Holdings: -40718  }
-const FIN_RES_APR: Record<ClosingBv, number> = { Consultancy: -444,   Projects: -188,   Software: -78,     Holdings: -112089 }
-const VPB_JAN:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
-const VPB_FEB:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
-const VPB_MAR:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
-const VPB_APR:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
+// actuals-waardes uit de P&L (plData 2026). Jan/Feb worden voor-ingevuld
+// zodat de user ze alleen hoeft te bevestigen / aanpassen; Mar start op 0.
+const FIN_RES_JAN: Record<ClosingBv, number> = { Consultancy: -512,  Projects: -242,  Software: -102,   Holdings: -37559 }
+const FIN_RES_FEB: Record<ClosingBv, number> = { Consultancy: -382,  Projects: -196,  Software: -7431,  Holdings: -37135 }
+const VPB_JAN:     Record<ClosingBv, number> = { Consultancy: 0,     Projects: 0,     Software: 0,      Holdings: 0      }
+const VPB_FEB:     Record<ClosingBv, number> = { Consultancy: 0,     Projects: 0,     Software: 0,      Holdings: 0      }
 
 // Initial closing data sourced from P02.2026 Maandrapportage actuals
-const BASE_ENTRIES: ClosingEntry[] = [
+const INITIAL_ENTRIES: ClosingEntry[] = [
   // ── January 2026 ─────────────────────────────────────────────────────────
   {
     id: 'c-jan26', bv: 'Consultancy', month: 'Jan-26',
@@ -98,54 +71,29 @@ const BASE_ENTRIES: ClosingEntry[] = [
     financieelResultaat: FIN_RES_FEB.Software, vennootschapsbelasting: VPB_FEB.Software,
     remark: '',
   },
-  // ── March 2026 (actuals uit maandafsluiting) ─────────────────────────────
+  // ── March 2026 (open / empty template) ───────────────────────────────────
   {
     id: 'c-mar26', bv: 'Consultancy', month: 'Mar-26',
-    factuurvolume: 1068056, debiteuren: 0, ohwMutatie: -44348,
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: FIN_RES_MAR.Consultancy, vennootschapsbelasting: VPB_MAR.Consultancy,
+    financieelResultaat: 0, vennootschapsbelasting: 0,
     remark: '',
   },
   {
     id: 'p-mar26', bv: 'Projects', month: 'Mar-26',
-    factuurvolume: 698848, debiteuren: 0, ohwMutatie: 14646,
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: FIN_RES_MAR.Projects, vennootschapsbelasting: VPB_MAR.Projects,
+    financieelResultaat: 0, vennootschapsbelasting: 0,
     remark: '',
   },
   {
     id: 's-mar26', bv: 'Software', month: 'Mar-26',
-    factuurvolume: 203630, debiteuren: 0, ohwMutatie: 49665,
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: FIN_RES_MAR.Software, vennootschapsbelasting: VPB_MAR.Software,
-    remark: '',
-  },
-  // ── April 2026 (actuals uit maandafsluiting) ─────────────────────────────
-  {
-    id: 'c-apr26', bv: 'Consultancy', month: 'Apr-26',
-    factuurvolume: 1113614, debiteuren: 0, ohwMutatie: -175592,
-    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
-    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: FIN_RES_APR.Consultancy, vennootschapsbelasting: VPB_APR.Consultancy,
-    remark: '',
-  },
-  {
-    id: 'p-apr26', bv: 'Projects', month: 'Apr-26',
-    factuurvolume: 477026, debiteuren: 0, ohwMutatie: 166062,
-    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
-    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: FIN_RES_APR.Projects, vennootschapsbelasting: VPB_APR.Projects,
-    remark: '',
-  },
-  {
-    id: 's-apr26', bv: 'Software', month: 'Apr-26',
-    factuurvolume: 272008, debiteuren: 0, ohwMutatie: 110015,
-    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
-    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: FIN_RES_APR.Software, vennootschapsbelasting: VPB_APR.Software,
+    financieelResultaat: 0, vennootschapsbelasting: 0,
     remark: '',
   },
   // ── Holdings: geen OHW/factuurvolume flow, alleen kosten-invoer ─────
@@ -170,57 +118,9 @@ const BASE_ENTRIES: ClosingEntry[] = [
     factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: FIN_RES_MAR.Holdings, vennootschapsbelasting: VPB_MAR.Holdings,
+    financieelResultaat: 0, vennootschapsbelasting: 0,
     remark: '',
   },
-  {
-    id: 'h-apr26', bv: 'Holdings', month: 'Apr-26',
-    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
-    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
-    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
-    financieelResultaat: FIN_RES_APR.Holdings, vennootschapsbelasting: VPB_APR.Holdings,
-    remark: '',
-  },
-]
-
-// Maanden met hardgecodeerde actuals hierboven; al het overige in CLOSING_MONTHS
-// krijgt een lege entry per BV.
-//
-// BASE_ACTUAL_MONTHS_2026 is de autoritatieve, in-code gedeelde lijst van
-// maanden waarvoor TPG-brede actuals bekend zijn. Deze lijst is dezelfde voor
-// elke gebruiker (zit in de bundle, niet in per-user state) en moet daarom de
-// bron zijn voor wat de Executive Overview als "actual"-maanden toont — anders
-// ziet een nieuw account minder maanden dan iemand die een maand lokaal al
-// heeft afgesloten. Breid deze lijst uit zodra een nieuwe maand harde actuals
-// krijgt in BASE_ENTRIES hierboven.
-export const BASE_ACTUAL_MONTHS_2026: string[] = ['Jan-26', 'Feb-26', 'Mar-26', 'Apr-26']
-const BASE_MONTHS = new Set<string>(BASE_ACTUAL_MONTHS_2026)
-const ALL_CLOSING_BVS: ClosingBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
-
-/** Lege closing-entry voor een (bv, maand) zonder hardgecodeerde actuals. Nodig
- *  zodat factuurvolume-imports en kosten-invoer voor nieuwe maanden ergens in
- *  landen — zonder bestaande entry doet applyImportToEntries `continue` en gaat
- *  de import stilletjes verloren. Het id volgt hetzelfde schema als hierboven
- *  (en als ensureEntry's fallback): bv. 'c-may26'. */
-function emptyClosingEntry(bv: ClosingBv, month: string): ClosingEntry {
-  return {
-    id: `${bv[0].toLowerCase()}-${month.replace('-', '').toLowerCase()}`,
-    bv, month,
-    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
-    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
-    operationeleKosten: 0, amortisatieAfschrijvingen: 0,
-    kostenOverrides: {}, remark: '',
-  }
-}
-
-// Volledige initiële set: hardgecodeerde Jan–Apr + lege entries voor elke
-// verdere afsluitbare maand × alle 4 BVs. Groeit mee met CLOSING_MONTHS, en
-// via mergeWithInitialEntries krijgen bestaande users de nieuwe maanden erbij.
-const INITIAL_ENTRIES: ClosingEntry[] = [
-  ...BASE_ENTRIES,
-  ...CLOSING_MONTHS
-    .filter(m => !BASE_MONTHS.has(m))
-    .flatMap(m => ALL_CLOSING_BVS.map(bv => emptyClosingEntry(bv, m))),
 ]
 
 /** Pre-fill-defaults die read-paden kunnen gebruiken als een persisted entry
@@ -229,15 +129,11 @@ const INITIAL_ENTRIES: ClosingEntry[] = [
 export function getFinResDefault(bv: ClosingBv, month: string): number {
   if (month === 'Jan-26') return FIN_RES_JAN[bv] ?? 0
   if (month === 'Feb-26') return FIN_RES_FEB[bv] ?? 0
-  if (month === 'Mar-26') return FIN_RES_MAR[bv] ?? 0
-  if (month === 'Apr-26') return FIN_RES_APR[bv] ?? 0
   return 0
 }
 export function getVpbDefault(bv: ClosingBv, month: string): number {
   if (month === 'Jan-26') return VPB_JAN[bv] ?? 0
   if (month === 'Feb-26') return VPB_FEB[bv] ?? 0
-  if (month === 'Mar-26') return VPB_MAR[bv] ?? 0
-  if (month === 'Apr-26') return VPB_APR[bv] ?? 0
   return 0
 }
 
@@ -505,3 +401,5 @@ export const useFinStore = create<FinStore>()(
     },
   ),
 )
+
+export const CLOSING_MONTHS = ['Jan-26', 'Feb-26', 'Mar-26', 'Apr-26']
