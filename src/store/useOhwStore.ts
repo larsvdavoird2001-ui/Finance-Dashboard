@@ -24,14 +24,14 @@ function ensureSeedSourceRows(
   seed: OhwEntityData | undefined,
   tombstones: Set<string>,
 ): OhwEntityData {
-  if (!seed) return entity
+  if (!seed || !Array.isArray(entity.onderhanden) || !Array.isArray(seed.onderhanden)) return entity
   const existingIds = new Set<string>()
-  for (const sec of entity.onderhanden) for (const r of sec.rows) existingIds.add(r.id)
+  for (const sec of entity.onderhanden) for (const r of (sec.rows ?? [])) existingIds.add(r.id)
   let changed = false
   const onderhanden = entity.onderhanden.map(sec => {
     const seedSec = seed.onderhanden.find(s => s.id === sec.id)
     if (!seedSec) return sec
-    const missing = seedSec.rows.filter(r =>
+    const missing = (seedSec.rows ?? []).filter(r =>
       r.sourceSlot && !existingIds.has(r.id) && !tombstones.has(r.id),
     )
     if (missing.length === 0) return sec

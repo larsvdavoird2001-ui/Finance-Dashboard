@@ -1997,27 +1997,30 @@ export function MaandTab({ filter: _filter }: Props) {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
                 {(['Consultancy', 'Projects', 'Software'] as const).map(bv => {
                   const isDragOver = icFactDragOver === bv
-                  // Bepaal of er een goedgekeurde IC Facturatie-upload is voor
-                  // deze (bv, uploadMonth) door te kijken naar OHW: tel alle
-                  // auto-rijen (sourceSlot='ic_facturatie') waarvan icFromBv ===
-                  // bv (deze BV is de betaler in het pair). Som van die rijen
-                  // is negatief (kost) — abs = bedrag te betalen.
+                  // IC-verrekening voor deze (bv, uploadMonth). We tonen exact
+                  // hetzelfde NETTO bedrag als de opstelling-tabel hieronder:
+                  // som van ALLE ic_facturatie-rijen van deze BV (zowel de
+                  // kost-kant waar deze BV betaalt als de opbrengst-kant waar
+                  // deze BV levert). Eerder telde de tegel alleen de betaler-
+                  // kant (icFromBv === bv) → die week af van de tabel.
+                  // `ownUploadRows` (icFromBv === bv) bepaalt los daarvan of
+                  // déze BV zelf een bestand heeft geüpload — dat stuurt de
+                  // rand/badge/knoptekst aan.
                   const bvEntity = ohwData2026.entities.find(e => e.entity === bv)
-                  let icAutoSum = 0
-                  let icAutoRowCount = 0
+                  let icNet = 0
+                  let icRowCount = 0
+                  let ownUploadRows = 0
                   if (bvEntity) {
                     for (const row of bvEntity.icVerrekening) {
                       if (row.sourceSlot !== 'ic_facturatie') continue
-                      if (row.icFromBv !== bv) continue  // alleen rijen waar deze BV betaalt
                       const v = row.values?.[uploadMonth]
-                      if (v != null && v !== 0) {
-                        icAutoSum += v
-                        icAutoRowCount++
-                      }
+                      if (v == null || v === 0) continue
+                      icNet += v
+                      icRowCount++
+                      if (row.icFromBv === bv) ownUploadRows++
                     }
                   }
-                  const hasUpload = icAutoRowCount > 0
-                  const teBetalen = Math.abs(icAutoSum)
+                  const hasUpload = ownUploadRows > 0
                   const handleFile = async (file: File) => {
                     try {
                       const workbook = await readWorkbookFromFile(file)
@@ -2079,7 +2082,7 @@ export function MaandTab({ filter: _filter }: Props) {
                         <span style={{ fontSize: 13, fontWeight: 700 }}>{bv}</span>
                         {hasUpload && !isDragOver && (
                           <span
-                            title={`${icAutoRowCount} IC-regel(s) ingelezen voor ${uploadMonth}. Upload opnieuw om bij te werken.`}
+                            title={`${ownUploadRows} IC-regel(s) ingelezen voor ${uploadMonth}. Upload opnieuw om bij te werken.`}
                             style={{
                               marginLeft: 'auto',
                               display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -2100,7 +2103,7 @@ export function MaandTab({ filter: _filter }: Props) {
                           </span>
                         )}
                       </div>
-                      {hasUpload && (
+                      {icRowCount > 0 && (
                         <div style={{
                           display: 'flex', alignItems: 'baseline', gap: 6,
                           padding: '6px 8px', marginBottom: 8,
@@ -2108,13 +2111,13 @@ export function MaandTab({ filter: _filter }: Props) {
                           border: '1px solid var(--bd2)',
                         }}>
                           <span style={{ fontSize: 9, color: 'var(--t3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                            Te betalen ({uploadMonth})
+                            IC verrekening ({uploadMonth})
                           </span>
                           <span style={{
                             marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700,
-                            color: 'var(--red)',
+                            color: icNet >= 0 ? 'var(--green)' : 'var(--red)',
                           }}>
-                            {fmt(-teBetalen)}
+                            {icNet >= 0 ? '+' : ''}{fmt(icNet)}
                           </span>
                         </div>
                       )}

@@ -19,6 +19,12 @@ type SlotAmountConfig = {
   targetEntity?: string
 }
 
+// Slots waarvan de waarde uren (decimaal) is i.p.v. euro's. Bepaalt afronding
+// (1 decimaal vs hele euro) en de weergave-eenheid. Expliciet i.p.v. een
+// keyword-scan op kolomnamen, want euro-slots als d_lijst hebben 'uren'-
+// achtige fallback-kolomnamen.
+const HOURS_SLOTS = new Set(['geschreven_uren', 'interne_uren'])
+
 const SLOT_CONFIGS: Record<string, SlotAmountConfig> = {
   factuurvolume: {
     amountCols: [
@@ -2407,13 +2413,12 @@ export function suggestGenericImportColumns(
     return n.includes('factuuraanvraag') || n.includes('projectfactuuraanvraag')
   })
   if (factuuraanvraagCol) {
-    const hasNietToegewezen = sample.some(r =>
-      String(r[factuuraanvraagCol] ?? '').trim().toLowerCase() === 'niet toegewezen'
-    )
-    filters.push({
-      col: factuuraanvraagCol,
-      value: hasNietToegewezen ? 'Niet toegewezen' : '',
-    })
+    // Suggereer de kolom maar laat de filter standaard UIT (lege waarde):
+    // anders zou een automatische "Niet toegewezen"-filter stilletjes het
+    // merendeel van de rijen wegfilteren (en bij sommige bestanden op € 0
+    // uitkomen). De gebruiker kiest zelf een statuswaarde in de wizard-chips
+    // als hij wil filteren (bv. NTF = "Niet toegewezen").
+    filters.push({ col: factuuraanvraagCol, value: '' })
   }
 
   // Voorstel 2: voor single-BV slots (d_lijst, conceptfacturen) die de fuzzy
@@ -2681,8 +2686,11 @@ export function computeGenericImport(
     }
   }
 
-  // Afronden op hele euro voor bedragen; uren blijven decimaal
-  const isHoursSlot = /uren|hours/i.test(slotConfig.amountCols.join(' '))
+  // Afronden op hele euro voor bedragen; uren blijven decimaal. Hours-slots
+  // expliciet op slot-id i.p.v. keyword-scan op amountCols — d_lijst bevat
+  // bv. 'declarabele uren'/'billable hours' als fallback-kolomnaam maar is een
+  // EURO-slot, dat werd onterecht als uren-slot herkend (bedragen toonden "u").
+  const isHoursSlot = HOURS_SLOTS.has(slotId)
   for (const k of Object.keys(perBv) as BvId[]) {
     perBv[k] = isHoursSlot ? Math.round(perBv[k] * 10) / 10 : Math.round(perBv[k])
   }
