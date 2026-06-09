@@ -93,7 +93,7 @@ function pctOf(num: number, denom: number): string {
  *     ("bedrijf", "winstcentrum", "profit center", etc.). */
 const BV_VALUE_PATTERNS = [
   /consultancy/i, /projects?/i, /software/i,
-  /\bp15000\b/i, /\bp25000\b/i, /\bp35000\b/i,
+  /\bp01000\b/i, /\bp07000\b/i, /\bp15000\b/i, /\bp25000\b/i, /\bp35000\b/i,
   /holding/i, /ingenieurs/i, /specialist/i, /engineering/i,
 ]
 function detectBvColumn(
@@ -166,9 +166,12 @@ function defaultMapBvValue(raw: string): BvId | 'ignore' {
   if (v.includes('software'))    return 'Software'
   if (v.includes('projects'))    return 'Projects'
   if (v.includes('project'))     return 'Projects'
-  // 2) SAP profit-center codes
+  // 2) SAP profit-center / bedrijfscodes (door business bevestigde mapping —
+  //    zie ook SAP_COMPANY_CODE_BV in parseImport.ts)
   if (v.includes('p15000') || v === '15000') return 'Consultancy'
+  if (v.includes('p01000') || v === '01000') return 'Projects'
   if (v.includes('p25000') || v === '25000') return 'Projects'
+  if (v.includes('p07000') || v === '07000') return 'Software'
   if (v.includes('p35000') || v === '35000') return 'Software'
   // 3) Korte codes (whitespace-trimmed exact-match)
   if (v === 'co' || v === 'cons')   return 'Consultancy'

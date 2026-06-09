@@ -463,6 +463,21 @@ function normalizeBvString(val: string): string {
     .trim()
 }
 
+// SAP-bedrijfscodes (kolom "Projectbedrijf"/"Verantwoordelijke eenheid") → BV.
+// SAP exporteert de BV soms als bedrijfscode i.p.v. naam (bv. de D-/U-facturatie
+// exports gebruiken "P15000", "P01000", …). De codes volgen GEEN logisch
+// patroon t.o.v. de BV, dus dit is een expliciete, door de business bevestigde
+// mapping. Onbekende codes → null (rij wordt overgeslagen i.p.v. misgerouteerd).
+// Breid deze map uit zodra een nieuwe bedrijfscode opduikt.
+const SAP_COMPANY_CODE_BV: Record<string, BvId> = {
+  P15000: 'Consultancy',
+  P01000: 'Projects',
+  P25000: 'Projects',
+  P07000: 'Software',
+  P35000: 'Software',
+  // P09000: bewust NIET gemapt (hoort niet bij Cons/Proj/Soft) → overslaan
+}
+
 export function detectBvFromValue(val: unknown): BvId | null {
   if (val === null || val === undefined) return null
   const raw = String(val).trim()
@@ -486,6 +501,15 @@ export function detectBvFromValue(val: unknown): BvId | null {
   if (/^tpg[\s\-_]*c\b/i.test(raw) || /\bconsultancy\s*(bv|b\.v\.|ak|a\.k\.)/i.test(raw)) return 'Consultancy'
   if (/^tpg[\s\-_]*p\b/i.test(raw) || /\bprojects?\s*(bv|b\.v\.|ak|a\.k\.)/i.test(raw)) return 'Projects'
   if (/^tpg[\s\-_]*s\b/i.test(raw) || /\bsoftware\s*(bv|b\.v\.|ak|a\.k\.)/i.test(raw)) return 'Software'
+
+  // SAP-bedrijfscodes (bv. "P15000", of "P15000 - …"). Match de code als
+  // heel woord; ook een kale 5-cijfer-variant ("15000") wordt geaccepteerd.
+  const up = raw.toUpperCase()
+  for (const code of Object.keys(SAP_COMPANY_CODE_BV)) {
+    if (new RegExp(`\\b${code}\\b`).test(up)) return SAP_COMPANY_CODE_BV[code]
+    const bare = code.slice(1) // zonder 'P'-prefix
+    if (new RegExp(`\\b${bare}\\b`).test(up)) return SAP_COMPANY_CODE_BV[code]
+  }
 
   return null
 }
