@@ -105,17 +105,33 @@ export const useNotificationStore = create<NotificationStore>()(
           return
         }
         const local = get().notifications
+        const dbIds = new Set(dbRows.map(n => n.id))
+        // dedupe_keys die de DB al kent. Een lokale notificatie met dezelfde
+        // key maar een ánder id is een duplicaat (ontstaan in een andere
+        // sessie/client). Die mogen we NIET tonen én NIET terugpushen: een
+        // insert met nieuw id + bestaande dedupe_key schendt de
+        // uniq_notifications_dedupe UNIQUE index → continue save-fouten elke
+        // poll. We laten de DB-versie leidend zijn.
+        const dbDedupeKeys = new Set(
+          dbRows.filter(n => n.dedupeKey).map(n => n.dedupeKey),
+        )
         const byId = new Map<string, Notification>()
-        for (const n of local) byId.set(n.id, n)
-        for (const n of dbRows) byId.set(n.id, n) // DB wint
+        for (const n of dbRows) byId.set(n.id, n) // DB is leidend
+        for (const n of local) {
+          if (dbIds.has(n.id)) continue
+          if (n.dedupeKey && dbDedupeKeys.has(n.dedupeKey)) continue // dedupe-duplicaat → drop lokaal
+          byId.set(n.id, n)
+        }
         const merged = Array.from(byId.values())
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, 500)
         set({ notifications: merged, loaded: true })
-        // Reconcile: push local-only notifications (server kent ze nog niet)
-        const dbIds = new Set(dbRows.map(n => n.id))
+        // Reconcile: push alleen lokale notificaties die de server noch op id
+        // noch op dedupe_key kent. Zo herhaalt een mislukte insert zich niet.
         for (const n of local) {
-          if (!dbIds.has(n.id)) upsertNotification(n)
+          if (dbIds.has(n.id)) continue
+          if (n.dedupeKey && dbDedupeKeys.has(n.dedupeKey)) continue
+          upsertNotification(n)
         }
       },
 

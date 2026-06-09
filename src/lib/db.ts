@@ -664,7 +664,10 @@ export async function fetchNotifications(): Promise<Notification[]> {
     .select('*')
     .order('created_at', { ascending: false })
     .limit(500)
-  if (error) { console.error('fetchNotifications:', error); return [] }
+  // Throw bij echte fout — anders ziet de reconcile in loadFromDb de DB als
+  // leeg, pusht lokale notificaties terug en herhaalt een dedupe-conflict
+  // elke poll. De store vangt de throw op en behoudt lokale state.
+  if (error) throw new Error(`fetchNotifications: ${error.message ?? error}`)
   return (data ?? []).map(row => ({
     id:         String(row.id),
     category:   row.category,
@@ -694,8 +697,22 @@ export async function upsertNotification(n: Notification): Promise<void> {
     read_by:    n.readBy,
     created_at: n.createdAt,
   }
-  await trackedWrite('notifications', () =>
-    supabase.from('notifications').upsert(row, { onConflict: 'id' }))
+  await trackedWrite('notifications', async () => {
+    // Dedupe: de tabel heeft een partial UNIQUE index op dedupe_key. Een
+    // upsert op `id` met een nieuw id maar een al bestaande dedupe_key zou die
+    // index schenden (een andere sessie/client maakte de melding eerder met
+    // een ander id). Verwijder daarom eerst een eventuele andere rij met
+    // dezelfde dedupe_key; daarna is de upsert op id altijd conflictvrij.
+    if (n.dedupeKey) {
+      const del = await supabase
+        .from('notifications')
+        .delete()
+        .eq('dedupe_key', n.dedupeKey)
+        .neq('id', n.id)
+      if (del.error) return { error: del.error }
+    }
+    return await supabase.from('notifications').upsert(row, { onConflict: 'id' })
+  })
 }
 
 export async function deleteNotification(id: string): Promise<void> {
