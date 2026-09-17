@@ -1,4 +1,4 @@
-import { useFinStore, getFinResDefault, getVpbDefault } from '../store/useFinStore'
+import { useFinStore, getFinResDefault, getVpbDefault, BASE_ACTUAL_MONTHS_2026 as BASE_ACTUAL_MONTHS } from '../store/useFinStore'
 import { useOhwStore } from '../store/useOhwStore'
 import { useCostBreakdownStore } from '../store/useCostBreakdownStore'
 import { monthlyActuals2026 } from '../data/plData'
@@ -156,10 +156,12 @@ export function useAdjustedActuals() {
       const brutomarge = netRevenue + adjDirecteKosten
       const ebitda     = brutomarge + operationeleKosten
       const ebit       = ebitda + amortisatie
-      const finRes     = entry && typeof entry.financieelResultaat === 'number'
+      // 0 telt als "nog niet ingevuld" (auto-aangemaakte maand-template) →
+      // default uit de bekende P&L-actuals van die maand.
+      const finRes     = entry && typeof entry.financieelResultaat === 'number' && entry.financieelResultaat !== 0
         ? entry.financieelResultaat
         : getFinResDefault(bv, month)
-      const vpb        = entry && typeof entry.vennootschapsbelasting === 'number'
+      const vpb        = entry && typeof entry.vennootschapsbelasting === 'number' && entry.vennootschapsbelasting !== 0
         ? entry.vennootschapsbelasting
         : getVpbDefault(bv, month)
       const nettoResultaat = ebit + finRes + vpb
@@ -189,17 +191,17 @@ export function useAdjustedActuals() {
         entry.factuurvolume !== 0 || entry.ohwMutatie !== 0 ||
         entry.accruals !== 0 || entry.handmatigeCorrectie !== 0 ||
         entry.kostencorrectie !== 0 || hasAnySubCustom
-      const isClosed = month === 'Jan-26' || month === 'Feb-26'
+      const isClosed = BASE_ACTUAL_MONTHS.includes(month)
       if (touched || isClosed) {
         const netRevenue =
           entry.factuurvolume + entry.ohwMutatie + entry.accruals + entry.handmatigeCorrectie
         const brutomarge = netRevenue + adjDirecteKosten
         const ebitda     = brutomarge + operationeleKosten
         const ebit       = ebitda + amortisatie
-        const finRes     = typeof entry.financieelResultaat === 'number'
+        const finRes     = typeof entry.financieelResultaat === 'number' && entry.financieelResultaat !== 0
           ? entry.financieelResultaat
           : getFinResDefault(bv, month)
-        const vpb        = typeof entry.vennootschapsbelasting === 'number'
+        const vpb        = typeof entry.vennootschapsbelasting === 'number' && entry.vennootschapsbelasting !== 0
           ? entry.vennootschapsbelasting
           : getVpbDefault(bv, month)
         const nettoResultaat = ebit + finRes + vpb

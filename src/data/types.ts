@@ -39,6 +39,11 @@ export interface OhwSection {
 export interface OhwEntityData {
   entity: string
   label: string
+  /** Versie van de hardcoded baseline waaruit deze entity is opgebouwd.
+   *  useOhwStore vergelijkt dit met OHW_BASELINE_VERSION_2026 en vervangt
+   *  verouderde persisted/Supabase-state door de nieuwe baseline (met behoud
+   *  van remarks, contactpersonen en door gebruikers toegevoegde rijen). */
+  baselineVersion?: number
   onderhanden: OhwSection[]
   totaalOnderhanden: Record<string, number | null>
   debiteuren: Record<string, number | null>
@@ -62,7 +67,7 @@ export interface OhwYearData {
   entities: OhwEntityData[]
 }
 
-export type TabId = 'dashboard' | 'hours' | 'ohw' | 'budget' | 'budgets' | 'maand' | 'users' | 'backups'
+export type TabId = 'dashboard' | 'hours' | 'markt' | 'ohw' | 'budget' | 'budgets' | 'maand' | 'users' | 'backups'
 
 export type BvId = 'Consultancy' | 'Projects' | 'Software'
 

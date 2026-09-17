@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { OhwEntityData, OhwYearData, OhwRow } from '../data/types'
 import { recomputeEntity } from '../lib/calc'
 import { ohwYearData2025 } from '../data/ohwData2025'
-import { ohwYearData2026 } from '../data/ohwData2026'
+import { ohwYearData2026, OHW_BASELINE_VERSION_2026 } from '../data/ohwData2026'
 import { fetchOhwEntities, upsertOhwEntity, upsertAllOhwEntities } from '../lib/db'
 import type { IcFacturatieAggregated, IcReceiverBv } from '../lib/parseImport'
 
@@ -45,6 +45,67 @@ function ensureSeedSourceRows(
 function seedEntityFor(year: '2025' | '2026', entityName: string): OhwEntityData | undefined {
   const src = year === '2025' ? ohwYearData2025 : ohwYearData2026
   return src.entities.find(e => e.entity === entityName)
+}
+
+/** Baseline-upgrade (alleen 2026): als een persisted/Supabase-entity van een
+ *  oudere baseline-versie komt (baselineVersion ontbreekt of < huidige),
+ *  vervangen we hem door de nieuwe hardcoded baseline (P08-import) en nemen
+ *  we gebruikersdata over:
+ *   - remarks + contactPerson op rijen die (op id) ook in de baseline bestaan
+ *   - complete rijen die via de UI zijn toegevoegd: id-prefix `new-`/`ic-`,
+ *     een icPairId (IC-pairs, incl. IC Facturatie-upload-rijen) of manualIc.
+ *  Celwaarden uit de oude staat worden bewust NIET behouden — de Excel-import
+ *  (P08-rapportage) is voor die maanden de bron van waarheid. */
+function upgradeToBaseline2026(persisted: OhwEntityData): OhwEntityData {
+  if ((persisted.baselineVersion ?? 1) >= OHW_BASELINE_VERSION_2026) return persisted
+  const baseline = ohwYearData2026.entities.find(e => e.entity === persisted.entity)
+  if (!baseline) return persisted
+
+  const baselineIds = new Set<string>()
+  for (const sec of baseline.onderhanden) for (const r of sec.rows) baselineIds.add(r.id)
+  for (const r of baseline.icVerrekening) baselineIds.add(r.id)
+  for (const r of baseline.vooruitgefactureerd ?? []) baselineIds.add(r.id)
+
+  const persistedById = new Map<string, OhwRow>()
+  const collect = (rows?: OhwRow[]) => { for (const r of rows ?? []) persistedById.set(r.id, r) }
+  for (const sec of persisted.onderhanden ?? []) collect(sec.rows)
+  collect(persisted.icVerrekening)
+  collect(persisted.vooruitgefactureerd)
+
+  const carryMeta = (row: OhwRow): OhwRow => {
+    const old = persistedById.get(row.id)
+    if (!old) return row
+    const next = { ...row }
+    if (old.remarks && Object.keys(old.remarks).length > 0) next.remarks = { ...old.remarks, ...(row.remarks ?? {}) }
+    if (old.contactPerson && !next.contactPerson) next.contactPerson = old.contactPerson
+    return next
+  }
+  const hasAnyValue = (r: OhwRow) => Object.values(r.values ?? {}).some(v => v != null && v !== 0)
+  const isUserRow = (r: OhwRow) => /^(new-|ic-)/.test(r.id) || !!r.icPairId || !!r.manualIc
+  const userAdded = (rows?: OhwRow[]) => (rows ?? []).filter(r =>
+    !baselineIds.has(r.id) && isUserRow(r) &&
+    (hasAnyValue(r) || r.icPairId || (r.remarks && Object.keys(r.remarks).length > 0)),
+  )
+
+  const extraOnderhanden = userAdded(persisted.onderhanden?.flatMap(s => s.rows))
+  const upgraded: OhwEntityData = {
+    ...baseline,
+    baselineVersion: OHW_BASELINE_VERSION_2026,
+    onderhanden: baseline.onderhanden.map((sec, i) => ({
+      ...sec,
+      rows: [
+        ...sec.rows.map(carryMeta),
+        // gebruikers-rijen landen in de laatste sectie
+        ...(i === baseline.onderhanden.length - 1 ? extraOnderhanden : []),
+      ],
+    })),
+    icVerrekening: [...baseline.icVerrekening.map(carryMeta), ...userAdded(persisted.icVerrekening)],
+    vooruitgefactureerd: baseline.vooruitgefactureerd
+      ? [...baseline.vooruitgefactureerd.map(carryMeta), ...userAdded(persisted.vooruitgefactureerd)]
+      : persisted.vooruitgefactureerd,
+  }
+  console.info(`[useOhwStore] baseline-upgrade ${persisted.entity}: v${persisted.baselineVersion ?? 1} → v${OHW_BASELINE_VERSION_2026}`)
+  return upgraded
 }
 
 type BvName = 'Consultancy' | 'Projects' | 'Software'
@@ -179,8 +240,11 @@ export const useOhwStore = create<OhwStore>()(
               const dbEnt = dbByName.get(localEnt.entity)
               const seedEnt = seedEntityFor(year, localEnt.entity)
               if (dbEnt) {
-                const stripped = ensureSeedSourceRows(stripTombstones(dbEnt), seedEnt, tombstones)
+                // 2026: verouderde DB-state eerst naar de nieuwe P08-baseline tillen
+                const upgraded = year === '2026' ? upgradeToBaseline2026(dbEnt) : dbEnt
+                const stripped = ensureSeedSourceRows(stripTombstones(upgraded), seedEnt, tombstones)
                 merged.push(recomputeEntity(stripped, localData.allMonths))
+                if (upgraded !== dbEnt) toPush.push(stripped)
               } else if (hasEntityData(localEnt)) {
                 const withSeed = ensureSeedSourceRows(localEnt, seedEnt, tombstones)
                 merged.push(withSeed)
@@ -839,10 +903,18 @@ export const useOhwStore = create<OhwStore>()(
           }
         }
         if (state.data2026?.entities) {
+          // Baseline-upgrade vóór recompute: localStorage-state van een oudere
+          // data-import wordt vervangen door de actuele hardcoded P08-baseline.
           state.data2026 = {
             ...state.data2026,
+            allMonths: ohwYearData2026.allMonths,
+            displayMonths: ohwYearData2026.displayMonths,
+            openingMonth: ohwYearData2026.openingMonth,
             entities: state.data2026.entities.map(e =>
-              recomputeEntity(ensureSeedSourceRows(e, seedEntityFor('2026', e.entity), tombstones), state.data2026.allMonths)),
+              recomputeEntity(
+                ensureSeedSourceRows(upgradeToBaseline2026(e), seedEntityFor('2026', e.entity), tombstones),
+                ohwYearData2026.allMonths,
+              )),
           }
         }
       },

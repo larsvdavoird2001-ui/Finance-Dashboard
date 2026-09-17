@@ -14,6 +14,7 @@ const items: { id: TabId; ic: string; label: string; group: string; adminOnly?: 
   // Executive dashboards — bovenste groep in de sidebar
   { id: 'dashboard',  ic: '🏠', label: 'Executive Overview',   group: 'Overview' },
   { id: 'hours',      ic: '⏱',  label: 'Uren Dashboard',       group: 'Overview' },
+  { id: 'markt',      ic: '🧭', label: 'Omzet per markt',      group: 'Overview' },
   // Rapportage
   { id: 'budget',  ic: '🎯', label: 'Budget vs Actuals',  group: 'Rapportage' },
   { id: 'budgets', ic: '💼', label: 'Budgetten',          group: 'Rapportage' },

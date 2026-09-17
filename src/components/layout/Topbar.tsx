@@ -5,6 +5,7 @@ import { NotificationInbox } from './NotificationInbox'
 const TITLES: Record<TabId, string> = {
   dashboard:  'Executive Overview',
   hours:      'Uren Dashboard',
+  markt:      'Omzet per markt',
   ohw:        'OHW Overzicht',
   budget:     'Budget vs Actuals',
   budgets:    'Budgetten',

@@ -21,7 +21,7 @@ import {
 //   altijd zichtbaar). Bovengrens: Dec-26.
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const APP_YEAR = 2026
-const MIN_CLOSING_IDX = 3 // t/m Apr-26
+const MIN_CLOSING_IDX = 7 // t/m Aug-26 (maanden met hardgecodeerde actuals blijven altijd zichtbaar)
 
 function computeClosingMonths(now: Date = new Date()): string[] {
   let lastIdx: number
@@ -41,10 +41,18 @@ const FIN_RES_JAN: Record<ClosingBv, number> = { Consultancy: -512,   Projects: 
 const FIN_RES_FEB: Record<ClosingBv, number> = { Consultancy: -382,   Projects: -196,   Software: -7431,   Holdings: -37135  }
 const FIN_RES_MAR: Record<ClosingBv, number> = { Consultancy: -3700,  Projects: -2632,  Software: 6848,    Holdings: -40718  }
 const FIN_RES_APR: Record<ClosingBv, number> = { Consultancy: -444,   Projects: -188,   Software: -78,     Holdings: -112089 }
+const FIN_RES_MAY: Record<ClosingBv, number> = { Consultancy: -378,   Projects: -143,   Software: -78,     Holdings: 40457   }
+const FIN_RES_JUN: Record<ClosingBv, number> = { Consultancy: -362,   Projects: -139,   Software: -88,     Holdings: -16834  }
+const FIN_RES_JUL: Record<ClosingBv, number> = { Consultancy: -466,   Projects: -137,   Software: -127,    Holdings: -33017  }
+const FIN_RES_AUG: Record<ClosingBv, number> = { Consultancy: -680,   Projects: -169,   Software: -87,     Holdings: -33208  }
 const VPB_JAN:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
 const VPB_FEB:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
 const VPB_MAR:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
 const VPB_APR:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
+const VPB_MAY:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
+const VPB_JUN:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
+const VPB_JUL:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
+const VPB_AUG:     Record<ClosingBv, number> = { Consultancy: 0,      Projects: 0,      Software: 0,       Holdings: 0       }
 
 // Initial closing data sourced from P02.2026 Maandrapportage actuals
 const BASE_ENTRIES: ClosingEntry[] = [
@@ -101,7 +109,8 @@ const BASE_ENTRIES: ClosingEntry[] = [
   // ── March 2026 (actuals uit maandafsluiting) ─────────────────────────────
   {
     id: 'c-mar26', bv: 'Consultancy', month: 'Mar-26',
-    factuurvolume: 1068056, debiteuren: 0, ohwMutatie: -44348,
+    // P08-rapportage reviseerde maart: fv 1.068.056 → 1.053.260, mutatie -44.348 → -24.169
+    factuurvolume: 1053260, debiteuren: 0, ohwMutatie: -24169,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
     financieelResultaat: FIN_RES_MAR.Consultancy, vennootschapsbelasting: VPB_MAR.Consultancy,
@@ -109,7 +118,8 @@ const BASE_ENTRIES: ClosingEntry[] = [
   },
   {
     id: 'p-mar26', bv: 'Projects', month: 'Mar-26',
-    factuurvolume: 698848, debiteuren: 0, ohwMutatie: 14646,
+    // P08-rapportage reviseerde maart: fv 698.848 → 608.848, mutatie 14.646 → 104.646
+    factuurvolume: 608848, debiteuren: 0, ohwMutatie: 104646,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
     financieelResultaat: FIN_RES_MAR.Projects, vennootschapsbelasting: VPB_MAR.Projects,
@@ -117,7 +127,8 @@ const BASE_ENTRIES: ClosingEntry[] = [
   },
   {
     id: 's-mar26', bv: 'Software', month: 'Mar-26',
-    factuurvolume: 203630, debiteuren: 0, ohwMutatie: 49665,
+    // P08-rapportage reviseerde maart: fv 203.630 → 151.630, mutatie 49.665 → -5.300
+    factuurvolume: 151630, debiteuren: 0, ohwMutatie: -5300,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
     financieelResultaat: FIN_RES_MAR.Software, vennootschapsbelasting: VPB_MAR.Software,
@@ -126,7 +137,8 @@ const BASE_ENTRIES: ClosingEntry[] = [
   // ── April 2026 (actuals uit maandafsluiting) ─────────────────────────────
   {
     id: 'c-apr26', bv: 'Consultancy', month: 'Apr-26',
-    factuurvolume: 1113614, debiteuren: 0, ohwMutatie: -175592,
+    // P08-rapportage reviseerde april: mutatie -175.592 → -165.504
+    factuurvolume: 1113614, debiteuren: 0, ohwMutatie: -165504,
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
     financieelResultaat: FIN_RES_APR.Consultancy, vennootschapsbelasting: VPB_APR.Consultancy,
@@ -146,6 +158,106 @@ const BASE_ENTRIES: ClosingEntry[] = [
     kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
     operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
     financieelResultaat: FIN_RES_APR.Software, vennootschapsbelasting: VPB_APR.Software,
+    remark: '',
+  },
+  // ── Mei 2026 (actuals uit P08-maandrapportage) ───────────────────────────
+  {
+    id: 'c-may26', bv: 'Consultancy', month: 'May-26',
+    factuurvolume: 923527, debiteuren: 0, ohwMutatie: -86891,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_MAY.Consultancy, vennootschapsbelasting: VPB_MAY.Consultancy,
+    remark: '',
+  },
+  {
+    id: 'p-may26', bv: 'Projects', month: 'May-26',
+    factuurvolume: 560722, debiteuren: 0, ohwMutatie: 70914,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_MAY.Projects, vennootschapsbelasting: VPB_MAY.Projects,
+    remark: '',
+  },
+  {
+    id: 's-may26', bv: 'Software', month: 'May-26',
+    factuurvolume: 125169, debiteuren: 0, ohwMutatie: 144540,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_MAY.Software, vennootschapsbelasting: VPB_MAY.Software,
+    remark: '',
+  },
+  // ── Juni 2026 (actuals uit P08-maandrapportage) ──────────────────────────
+  {
+    id: 'c-jun26', bv: 'Consultancy', month: 'Jun-26',
+    factuurvolume: 863206, debiteuren: 0, ohwMutatie: 85282,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_JUN.Consultancy, vennootschapsbelasting: VPB_JUN.Consultancy,
+    remark: '',
+  },
+  {
+    id: 'p-jun26', bv: 'Projects', month: 'Jun-26',
+    factuurvolume: 354763, debiteuren: 0, ohwMutatie: 88859,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_JUN.Projects, vennootschapsbelasting: VPB_JUN.Projects,
+    remark: '',
+  },
+  {
+    id: 's-jun26', bv: 'Software', month: 'Jun-26',
+    factuurvolume: 625042, debiteuren: 0, ohwMutatie: -199572,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_JUN.Software, vennootschapsbelasting: VPB_JUN.Software,
+    remark: '',
+  },
+  // ── Juli 2026 (actuals uit P08-maandrapportage) ──────────────────────────
+  {
+    id: 'c-jul26', bv: 'Consultancy', month: 'Jul-26',
+    factuurvolume: 820152, debiteuren: 0, ohwMutatie: 55265,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_JUL.Consultancy, vennootschapsbelasting: VPB_JUL.Consultancy,
+    remark: '',
+  },
+  {
+    id: 'p-jul26', bv: 'Projects', month: 'Jul-26',
+    factuurvolume: 785029, debiteuren: 0, ohwMutatie: -223955,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_JUL.Projects, vennootschapsbelasting: VPB_JUL.Projects,
+    remark: '',
+  },
+  {
+    id: 's-jul26', bv: 'Software', month: 'Jul-26',
+    factuurvolume: 78568, debiteuren: 0, ohwMutatie: 19976,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_JUL.Software, vennootschapsbelasting: VPB_JUL.Software,
+    remark: '',
+  },
+  // ── Augustus 2026 (actuals uit P08-maandrapportage) ──────────────────────
+  {
+    id: 'c-aug26', bv: 'Consultancy', month: 'Aug-26',
+    factuurvolume: 733182, debiteuren: 0, ohwMutatie: 9692,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_AUG.Consultancy, vennootschapsbelasting: VPB_AUG.Consultancy,
+    remark: '',
+  },
+  {
+    id: 'p-aug26', bv: 'Projects', month: 'Aug-26',
+    factuurvolume: 402188, debiteuren: 0, ohwMutatie: 83502,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_AUG.Projects, vennootschapsbelasting: VPB_AUG.Projects,
+    remark: '',
+  },
+  {
+    id: 's-aug26', bv: 'Software', month: 'Aug-26',
+    factuurvolume: 163295, debiteuren: 0, ohwMutatie: 101578,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_AUG.Software, vennootschapsbelasting: VPB_AUG.Software,
     remark: '',
   },
   // ── Holdings: geen OHW/factuurvolume flow, alleen kosten-invoer ─────
@@ -181,6 +293,38 @@ const BASE_ENTRIES: ClosingEntry[] = [
     financieelResultaat: FIN_RES_APR.Holdings, vennootschapsbelasting: VPB_APR.Holdings,
     remark: '',
   },
+  {
+    id: 'h-may26', bv: 'Holdings', month: 'May-26',
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_MAY.Holdings, vennootschapsbelasting: VPB_MAY.Holdings,
+    remark: '',
+  },
+  {
+    id: 'h-jun26', bv: 'Holdings', month: 'Jun-26',
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_JUN.Holdings, vennootschapsbelasting: VPB_JUN.Holdings,
+    remark: '',
+  },
+  {
+    id: 'h-jul26', bv: 'Holdings', month: 'Jul-26',
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_JUL.Holdings, vennootschapsbelasting: VPB_JUL.Holdings,
+    remark: '',
+  },
+  {
+    id: 'h-aug26', bv: 'Holdings', month: 'Aug-26',
+    factuurvolume: 0, debiteuren: 0, ohwMutatie: 0,
+    kostencorrectie: 0, accruals: 0, handmatigeCorrectie: 0,
+    operationeleKosten: 0, amortisatieAfschrijvingen: 0, kostenOverrides: {},
+    financieelResultaat: FIN_RES_AUG.Holdings, vennootschapsbelasting: VPB_AUG.Holdings,
+    remark: '',
+  },
 ]
 
 // Maanden met hardgecodeerde actuals hierboven; al het overige in CLOSING_MONTHS
@@ -193,7 +337,7 @@ const BASE_ENTRIES: ClosingEntry[] = [
 // ziet een nieuw account minder maanden dan iemand die een maand lokaal al
 // heeft afgesloten. Breid deze lijst uit zodra een nieuwe maand harde actuals
 // krijgt in BASE_ENTRIES hierboven.
-export const BASE_ACTUAL_MONTHS_2026: string[] = ['Jan-26', 'Feb-26', 'Mar-26', 'Apr-26']
+export const BASE_ACTUAL_MONTHS_2026: string[] = ['Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26', 'Aug-26']
 const BASE_MONTHS = new Set<string>(BASE_ACTUAL_MONTHS_2026)
 const ALL_CLOSING_BVS: ClosingBv[] = ['Consultancy', 'Projects', 'Software', 'Holdings']
 
@@ -231,6 +375,10 @@ export function getFinResDefault(bv: ClosingBv, month: string): number {
   if (month === 'Feb-26') return FIN_RES_FEB[bv] ?? 0
   if (month === 'Mar-26') return FIN_RES_MAR[bv] ?? 0
   if (month === 'Apr-26') return FIN_RES_APR[bv] ?? 0
+  if (month === 'May-26') return FIN_RES_MAY[bv] ?? 0
+  if (month === 'Jun-26') return FIN_RES_JUN[bv] ?? 0
+  if (month === 'Jul-26') return FIN_RES_JUL[bv] ?? 0
+  if (month === 'Aug-26') return FIN_RES_AUG[bv] ?? 0
   return 0
 }
 export function getVpbDefault(bv: ClosingBv, month: string): number {
@@ -238,6 +386,10 @@ export function getVpbDefault(bv: ClosingBv, month: string): number {
   if (month === 'Feb-26') return VPB_FEB[bv] ?? 0
   if (month === 'Mar-26') return VPB_MAR[bv] ?? 0
   if (month === 'Apr-26') return VPB_APR[bv] ?? 0
+  if (month === 'May-26') return VPB_MAY[bv] ?? 0
+  if (month === 'Jun-26') return VPB_JUN[bv] ?? 0
+  if (month === 'Jul-26') return VPB_JUL[bv] ?? 0
+  if (month === 'Aug-26') return VPB_AUG[bv] ?? 0
   return 0
 }
 
@@ -286,10 +438,34 @@ interface FinStore {
  *  Critical voor migraties — users met oudere persisted state (bv. zonder
  *  Holdings) krijgen de nieuwe entries er automatisch bij. Hiermee bailt
  *  updateKosten niet meer uit bij Holdings-cellen. */
+/** P08-rapportage reviseerde eerder geseede maart/april-waarden. Persisted
+ *  entries die nog exact het OUDE seed-bedrag dragen (dus onaangeraakt zijn)
+ *  worden opgetild naar de gereviseerde waarde; door de gebruiker gewijzigde
+ *  bedragen blijven staan. Key = entry-id. */
+const SEED_REVISIONS: Record<string, { fv?: [number, number]; mut?: [number, number] }> = {
+  'c-mar26': { fv: [1068056, 1053260], mut: [-44348, -24169] },
+  'p-mar26': { fv: [698848, 608848],   mut: [14646, 104646] },
+  's-mar26': { fv: [203630, 151630],   mut: [49665, -5300] },
+  'c-apr26': { mut: [-175592, -165504] },
+}
+function applySeedRevisions(entries: ClosingEntry[]): ClosingEntry[] {
+  let changed = false
+  const out = entries.map(e => {
+    const rev = SEED_REVISIONS[e.id]
+    if (!rev) return e
+    let next = e
+    if (rev.fv && e.factuurvolume === rev.fv[0]) { next = { ...next, factuurvolume: rev.fv[1] }; changed = true }
+    if (rev.mut && next.ohwMutatie === rev.mut[0]) { next = { ...next, ohwMutatie: rev.mut[1] }; changed = true }
+    return next
+  })
+  return changed ? out : entries
+}
+
 function mergeWithInitialEntries(existing: ClosingEntry[]): ClosingEntry[] {
   const existingIds = new Set(existing.map(e => e.id))
   const missing = INITIAL_ENTRIES.filter(e => !existingIds.has(e.id))
-  return missing.length > 0 ? [...existing, ...missing] : existing
+  const merged = missing.length > 0 ? [...existing, ...missing] : existing
+  return applySeedRevisions(merged)
 }
 
 export const useFinStore = create<FinStore>()(
@@ -333,6 +509,17 @@ export const useFinStore = create<FinStore>()(
           const finalMerged = mergeWithInitialEntries(merged)
           console.info(`[useFinStore] DB=${rows.length}, local-only=${localOnly.length}, total=${finalMerged.length}`)
           set({ entries: finalMerged, loaded: true })
+
+          // Seed-revisies (P08) die op DB-rijen zijn toegepast ook terugpushen,
+          // zodat alle clients dezelfde gecorrigeerde maart/april-waarden zien.
+          const revised = finalMerged.filter(e => {
+            const before = merged.find(m => m.id === e.id)
+            return before && (before.factuurvolume !== e.factuurvolume || before.ohwMutatie !== e.ohwMutatie)
+          })
+          if (revised.length > 0) {
+            console.info(`[useFinStore] seed-revisies pushen: ${revised.map(e => e.id).join(', ')}`)
+            await upsertAllClosingEntries(revised)
+          }
 
           // Reconcile: lokaal-only entries pushen naar Supabase
           if (localOnly.length > 0) {

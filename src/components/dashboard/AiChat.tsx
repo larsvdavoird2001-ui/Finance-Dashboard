@@ -9,25 +9,32 @@ import { fmt } from '../../lib/format'
 import { parseDutchNumber, detectBvFromValue } from '../../lib/parseImport'
 import type { BvId } from '../../data/types'
 import type { RawRow } from '../../store/useRawDataStore'
+import { BASE_ACTUAL_MONTHS_2026 } from '../../store/useFinStore'
 
 const BVS: BvId[] = ['Consultancy', 'Projects', 'Software']
-const ACTUAL_MONTHS = ['Jan-26', 'Feb-26', 'Mar-26']
+const ACTUAL_MONTHS = BASE_ACTUAL_MONTHS_2026
+const LAST_ACTUAL_MONTH = ACTUAL_MONTHS[ACTUAL_MONTHS.length - 1]
 
 // Maand-aliassen voor herkenning in vrije tekst
 const MONTH_ALIASES: Record<string, string> = {
   jan: 'Jan-26', januari: 'Jan-26', january: 'Jan-26',
   feb: 'Feb-26', februari: 'Feb-26', february: 'Feb-26',
   mrt: 'Mar-26', mar: 'Mar-26', maart: 'Mar-26', march: 'Mar-26',
+  apr: 'Apr-26', april: 'Apr-26',
+  mei: 'May-26', may: 'May-26',
+  jun: 'Jun-26', juni: 'Jun-26', june: 'Jun-26',
+  jul: 'Jul-26', juli: 'Jul-26', july: 'Jul-26',
+  aug: 'Aug-26', augustus: 'Aug-26', august: 'Aug-26',
 }
 
 interface Message { role: 'user' | 'assistant'; text: string }
 
 const SUGGESTED = [
-  'Omzettrend Q1 2026',
+  'Omzettrend 2026',
   'Marge analyse per BV',
   'Budget vs actuals',
-  'Facturen overzicht Mar-26',
-  'Top klanten Mar-26',
+  'Facturen overzicht Aug-26',
+  'Top klanten Aug-26',
   'OHW overzicht',
 ]
 
@@ -290,8 +297,8 @@ function respond(msg: string, ctx: FinCtx): string {
       return `**${m}**: ${fmt(r)} — vs budget ${d(r - b)}`
     })
     const janR = BVS.reduce((s, bv) => s + (ctx.monthly[bv]['Jan-26']['netto_omzet'] ?? 0), 0)
-    const marR = BVS.reduce((s, bv) => s + (ctx.monthly[bv]['Mar-26']['netto_omzet'] ?? 0), 0)
-    return `**Omzettrend Q1 2026**\n\n${rows.join('\n')}\n\nGroei Jan→Mar: ${p(marR - janR, janR)}`
+    const lastR = BVS.reduce((s, bv) => s + (ctx.monthly[bv][LAST_ACTUAL_MONTH]?.['netto_omzet'] ?? 0), 0)
+    return `**Omzettrend 2026 (t/m ${LAST_ACTUAL_MONTH})**\n\n${rows.join('\n')}\n\nGroei Jan→${LAST_ACTUAL_MONTH}: ${p(lastR - janR, janR)}`
   }
 
   if (q.match(/marge|margin/)) {
@@ -337,8 +344,9 @@ function respond(msg: string, ctx: FinCtx): string {
 
   if (q.match(/ohw|onderhanden|wip/)) {
     const wipRows = ACTUAL_MONTHS.map(m => `**${m}**: ${fmt(ctx.wip[m] ?? 0)}`)
-    const delta = (ctx.wip['Mar-26'] ?? 0) - (ctx.wip['Feb-26'] ?? 0)
-    return `**OHW Stand — Q1 2026**\n\n${wipRows.join('\n')}\n\nMutatie Feb→Mar: ${d(delta)}`
+    const prevMonth = ACTUAL_MONTHS[ACTUAL_MONTHS.length - 2]
+    const delta = (ctx.wip[LAST_ACTUAL_MONTH] ?? 0) - (ctx.wip[prevMonth] ?? 0)
+    return `**OHW Stand — 2026 (t/m ${LAST_ACTUAL_MONTH})**\n\n${wipRows.join('\n')}\n\nMutatie ${prevMonth}→${LAST_ACTUAL_MONTH}: ${d(delta)}`
   }
 
   // ── Beschikbare data tonen ────────────────────────────────────────────────
@@ -357,9 +365,9 @@ function respond(msg: string, ctx: FinCtx): string {
   const totR  = BVS.reduce((s, bv) => s + (ctx.ytd[bv]['netto_omzet'] ?? 0), 0)
   const totGm = BVS.reduce((s, bv) => s + (ctx.ytd[bv]['brutomarge']  ?? 0), 0)
   const totB  = BVS.reduce((s, bv) => s + (ctx.ytdBud[bv]['netto_omzet'] ?? 0), 0)
-  const wip   = ctx.wip['Mar-26'] ?? 0
+  const wip   = ctx.wip[LAST_ACTUAL_MONTH] ?? 0
   const hasRaw = rawStore.getApproved().length > 0
-  return `**Executive samenvatting — YTD Q1 2026**\n\nOmzet: **${fmt(totR)}** (${d(totR - totB)} vs budget)\nBrutomarge: **${fmt(totGm)}** (${p(totGm, totR)})\nOHW stand: **${fmt(wip)}**\n\n${hasRaw ? 'Factuurdata beschikbaar — vraag bijv: _"facturen overzicht Mar-26"_ of _"top klanten"_' : 'Gebruik de suggesties voor specifieke analyses.'}`
+  return `**Executive samenvatting — YTD 2026 (t/m ${LAST_ACTUAL_MONTH})**\n\nOmzet: **${fmt(totR)}** (${d(totR - totB)} vs budget)\nBrutomarge: **${fmt(totGm)}** (${p(totGm, totR)})\nOHW stand: **${fmt(wip)}**\n\n${hasRaw ? 'Factuurdata beschikbaar — vraag bijv: _"facturen overzicht Mar-26"_ of _"top klanten"_' : 'Gebruik de suggesties voor specifieke analyses.'}`
 }
 
 // ── Markdown renderer ─────────────────────────────────────────────────────────
