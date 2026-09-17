@@ -1,0 +1,273 @@
+{
+  "_toelichting": "Handmatige marktsegment-toewijzing (Lars, 17-09-2026) voor klanten waarvan de SAP-bedrijfstak Niet toegewezen, leeg of 6. Overig is. Toegepast in de klantomzet-extractie voor customerRevenue.ts; geldt alleen voor factuurregels zonder echt SAP-segment.",
+  "toewijzingen": {
+    "itaq b.v.": {
+      "klant": "Itaq B.V.",
+      "segment": "3. Energy"
+    },
+    "marin": {
+      "klant": "MARIN",
+      "segment": "5. Industry"
+    },
+    "dewi online b.v.": {
+      "klant": "Dewi Online B.V.",
+      "segment": "6. Overig"
+    },
+    "renique beheer b.v.": {
+      "klant": "Renique Beheer B.V.",
+      "segment": "6. Overig"
+    },
+    "van wijk aannemersbedrijf nieuwegein": {
+      "klant": "Van Wijk Aannemersbedrijf Nieuwegein",
+      "segment": "1. Public"
+    },
+    "base ip b.v.": {
+      "klant": "Base IP B.V.",
+      "segment": "2. Telecom"
+    },
+    "beheervereniging laadpalen wickevoort": {
+      "klant": "Beheervereniging Laadpalen Wickevoort",
+      "segment": "3. Energy"
+    },
+    "smulders projects netherlands b.v.": {
+      "klant": "Smulders Projects Netherlands B.V.",
+      "segment": "5. Industry"
+    },
+    "cadac group services b.v.": {
+      "klant": "Cadac Group Services B.V.",
+      "segment": "1. Public"
+    },
+    "has green academy": {
+      "klant": "HAS green academy",
+      "segment": "3. Energy"
+    },
+    "anthura b.v.": {
+      "klant": "Anthura B.V.",
+      "segment": "5. Industry"
+    },
+    "tuinbouwcombinatie harmelerwaard b.v.": {
+      "klant": "Tuinbouwcombinatie Harmelerwaard B.V.",
+      "segment": "5. Industry"
+    },
+    "hoogweg paprikakwekerijen b.v.": {
+      "klant": "Hoogweg Paprikakwekerijen B.V.",
+      "segment": "5. Industry"
+    },
+    "ecl netwerk b.v.": {
+      "klant": "ECL Netwerk B.V.",
+      "segment": "3. Energy"
+    },
+    "mulder asparagus og b.v.": {
+      "klant": "Mulder Asparagus OG B.V.",
+      "segment": "5. Industry"
+    },
+    "next venue b.v.": {
+      "klant": "Next Venue B.V.",
+      "segment": "5. Industry"
+    },
+    "noorland paprika b.v.": {
+      "klant": "Noorland Paprika B.V.",
+      "segment": "5. Industry"
+    },
+    "vermeulen oosteind b.v.": {
+      "klant": "Vermeulen Oosteind B.V.",
+      "segment": "5. Industry"
+    },
+    "p. van der haak handelskwekerij b.v.": {
+      "klant": "P. van der Haak Handelskwekerij B.V.",
+      "segment": "3. Energy"
+    },
+    "kwekerij wouters b.v.": {
+      "klant": "Kwekerij Wouters B.V.",
+      "segment": "3. Energy"
+    },
+    "kwekerij overgaag b.v.": {
+      "klant": "Kwekerij Overgaag B.V.",
+      "segment": "3. Energy"
+    },
+    "haringhandel a. hoek b.v.": {
+      "klant": "Haringhandel A. Hoek B.V.",
+      "segment": "3. Energy"
+    },
+    "hotel wesseling b.v.": {
+      "klant": "Hotel Wesseling B.V.",
+      "segment": "3. Energy"
+    },
+    "sligro food group nederland b.v.": {
+      "klant": "Sligro Food Group Nederland B.V.",
+      "segment": "3. Energy"
+    },
+    "kwekerij greenbase b.v.": {
+      "klant": "Kwekerij Greenbase B.V.",
+      "segment": "3. Energy"
+    },
+    "trajan": {
+      "klant": "Trajan",
+      "segment": "3. Energy"
+    },
+    "aliavita engineering": {
+      "klant": "AliaVita Engineering",
+      "segment": "1. Public"
+    },
+    "maerschalk": {
+      "klant": "Maerschalk",
+      "segment": "3. Energy"
+    },
+    "de efteling b.v.": {
+      "klant": "De Efteling B.V.",
+      "segment": "3. Energy"
+    },
+    "curatio landscaping": {
+      "klant": "Curatio Landscaping",
+      "segment": "4. Civil"
+    },
+    "eduvision b.v.": {
+      "klant": "Eduvision B.V.",
+      "segment": "1. Public"
+    },
+    "coalition vof": {
+      "klant": "Coalition VOF",
+      "segment": "1. Public"
+    },
+    "bureau groenadvies": {
+      "klant": "Bureau Groenadvies",
+      "segment": "1. Public"
+    },
+    "qing groep b.v.": {
+      "klant": "Qing Groep B.V.",
+      "segment": "5. Industry"
+    },
+    "between staffing nederland b.v.": {
+      "klant": "Between Staffing Nederland B.V.",
+      "segment": "3. Energy"
+    },
+    "flexz services": {
+      "klant": "Flexz Services",
+      "segment": "2. Telecom"
+    },
+    "tof services b.v.": {
+      "klant": "TOF Services B.V.",
+      "segment": "2. Telecom"
+    },
+    "vision car lease b.v.": {
+      "klant": "Vision Car Lease B.V.",
+      "segment": "6. Overig"
+    },
+    "\"oostendorp jos van boxtel locatie 's-hertogenbosch\"": {
+      "klant": "\"Oostendorp Jos van Boxtel Locatie 's-Hertogenbosch\"",
+      "segment": "6. Overig"
+    },
+    "tpg spain s.l.": {
+      "klant": "TPG Spain S.L.",
+      "segment": "6. Overig"
+    },
+    "power2create b.v.": {
+      "klant": "Power2Create B.V.",
+      "segment": "3. Energy"
+    },
+    "hvc cai-techniek b.v.": {
+      "klant": "HVC CAI-Techniek B.V.",
+      "segment": "2. Telecom"
+    },
+    "strukton management bv": {
+      "klant": "Strukton Management BV",
+      "segment": "1. Public"
+    },
+    "abdelkader haouchine": {
+      "klant": "Abdelkader Haouchine",
+      "segment": "1. Public"
+    },
+    "terra-digital gmbh": {
+      "klant": "Terra-Digital GmbH",
+      "segment": "2. Telecom"
+    },
+    "bam nederland b.v.": {
+      "klant": "BAM Nederland B.V.",
+      "segment": "1. Public"
+    },
+    "haert": {
+      "klant": "Haert",
+      "segment": "3. Energy"
+    },
+    "qub afbouwgroep b.v.": {
+      "klant": "QUB Afbouwgroep B.V.",
+      "segment": "4. Civil"
+    },
+    "omri engineering": {
+      "klant": "Omri Engineering",
+      "segment": "1. Public"
+    },
+    "tyco fire and security nederland b.v.": {
+      "klant": "Tyco Fire and Security Nederland B.V.",
+      "segment": "1. Public"
+    },
+    "hendriks energie en duurzaam beheer": {
+      "klant": "Hendriks Energie en Duurzaam Beheer",
+      "segment": "3. Energy"
+    },
+    "tomaten van den belt b.v.": {
+      "klant": "Tomaten van den Belt B.V.",
+      "segment": "5. Industry"
+    },
+    "dietz power b.v.": {
+      "klant": "Dietz Power B.V.",
+      "segment": "5. Industry"
+    },
+    "naderi designs": {
+      "klant": "Naderi Designs",
+      "segment": "4. Civil"
+    },
+    "martin de vries": {
+      "klant": "Martin de Vries",
+      "segment": "6. Overig"
+    },
+    "bvl beheer": {
+      "klant": "BVL Beheer",
+      "segment": "6. Overig"
+    },
+    "stork nederland b.v. locatie elsloo": {
+      "klant": "Stork Nederland B.V. Locatie Elsloo",
+      "segment": "6. Overig"
+    },
+    "geomaat b.v.": {
+      "klant": "Geomaat B.V.",
+      "segment": "6. Overig"
+    },
+    "ps indus b.v.": {
+      "klant": "PS INDUS B.V.",
+      "segment": "1. Public"
+    },
+    "harm dreijer": {
+      "klant": "Harm Dreijer",
+      "segment": "1. Public"
+    },
+    "catie bakker": {
+      "klant": "Catie Bakker",
+      "segment": "1. Public"
+    },
+    "marja folman": {
+      "klant": "Marja Folman",
+      "segment": "1. Public"
+    },
+    "johan brinkers": {
+      "klant": "Johan Brinkers",
+      "segment": "6. Overig"
+    },
+    "jon posthuma": {
+      "klant": "Jon Posthuma",
+      "segment": "6. Overig"
+    },
+    "emiel van der stelt": {
+      "klant": "Emiel van der Stelt",
+      "segment": "1. Public"
+    },
+    "edwin bos": {
+      "klant": "Edwin Bos",
+      "segment": "1. Public"
+    },
+    "automobielbedrijf van ekris woerden b.v.": {
+      "klant": "Automobielbedrijf van Ekris Woerden B.V.",
+      "segment": "6. Overig"
+    }
+  }
+}
