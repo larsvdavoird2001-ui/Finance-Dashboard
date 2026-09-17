@@ -50,10 +50,12 @@ async function fetchTable(name) {
         Prefer: 'count=exact',
       },
     })
-    if (!res.ok) {
+    // Hard falen bij fouten of niet-JSON (bv. een HTML-pagina omdat de URL
+    // niet naar Supabase wijst) — anders schrijven we stilletjes lege snapshots.
+    const contentType = res.headers.get('content-type') ?? ''
+    if (!res.ok || !contentType.includes('json')) {
       const txt = await res.text()
-      console.warn(`  ⚠ ${name}: ${res.status} — ${txt.slice(0, 200)}`)
-      return all
+      throw new Error(`${name}: HTTP ${res.status} (${contentType}) — ${txt.slice(0, 200)}`)
     }
     const rows = await res.json()
     all = all.concat(rows)
@@ -73,6 +75,12 @@ async function main() {
     tables[t] = rows
     totalRows += rows.length
     console.log(`  ${t.padEnd(22)} ${String(rows.length).padStart(5)} rijen`)
+  }
+
+  // Vangnet: deze database is nooit leeg. 0 rijen betekent een config-fout
+  // (verkeerde URL/key), geen geldige backup — dan liever falen dan schrijven.
+  if (totalRows === 0) {
+    throw new Error('0 rijen over alle tabellen — snapshot niet geschreven (check SUPABASE_URL/SUPABASE_SERVICE_ROLE)')
   }
 
   const date = exportedAt.slice(0, 10)        // 2026-04-28
