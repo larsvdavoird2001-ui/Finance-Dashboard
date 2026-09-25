@@ -581,7 +581,7 @@ export function MarktTab() {
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Urenkosten</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>w.v. geschat tarief</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>w.v. missing hours</th>
-                <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Omzet zonder uren</th>
+                <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>w.v. losse dossiers</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Intern (geen omzet)</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Marge model</th>
                 <th style={{ textAlign: 'right', padding: '3px 0 3px 10px', fontWeight: 600 }}>P&amp;L EBITDA</th>
@@ -597,7 +597,7 @@ export function MarktTab() {
                   <td style={{ textAlign: 'right', padding: '3px 10px' }}>{fmtEur(a.kosten + a.fallback)}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--amber)' }}>{a.kosten + a.fallback ? `${Math.round(a.fallback / (a.kosten + a.fallback) * 100)}%` : '—'}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--t2)' }} title="Missing hours (nog niet geboekte uren) in de toegerekende omzet; Projects = schatting">{metMh && a.mhOmzet ? fmtEur(a.mhOmzet) : '—'}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--amber)' }} title="Omzet op projecten zonder geboekte uren — kosten (inhuur/onderaanneming/fixed price) onbekend, marge overschat">{a.zonderUren ? fmtEur(a.zonderUren) : '—'}</td>
+                  <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--t2)' }} title="Losse dossiers: omzet zonder geboekte uren (telt mee als omzet, hangt niet aan projectwerk; ◌ in de projectenlijst)">{a.zonderUren ? fmtEur(a.zonderUren) : '—'}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--t2)' }}>{a.intern ? fmtEur(a.intern) : '—'}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 700, color: a.marge >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtEur(a.marge)}</td>
                   <td style={{ textAlign: 'right', padding: '3px 0 3px 10px', color: 'var(--t2)' }}>{fmtEur(a.plEbitda)}</td>
@@ -613,9 +613,9 @@ export function MarktTab() {
             Omdat de kostprijs+AK al een opslag voor algemene kosten bevat, ligt de modelmarge qua niveau tussen
             brutomarge en EBITDA in. {MARGE_META.zonderTarief.length} medewerkers ({Math.round(MARGE_META.urenZonderTarief / MARGE_META.urenTotaal * 100)}% van de uren)
             staan niet in het tarievenbestand en zijn op de mediaan van hun bedrijf gezet (kolom "geschat tarief").
-            OHW-eenhedensnapshots van maart en juli ontbreken en zijn lineair geïnterpoleerd. Projecten met omzet maar
-            zonder geboekte uren (⚠ in de projectenlijst, kolom "Omzet zonder uren") betreffen inhuur, onderaanneming of
-            fixed price: hun kosten zitten niet in het model en hun marge is dus overschat.
+            OHW-eenhedensnapshots van maart en juli ontbreken en zijn lineair geïnterpoleerd. Omzet zonder geboekte uren
+            zijn losse dossiers (◌ in de projectenlijst, kolom "w.v. losse dossiers"): die tellen gewoon mee als omzet,
+            maar hangen niet aan projectwerk en hebben in dit model geen urenkosten.
             {' '}Missing hours (nog niet geboekte/goedgekeurde uren; maandstand uit de OHW-administratie) zijn per
             medewerker over diens projecten verdeeld — bij Consultancy-detachering is dat exact, bij Projects een
             schatting naar rato van geschreven uren; met het vinkje "incl. missing hours" zet je ze uit.

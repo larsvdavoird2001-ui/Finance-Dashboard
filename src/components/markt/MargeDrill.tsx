@@ -121,7 +121,7 @@ export function MargeDrill({ ent, seg, metMh }: Props) {
               return (
                 <tr key={p.id} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
                   <td style={td('left', { maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' })}>
-                    {k.geenUren && <span style={{ color: 'var(--amber)', marginRight: 4 }} title="Geen uren geboekt: kosten onbekend (inhuur/onderaanneming/fixed price)">⚠</span>}
+                    {k.geenUren && <span style={{ color: 'var(--amber)', marginRight: 4 }} title="Los dossier: omzet zonder geboekte uren — hangt niet aan projectwerk (telt wel mee als omzet)">◌</span>}
                     <button style={linkStyle} onClick={() => setProjectId(p.id)} title="Klik voor medewerkers en weekoverzicht"><span style={{ fontFamily: 'var(--mono)', color: 'var(--t2)' }}>{p.id}</span> {p.naam}</button>
                   </td>
                   <td style={td('left', { color: 'var(--t2)' })}>{TYPE_LABEL[p.id[0]] ?? p.id[0]}</td>
@@ -163,7 +163,7 @@ function ProjectDetail({ p, metMh }: { p: DetailProject; metMh: boolean }) {
         <span>Kosten <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{fmtEur(k.kosten)}</b></span>
         <span>Marge <b style={{ color: margeColor(k.marge), fontFamily: 'var(--mono)' }}>{fmtEur(k.marge)}</b> ({pctStr(k.marge, k.omzet)})</span>
         <span>Uren <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{Math.round(k.uren).toLocaleString('nl-NL')}</b></span>
-        {k.geenUren && <span style={{ color: 'var(--amber)' }}>⚠ geen uren geboekt — kosten onbekend</span>}
+        {k.geenUren && <span style={{ color: 'var(--amber)' }}>◌ los dossier — omzet zonder geboekte uren, hangt niet aan projectwerk</span>}
       </div>
 
       <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -199,7 +199,7 @@ function ProjectDetail({ p, metMh }: { p: DetailProject; metMh: boolean }) {
             Medewerkers op dit project (YTD) — declarabiliteit = klanturen / alle geschreven uren excl. verlof/ziekte
           </div>
           {p.emps.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--amber)' }}>Geen uren op dit project geboekt in de urenexport.</div>
+            <div style={{ fontSize: 11, color: 'var(--amber)' }}>Los dossier: geen uren in de urenexport — de omzet telt mee in de matrix, maar er is geen medewerker of weekproductie aan te koppelen.</div>
           ) : (
             <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
               <thead>
