@@ -581,17 +581,24 @@ const empDecl = {}   // emp → { naam, bedrijf, klant, intern, afwezig }
     const [y, m] = serialToMonth(x[11])
     if (y !== 2026) continue
     const emp = x[2], uren = x[17] ?? 0, cat = x[15]
-    const d = (empDecl[emp] ??= { naam: x[3], bedrijf: bedrijfKey(String(x[0] ?? '')), klant: 0, intern: 0, afwezig: 0 })
+    // cat-arrays per maand: alle geschreven uren per soort, voor de declarabiliteit per medewerker
+    const d = (empDecl[emp] ??= { naam: x[3], bedrijf: bedrijfKey(String(x[0] ?? '')), klant: 0, intern: 0, afwezig: 0, bedrijfStr: String(x[0] ?? ''),
+      cat: { klant: arr12(), intern: arr12(), improductief: arr12(), verlof: arr12(), ziekte: arr12(), bijzverlof: arr12(), overig: arr12() } })
     const pid = x[7] ? String(x[7]).trim() : null
     if (cat === 'Productieve tijd' && pid) {
-      if (INTERN_RE.test(pid) || pid.startsWith('G-')) d.intern += uren; else d.klant += uren
+      const isIntern = INTERN_RE.test(pid) || pid.startsWith('G-')
+      if (isIntern) { d.intern += uren; d.cat.intern[m - 1] += uren } else { d.klant += uren; d.cat.klant[m - 1] += uren }
       const ep = ((empProj[emp] ??= {})[pid] ??= { uren: arr12(), kosten: arr12(), weeks: {} })
       const kp = kostprijsVan(emp, x[0])
       ep.uren[m - 1] += uren
       ep.kosten[m - 1] += uren * kp
       if (pid.startsWith('E-')) { const { jaar, week } = isoWeek(x[11]); if (jaar === 2026) ep.weeks[week] = (ep.weeks[week] ?? 0) + uren }
-    } else if (cat === 'Improductief' || cat === 'NTCS') d.intern += uren
-    else if (cat === 'Verlof' || cat === 'Ziekte' || cat === 'BijzVerlof') d.afwezig += uren
+    } else if (cat === 'Productieve tijd') d.cat.overig[m - 1] += uren // productief zonder project
+    else if (cat === 'Improductief' || cat === 'NTCS') { d.intern += uren; d.cat.improductief[m - 1] += uren }
+    else if (cat === 'Verlof') { d.afwezig += uren; d.cat.verlof[m - 1] += uren }
+    else if (cat === 'Ziekte') { d.afwezig += uren; d.cat.ziekte[m - 1] += uren }
+    else if (cat === 'BijzVerlof') { d.afwezig += uren; d.cat.bijzverlof[m - 1] += uren }
+    else d.cat.overig[m - 1] += uren // Missing e.d.
   }
 }
 // weekproductie per project (OHW Freezes) + per taak
@@ -641,6 +648,9 @@ D.push(` */`)
 D.push(`/** bron van de kostprijs: tarievenbestand | ingevuld (invullijst Lars) | spanje (€35-regel) | geschat (mediaan bedrijf) */`)
 D.push(`export type TariefBron = 'tarievenbestand' | 'ingevuld' | 'spanje' | 'geschat'`)
 D.push(`export interface DetailEmp { id: number; naam: string; bedrijf: string; uren: number[]; kosten: number[]; geschat: boolean; bron: TariefBron; tarief: number; decl: number | null }`)
+D.push(`/** Alle geschreven uren per medewerker per maand, per soort (urenexport kolom "Soort"): klant = productief op`)
+D.push(` *  klantprojecten, intern = productief op interne/G-projecten, improductief = Improductief + NTCS, overig = Missing e.d. */`)
+D.push(`export interface DetailMedewerker { id: number; naam: string; bedrijf: string; bron: TariefBron; tarief: number; klant: number[]; intern: number[]; improductief: number[]; verlof: number[]; ziekte: number[]; bijzverlof: number[]; overig: number[] }`)
 D.push(`export interface WeekRow { w: number; productie: number; bevestigd: number; uren: number; kosten: number; emps: [string, number][]; taken?: [string, number][] }`)
 D.push(`export interface DetailProject { id: string; naam: string; klant: string; ent: string; seg: string; intern: boolean; omzet: number[]; ohw: number[]; mhOmzet: number[]; mhKosten: number[]; kosten: number[]; uren: number[]; emps: DetailEmp[]; weeks?: WeekRow[]; productieYtd?: number; bevestigdYtd?: number }`)
 D.push(`export const detailProjecten: DetailProject[] = [`)
@@ -688,6 +698,15 @@ for (const p of Object.values(proj)) {
     nWeeks += weeks.length
   }
   D.push(`  ${JSON.stringify(rec)},`)
+}
+D.push(`]`)
+D.push(``)
+D.push(`/** Alle medewerkers uit de urenexport met hun uren per soort per maand (voor de medewerker-inzoom). */`)
+D.push(`export const detailMedewerkers: DetailMedewerker[] = [`)
+for (const [emp, d] of Object.entries(empDecl).sort((a, b) => a[1].naam.localeCompare(b[1].naam))) {
+  const tarief = rate[emp]?.kostprijsAK ?? kostprijsVan(emp, d.bedrijfStr)
+  D.push(`  ${JSON.stringify({ id: Number(emp), naam: d.naam, bedrijf: d.bedrijf, bron: bronVan(emp), tarief: Math.round(tarief * 100) / 100,
+    klant: rnd(d.cat.klant), intern: rnd(d.cat.intern), improductief: rnd(d.cat.improductief), verlof: rnd(d.cat.verlof), ziekte: rnd(d.cat.ziekte), bijzverlof: rnd(d.cat.bijzverlof), overig: rnd(d.cat.overig) })},`)
 }
 D.push(`]`)
 D.push(``)

@@ -505,8 +505,11 @@ export function MarktTab() {
               )}
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-              <table style={{ borderCollapse: 'collapse', fontSize: 11, fontFamily: 'var(--mono)' }}>
+            <MargeDrill
+              ent={sel.ent} seg={sel.seg} metMh={metMh}
+              maanden={mode === 'maand' && maand <= MARGE_MAANDEN ? [maand - 1] : Array.from({ length: MARGE_MAANDEN }, (_, i) => i)}
+              maandTabel={(
+              <table style={{ borderCollapse: 'collapse', fontSize: 11, fontFamily: 'var(--mono)', alignSelf: 'flex-start' }}>
                 <thead>
                   <tr style={{ color: 'var(--t2)', fontFamily: 'var(--font)' }}>
                     <th style={{ textAlign: 'left', padding: '3px 10px 3px 0', fontWeight: 600 }}>Maand</th>
@@ -559,13 +562,8 @@ export function MarktTab() {
                   })()}
                 </tbody>
               </table>
-              <div style={{ minWidth: 420, flex: 1 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>
-                  Inzoomen: klanten → projecten → medewerkers / weekoverzicht
-                </div>
-                <MargeDrill ent={sel.ent} seg={sel.seg} metMh={metMh} />
-              </div>
-            </div>
+              )}
+            />
           )}
           {metric === 'omzet' && <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 10 }}>* lopende maand (nog niet volledig gefactureerd)</div>}
         </div>
