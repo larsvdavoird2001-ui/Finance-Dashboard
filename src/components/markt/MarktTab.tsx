@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   marktOmzet, marktTopKlanten, MARKT_ENTITIES, MARKT_SEGMENTS, MARKT_META,
 } from '../../data/customerRevenue'
@@ -217,6 +217,11 @@ export function MarktTab() {
   const [mode, setMode] = useState<'maand' | 'ytd'>('ytd')
   const [maand, setMaand] = useState<number>(Math.min(MARKT_META.laatsteVolledigeMaand, maxMaandVoor('2026', 'omzet')))
   const [sel, setSel] = useState<{ ent: MarktEntity | 'totaal'; seg: string | 'totaal' } | null>(null)
+  const detailRef = useRef<HTMLDivElement>(null)
+  // Het detailpaneel staat onder de matrix en valt buiten beeld; bij openen ernaartoe scrollen.
+  useEffect(() => {
+    if (sel) detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [sel])
   const [metMh, setMetMh] = useState(true)
   const { getYtd } = useAdjustedActuals()
 
@@ -286,7 +291,7 @@ export function MarktTab() {
   }, [metric, segs, getYtd, metMh])
 
   return (
-    <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="page" style={{ gap: 14 }}>
       {/* ── Titel + keuzes ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div>
@@ -436,7 +441,7 @@ export function MarktTab() {
 
       {/* ── Detailpaneel ── */}
       {sel && detail && (
-        <div className="card" style={{ padding: 16 }}>
+        <div ref={detailRef} className="card" style={{ padding: 16, scrollMarginTop: 12 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>
               {sel.ent === 'totaal' ? 'Alle entiteiten' : sel.ent} × {sel.seg === 'totaal' ? 'alle segmenten' : (SEG_LABELS[sel.seg] ?? sel.seg)}
