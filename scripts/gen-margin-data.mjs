@@ -36,6 +36,7 @@ const SRC = {
   tarieven: 'C:/Users/lvanderavoird/Downloads/20260507 TPG TARIEVEN P4 2026 EN VERDER gedeeld met Lars.xlsx',
   factuurvolume: 'C:/Users/lvanderavoird/OneDrive - The People Group/Documenten/Claude Projects/Dashboard Sales/automation/tmp/factuurvolume.csv',
   toewijzing: path.join(__dirname, 'klant-toewijzing.json'),
+  tarievenAanvulling: path.join(__dirname, 'tarieven-aanvulling.json'), // uit import-tarieven-invullijst.mjs
 }
 // Maandsnapshots van de SAP-overzichten (index = maand 1..8). null = geen snapshot.
 const SNAP = [
@@ -113,11 +114,13 @@ const findHeader = (rows, must) => rows.findIndex(r => r && must.every(m => r.so
 const colIdx = (hdr, name) => hdr.findIndex(c => typeof c === 'string' && c.startsWith(name))
 
 // ── 1. Tarieven ─────────────────────────────────────────────────────────────
+// rate[id] = { bedrijf, naam, kostprijsAK, bron }; bron: 'tarievenbestand' | 'ingevuld' | 'spanje'.
+// Wie nergens in staat krijgt de mediaan van zijn bedrijf (bron 'geschat', kostenFallback).
 const rate = {}
 {
   const rows = sheetRows(SRC.tarieven, 'HC Tarieven 20260507')
   for (const r of rows) {
-    if (typeof r?.[1] === 'number' && typeof r[5] === 'number') rate[r[1]] = { bedrijf: r[0], naam: r[2], kostprijsAK: r[5] }
+    if (typeof r?.[1] === 'number' && typeof r[5] === 'number') rate[r[1]] = { bedrijf: r[0], naam: r[2], kostprijsAK: r[5], bron: 'tarievenbestand' }
   }
 }
 const medianBy = {}
@@ -127,6 +130,15 @@ for (const b of ['Consultancy', 'Projects', 'Software']) {
 }
 const bedrijfKey = b => /Software/i.test(b) ? 'Software' : /Consultancy/i.test(b) ? 'Consultancy' : 'Projects'
 console.log(`tarieven: ${Object.keys(rate).length} medewerkers; mediaan kostprijs+AK`, medianBy)
+// Aanvulling (invullijst Lars + Spanje-regel); tarief null = blijft schatting
+const AANVULLING = fs.existsSync(SRC.tarievenAanvulling) ? JSON.parse(fs.readFileSync(SRC.tarievenAanvulling, 'utf8')) : { medewerkers: [] }
+for (const m of AANVULLING.medewerkers) {
+  if (typeof m.tarief === 'number' && !rate[m.id]) rate[m.id] = { bedrijf: m.bedrijf, naam: m.naam, kostprijsAK: m.tarief, bron: m.bron }
+}
+const bronVan = emp => rate[emp]?.bron ?? 'geschat'
+const kostprijsVan = (emp, bedrijfStr) => rate[emp]?.kostprijsAK ?? (/Spanje/i.test(String(bedrijfStr)) ? medianBy.Projects : medianBy[bedrijfKey(String(bedrijfStr))])
+console.log(`aanvulling: ${AANVULLING.medewerkers.filter(m => typeof m.tarief === 'number').length} tarieven uit ${path.basename(SRC.tarievenAanvulling)} (${AANVULLING.datum ?? '?'})`)
+const bronTot = {} // bron → { personen:Set, uren, kosten } — voor MARGE_META.tariefBronnen
 
 // ── 2. Uren × kostprijs per project per maand ───────────────────────────────
 const proj = {} // id → { naam, uren[12], kosten[12], kostenFallback[12], empEnt:{}, omzet[12], ohw:{u,d,c,e}[snapshots], klant, btk, segFromList, ent }
@@ -151,10 +163,12 @@ const empInfo = {}  // werknemer-id → { naam, bedrijf }
     ;((empMix[emp] ??= {})[m] ??= {})[p.id] = (empMix[emp][m][p.id] ?? 0) + uren
     empInfo[emp] ??= { naam: x[3], bedrijf: bedrijfKey(String(x[0] ?? '')) }
     const rt = rate[x[2]]
-    if (rt) p.kosten[m - 1] += uren * rt.kostprijsAK
+    const bt = (bronTot[bronVan(emp)] ??= { personen: new Set(), uren: 0, kosten: 0 })
+    bt.personen.add(emp); bt.uren += uren
+    if (rt) { p.kosten[m - 1] += uren * rt.kostprijsAK; bt.kosten += uren * rt.kostprijsAK }
     else {
-      const fb = /Spanje/i.test(String(x[0])) ? medianBy.Projects : medianBy[eb]
-      p.kostenFallback[m - 1] += uren * fb
+      const fb = kostprijsVan(emp, x[0])
+      p.kostenFallback[m - 1] += uren * fb; bt.kosten += uren * fb
       const key = `${x[3]}|${x[0]}`
       missingRate[key] ??= { naam: x[3], bedrijf: String(x[0]).replace('The People Group', 'TPG'), uren: 0 }
       missingRate[key].uren += uren
@@ -469,8 +483,9 @@ L.push(` * AUTO-GENERATED door scripts/gen-margin-data.mjs — niet met de hand 
 L.push(` * Brutomarge-benadering per entiteit × marktsegment × maand, 2026 t/m augustus.`)
 L.push(` *   omzet   = factuurvolume per project (SAP CRMCIVIB)`)
 L.push(` *   ohw     = mutatie onderhanden werk per project (U-/D-facturatie, conceptfacturen, OHW-eenheden)`)
-L.push(` *   kosten  = productieve uren × kostprijs+AK (tarievenbestand P4 2026); kostenFallback = uren van`)
-L.push(` *             medewerkers zónder tarief × mediaan van hun bedrijf (zie MARGE_META.zonderTarief)`)
+L.push(` *   kosten  = productieve uren × kostprijs+AK (tarievenbestand P4 2026, aangevuld met de invullijst`)
+L.push(` *             van Lars en de Spanje-regel — zie MARGE_META.tariefBronnen); kostenFallback = uren van`)
+L.push(` *             medewerkers zónder enig tarief × mediaan van hun bedrijf (zie MARGE_META.zonderTarief)`)
 L.push(` * Kosten volgen het project (IC-uren tellen mee bij het project), directe inkoop/auto/overige`)
 L.push(` * personeelskosten zitten er NIET in — zie de aansluiting met de P&L in het tabblad.`)
 L.push(` */`)
@@ -502,11 +517,16 @@ L.push(`]`)
 L.push(``)
 L.push(`export const MARGE_META = {`)
 L.push(`  peildatum: '${new Date().toISOString().slice(0, 10)}',`)
-L.push(`  tarievenBron: 'TPG TARIEVEN P4 2026 EN VERDER (07-05-2026), kolom F kostprijs+AK',`)
+L.push(`  tarievenBron: 'TPG TARIEVEN P4 2026 EN VERDER (07-05-2026), kolom F kostprijs+AK; aangevuld met de invullijst van Lars (${AANVULLING.datum ?? '-'}) en de Spanje-regel €${AANVULLING.spanjeTarief ?? '-'}/uur',`)
 L.push(`  urenBron: 'SAP urenexport WN Tijden P1-8 (10-09-2026), alleen Productieve tijd',`)
 L.push(`  urenTotaal: ${Math.round(totUren)},`)
 L.push(`  urenZonderTarief: ${missingUren},`)
 L.push(`  medianKostprijs: ${JSON.stringify(medianBy)},`)
+L.push(`  /** Herkomst van de kostprijs per uur, over alle productieve uren:`)
+L.push(` *  tarievenbestand = HC-tarievenbestand; ingevuld = invullijst Lars; spanje = €${AANVULLING.spanjeTarief ?? 35}-regel S.L.; geschat = mediaan bedrijf. */`)
+L.push(`  tariefBronnen: ${JSON.stringify(Object.fromEntries(['tarievenbestand', 'ingevuld', 'spanje', 'geschat'].map(b => [b, { personen: bronTot[b]?.personen.size ?? 0, uren: Math.round(bronTot[b]?.uren ?? 0), kosten: Math.round(bronTot[b]?.kosten ?? 0) }])))},`)
+L.push(`  /** Alle medewerkers buiten het tarievenbestand, met het gebruikte tarief en de bron (scripts/tarieven-aanvulling.json). */`)
+L.push(`  tarievenAanvulling: ${JSON.stringify(AANVULLING.medewerkers.map(m => ({ id: m.id, naam: m.naam, bedrijf: m.bedrijf, uren: Math.round(m.urenProductief ?? 0), tarief: typeof m.tarief === 'number' ? m.tarief : (/Spanje/i.test(m.bedrijf) ? medianBy.Projects : medianBy[bedrijfKey(m.bedrijf)]), bron: m.bron })))},`)
 L.push(`  eenhedenSnapshotsOntbreken: ['Mar-26', 'Jul-26'], // lineair geïnterpoleerd per project`)
 L.push(`  /** Missing hours: stand per entiteit per maand (uren × verkooptarief) zoals berekend uit de lijsten;`)
 L.push(` *  onverdeeld = mutatie van medewerkers zonder geschreven uren (niet aan een project te koppelen). */`)
@@ -566,7 +586,7 @@ const empDecl = {}   // emp → { naam, bedrijf, klant, intern, afwezig }
     if (cat === 'Productieve tijd' && pid) {
       if (INTERN_RE.test(pid) || pid.startsWith('G-')) d.intern += uren; else d.klant += uren
       const ep = ((empProj[emp] ??= {})[pid] ??= { uren: arr12(), kosten: arr12(), weeks: {} })
-      const kp = rate[emp]?.kostprijsAK ?? (/Spanje/i.test(String(x[0])) ? medianBy.Projects : medianBy[d.bedrijf])
+      const kp = kostprijsVan(emp, x[0])
       ep.uren[m - 1] += uren
       ep.kosten[m - 1] += uren * kp
       if (pid.startsWith('E-')) { const { jaar, week } = isoWeek(x[11]); if (jaar === 2026) ep.weeks[week] = (ep.weeks[week] ?? 0) + uren }
@@ -618,7 +638,9 @@ D.push(` * projecten (E-) een weekoverzicht: productie uit OHW Freezes (OHW Tren
 D.push(` * meters uit de Projectadministratie, en de uren/kosten/medewerkers van die week.`)
 D.push(` * Declarabiliteit = uren op klantprojecten / alle geschreven uren excl. verlof/ziekte (conform Power BI).`)
 D.push(` */`)
-D.push(`export interface DetailEmp { id: number; naam: string; bedrijf: string; uren: number[]; kosten: number[]; geschat: boolean; decl: number | null }`)
+D.push(`/** bron van de kostprijs: tarievenbestand | ingevuld (invullijst Lars) | spanje (€35-regel) | geschat (mediaan bedrijf) */`)
+D.push(`export type TariefBron = 'tarievenbestand' | 'ingevuld' | 'spanje' | 'geschat'`)
+D.push(`export interface DetailEmp { id: number; naam: string; bedrijf: string; uren: number[]; kosten: number[]; geschat: boolean; bron: TariefBron; tarief: number; decl: number | null }`)
 D.push(`export interface WeekRow { w: number; productie: number; bevestigd: number; uren: number; kosten: number; emps: [string, number][]; taken?: [string, number][] }`)
 D.push(`export interface DetailProject { id: string; naam: string; klant: string; ent: string; seg: string; intern: boolean; omzet: number[]; ohw: number[]; mhOmzet: number[]; mhKosten: number[]; kosten: number[]; uren: number[]; emps: DetailEmp[]; weeks?: WeekRow[]; productieYtd?: number; bevestigdYtd?: number }`)
 D.push(`export const detailProjecten: DetailProject[] = [`)
@@ -634,7 +656,8 @@ for (const p of Object.values(proj)) {
     const e = ep[p.id]; if (!e) continue
     const d = empDecl[emp]
     const worked = d.klant + d.intern
-    emps.push({ id: Number(emp), naam: d.naam, bedrijf: d.bedrijf, uren: rnd(e.uren), kosten: rnd(e.kosten), geschat: !rate[emp], decl: worked ? Math.round(d.klant / worked * 100) : null })
+    const totU = e.uren.reduce((x, y) => x + y, 0), totK = e.kosten.reduce((x, y) => x + y, 0)
+    emps.push({ id: Number(emp), naam: d.naam, bedrijf: d.bedrijf, uren: rnd(e.uren), kosten: rnd(e.kosten), geschat: !rate[emp], bron: bronVan(emp), tarief: totU ? Math.round(totK / totU * 100) / 100 : 0, decl: worked ? Math.round(d.klant / worked * 100) : null })
   }
   emps.sort((a, b) => b.uren.reduce((x, y) => x + y, 0) - a.uren.reduce((x, y) => x + y, 0))
   const rec = {
@@ -650,7 +673,7 @@ for (const p of Object.values(proj)) {
       let uren = 0, kosten = 0; const we = []
       for (const [emp, ep] of Object.entries(empProj)) {
         const u = ep[p.id]?.weeks[w]; if (!u) continue
-        const kp = rate[emp]?.kostprijsAK ?? medianBy[empDecl[emp]?.bedrijf] ?? 60
+        const kp = rate[emp]?.kostprijsAK ?? medianBy[empDecl[emp]?.bedrijf] ?? 60  // Spanje-medewerkers zitten via de aanvulling in rate
         uren += u; kosten += u * kp; we.push([empDecl[emp].naam, Math.round(u * 10) / 10])
       }
       if (!prod && !bev && !uren) continue

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { DetailProject, DetailEmp, WeekRow } from '../../data/marginDetail'
+import type { DetailProject, DetailEmp, WeekRow, TariefBron } from '../../data/marginDetail'
 import { MARGE_MAANDEN } from '../../data/marginData'
 
 type DetailModule = typeof import('../../data/marginDetail')
@@ -25,6 +25,15 @@ function kpi(p: DetailProject, metMh: boolean): Kpi {
 const th = (align: 'left' | 'right' = 'right'): CSSProperties => ({ textAlign: align, padding: '3px 8px', fontWeight: 600, whiteSpace: 'nowrap' })
 const td = (align: 'left' | 'right' = 'right', extra: CSSProperties = {}): CSSProperties => ({ textAlign: align, padding: '3px 8px', whiteSpace: 'nowrap', ...extra })
 const margeColor = (v: number) => v >= 0 ? 'var(--green)' : 'var(--red)'
+// Kostprijs-herkomst van een medewerker die niet in het HC-tarievenbestand staat (scripts/tarieven-aanvulling.json)
+const BRON_MARKER: Record<TariefBron, string> = { tarievenbestand: '', ingevuld: '✎', spanje: 'ES', geschat: '≈' }
+const BRON_KLEUR: Record<TariefBron, string> = { tarievenbestand: 'inherit', ingevuld: 'var(--t3)', spanje: 'var(--t3)', geschat: 'var(--amber)' }
+const BRON_TITEL: Record<TariefBron, string> = {
+  tarievenbestand: 'Tarievenbestand',
+  ingevuld: 'Niet in tarievenbestand — tarief ingevuld door Lars (invullijst 25-09-2026)',
+  spanje: 'Niet in tarievenbestand — Spanje-regel: €35/uur voor alle S.L.-medewerkers (Lars, 25-09-2026)',
+  geschat: 'Niet in tarievenbestand en niet ingevuld — geschat op de mediaan kostprijs+AK van het bedrijf',
+}
 const linkStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 11.5, padding: 0, textAlign: 'left' }
 
 interface Props {
@@ -212,7 +221,7 @@ function ProjectDetail({ p, metMh }: { p: DetailProject; metMh: boolean }) {
                   const u = som(e.uren), c = som(e.kosten)
                   return (
                     <tr key={e.id} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
-                      <td style={td('left')}>{e.naam}{e.geschat && <span style={{ color: 'var(--amber)', marginLeft: 4 }} title="Niet in tarievenbestand — kostprijs geschat (mediaan van het bedrijf)">≈</span>}</td>
+                      <td style={td('left')}>{e.naam}{e.bron !== 'tarievenbestand' && <span style={{ color: BRON_KLEUR[e.bron], marginLeft: 4, fontSize: 10 }} title={`${BRON_TITEL[e.bron]} — €${e.tarief}/uur`}>{BRON_MARKER[e.bron]}</span>}</td>
                       <td style={td('left', { color: 'var(--t2)' })}>{e.bedrijf}</td>
                       <td style={td('right', { fontFamily: 'var(--mono)' })}>{Math.round(u).toLocaleString('nl-NL')}</td>
                       <td style={td('right', { color: 'var(--t2)' })}>{k.uren ? `${Math.round(u / k.uren * 100)}%` : '—'}</td>

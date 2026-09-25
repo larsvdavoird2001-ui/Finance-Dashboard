@@ -35,6 +35,7 @@ function fmtK(v: number): string {
   return `€ ${Math.round(v / 1000)}k`
 }
 const fmtEur = (v: number) => `€ ${Math.round(v).toLocaleString('nl-NL')}`
+const pctBron = (b: keyof typeof MARGE_META.tariefBronnen) => Math.round((MARGE_META.tariefBronnen[b]?.uren ?? 0) / MARGE_META.urenTotaal * 100)
 
 /** Laatste bruikbare maand (1-12) voor een weergavejaar/metric. */
 function maxMaandVoor(jaar: Jaar, metric: Metric): number {
@@ -611,8 +612,14 @@ export function MarktTab() {
             (tarievenbestand P4 2026, kolom F). Niet toegerekend: handmatige OHW-posten (indexaties, voorzieningen,
             fees), vooruitgefactureerde licenties (Software), directe inkoop, autokosten en overige personeelskosten.
             Omdat de kostprijs+AK al een opslag voor algemene kosten bevat, ligt de modelmarge qua niveau tussen
-            brutomarge en EBITDA in. {MARGE_META.zonderTarief.length} medewerkers ({Math.round(MARGE_META.urenZonderTarief / MARGE_META.urenTotaal * 100)}% van de uren)
-            staan niet in het tarievenbestand en zijn op de mediaan van hun bedrijf gezet (kolom "geschat tarief").
+            brutomarge en EBITDA in.
+            {' '}Herkomst kostprijs per uur (aandeel productieve uren): tarievenbestand {pctBron('tarievenbestand')}%,
+            invullijst Lars {pctBron('ingevuld')}% ({MARGE_META.tariefBronnen.ingevuld.personen} pers.), Spanje-regel
+            €{MARGE_META.tarievenAanvulling.find(m => m.bron === 'spanje')?.tarief ?? 35}/uur {pctBron('spanje')}%
+            ({MARGE_META.tariefBronnen.spanje.personen} pers.), nog geschat op de mediaan van het bedrijf {pctBron('geschat')}%
+            ({MARGE_META.tariefBronnen.geschat.personen} pers., kolom "geschat tarief"). In de drill-down staat per
+            medewerker een markering (✎ ingevuld, ES Spanje-regel, ≈ geschat) met het gebruikte tarief; de volledige
+            lijst staat in scripts/tarieven-aanvulling.json.
             OHW-eenhedensnapshots van maart en juli ontbreken en zijn lineair geïnterpoleerd. Omzet zonder geboekte uren
             zijn losse dossiers (◌ in de projectenlijst, kolom "w.v. losse dossiers"): die tellen gewoon mee als omzet,
             maar hangen niet aan projectwerk en hebben in dit model geen urenkosten.
