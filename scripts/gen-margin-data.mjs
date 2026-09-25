@@ -37,17 +37,25 @@ const SRC = {
   factuurvolume: 'C:/Users/lvanderavoird/OneDrive - The People Group/Documenten/Claude Projects/Dashboard Sales/automation/tmp/factuurvolume.csv',
   toewijzing: path.join(__dirname, 'klant-toewijzing.json'),
   tarievenAanvulling: path.join(__dirname, 'tarieven-aanvulling.json'), // uit import-tarieven-invullijst.mjs
+  icTarieven: path.join(ROOT, 'TPG IC Tarieven 2026 - POWERBI.xlsx'),
+}
+const SRC_DETAIL = {
+  freezes: 'C:/Users/lvanderavoird/The People Group/TPG Projects 2025 - Documenten/03 Finance/01 Finance Alex versie/OHW 2026/OHW Trendlijnen - 2026.xlsx',
+  projectadmin: 'C:/Users/lvanderavoird/The People Group/TPG Projects - OpEx - Planning/Projectadministratie en Registratie Vergaderingen.xlsm',
 }
 // Maandsnapshots van de SAP-overzichten (index = maand 1..8). null = geen snapshot.
+// eFreeze = eenheden-snapshot uit de weekfreezes (OHW Trendlijnen) i.p.v. een los bestand: maart en juli
+// ontbreken in de maandmap, en april is geboekt op een andere versie van week 18. De gekozen weken zijn
+// exact de standen die in de OHW-administratie geboekt zijn.
 const SNAP = [
   null,
   { dir: `${ZIP}/01. Januari 2026/Overzichten SAP januari 2026`, u: 'U-facturatie januari 2026.xlsx', d: 'D-facturatie januari 2026.xlsx', c: 'Conceptfacturen januari 2026.xlsx', e: 'Onderhanden Werk eind week 5 NA.xlsx' },
   { dir: `${ZIP}/02. Februari 2026/Overzichten SAP februari 2026`, u: 'U-facturatie februari .xlsx', d: 'D-facturatie februari.xlsx', c: 'Conceptfacturen februari.xlsx', e: 'Onderhanden Werk eind week 9 NA.xlsx' },
-  { dir: `${ZIP}/03. Maart 2026/Overzichten SAP maart 2026`, u: 'U-facturatie maart.xlsx', d: 'D-facturatie maart.xlsx', c: 'Conceptfacturatie maart.xlsx', e: null },
-  { dir: `${ZIP}/04. April 2026/Overzichten SAP april 2026`, u: 'U-facturatie april.xlsx', d: 'D-facturatie april.xlsx', c: 'Conceptfacturen april.xlsx', e: 'Onderhanden Werk week 18 NA.xlsx' },
+  { dir: `${ZIP}/03. Maart 2026/Overzichten SAP maart 2026`, u: 'U-facturatie maart.xlsx', d: 'D-facturatie maart.xlsx', c: 'Conceptfacturatie maart.xlsx', e: null, eFreeze: 'Onderhanden Werk week 14 NA.xlsx' },
+  { dir: `${ZIP}/04. April 2026/Overzichten SAP april 2026`, u: 'U-facturatie april.xlsx', d: 'D-facturatie april.xlsx', c: 'Conceptfacturen april.xlsx', e: 'Onderhanden Werk week 18 NA.xlsx', eFreeze: 'Onderhanden Werk week 18 NA.xlsx' },
   { dir: `${ZIP}/05. Mei 2026/Overzichten SAP mei 2026`, u: 'U-facturatie mei.xlsx', d: 'D-facturatie mei.xlsx', c: 'Conceptfacturen mei.xlsx', e: 'Onderhanden Werk week 22 NA.xlsx' },
   { dir: `${ZIP}/06. Juni 2026/Overzichten SAP juni 2026`, u: 'U-facturatie juni 2026.xlsx', d: 'D-facturatie juni 2026.xlsx', c: 'Conceptfacture juni 2026.xlsx', e: 'Onderhanden Werk week 27 VOOR.xlsx' },
-  { dir: `${ZIP}/07. Juli 2026/Overzichten SAP juli 2026`, u: 'U-facturatie juli.xlsx', d: 'D-facturatie juli.xlsx', c: 'Conceptfacturatie juli.xlsx', e: null },
+  { dir: `${ZIP}/07. Juli 2026/Overzichten SAP juli 2026`, u: 'U-facturatie juli.xlsx', d: 'D-facturatie juli.xlsx', c: 'Conceptfacturatie juli.xlsx', e: null, eFreeze: 'Onderhanden Werk week 31 NA.xlsx' },
   { dir: `${ZIP}/08 Augustus 2026/Overzichten SAP augustus 2026`, u: 'U-facturatie augustus.xlsx', d: 'D-facturatie augustus.xlsx', c: 'Conceptfacturen augustus.xlsx', e: 'EXCEL Onderhanden Werk P8 2026.xlsx' },
 ]
 const N_MONTHS = 8
@@ -92,7 +100,12 @@ const normSeg = s => {
   const a = SEG_ALIAS[t.toLowerCase().replace(/^\d\.\s*/, '')]
   return a ?? null
 }
-const projIdOf = task => { const m = String(task ?? '').trim().match(/^([A-Z]-\d+)/); return m ? m[1] : null }
+// Projectnummers die in SAP zijn omgenummerd maar hetzelfde werk zijn. E-1170 heeft dezelfde naam
+// als E-1158 ("KCW 2026 - Schetsen + Metingen"), krijgt vanaf augustus alle uren, maar heeft geen eigen
+// facturatie of OHW: productie (OHW Freezes t/m week 38) en facturen lopen door op E-1158.
+const PROJECT_ALIAS = { 'E-1170': 'E-1158' }
+const canonId = id => (id && PROJECT_ALIAS[id]) || id
+const projIdOf = task => { const m = String(task ?? '').trim().match(/^([A-Z]-\d+)/); return m ? canonId(m[1]) : null }
 const projBedrijfEnt = v => {
   const s = String(v ?? '').trim()
   const m = s.match(/^P(\d{2})000/)
@@ -120,7 +133,8 @@ const rate = {}
 {
   const rows = sheetRows(SRC.tarieven, 'HC Tarieven 20260507')
   for (const r of rows) {
-    if (typeof r?.[1] === 'number' && typeof r[5] === 'number') rate[r[1]] = { bedrijf: r[0], naam: r[2], kostprijsAK: r[5], bron: 'tarievenbestand' }
+    // kolom F = kostprijs+AK, kolom G = tarief klant (verkooptarief)
+    if (typeof r?.[1] === 'number' && typeof r[5] === 'number') rate[r[1]] = { bedrijf: r[0], naam: r[2], kostprijsAK: r[5], verkoop: typeof r[6] === 'number' ? r[6] : null, bron: 'tarievenbestand' }
   }
 }
 const medianBy = {}
@@ -135,8 +149,15 @@ const AANVULLING = fs.existsSync(SRC.tarievenAanvulling) ? JSON.parse(fs.readFil
 for (const m of AANVULLING.medewerkers) {
   if (typeof m.tarief === 'number' && !rate[m.id]) rate[m.id] = { bedrijf: m.bedrijf, naam: m.naam, kostprijsAK: m.tarief, bron: m.bron }
 }
+const SPANJE_TARIEF = AANVULLING.spanjeTarief ?? 35
 const bronVan = emp => rate[emp]?.bron ?? 'geschat'
-const kostprijsVan = (emp, bedrijfStr) => rate[emp]?.kostprijsAK ?? (/Spanje/i.test(String(bedrijfStr)) ? medianBy.Projects : medianBy[bedrijfKey(String(bedrijfStr))])
+const kostprijsVan = (emp, bedrijfStr) => rate[emp]?.kostprijsAK ?? (/Spanje/i.test(String(bedrijfStr)) ? SPANJE_TARIEF : medianBy[bedrijfKey(String(bedrijfStr))])
+// IC-tarieven (verkooptarief tussen BV's) — alleen als verkooptarief-fallback voor de omzetverdeling
+const IC_TARIEF = {}
+try {
+  const ic = xlsx.utils.sheet_to_json(xlsx.readFile(SRC.icTarieven).Sheets['IC tarieven 2026'], { defval: null })
+  for (const x of ic) if (typeof x.ID === 'number' && typeof x.Tarief === 'number') IC_TARIEF[x.ID] = x.Tarief
+} catch (e) { console.warn('IC-tarieven niet gelezen:', e.message) }
 console.log(`aanvulling: ${AANVULLING.medewerkers.filter(m => typeof m.tarief === 'number').length} tarieven uit ${path.basename(SRC.tarievenAanvulling)} (${AANVULLING.datum ?? '?'})`)
 const bronTot = {} // bron → { personen:Set, uren, kosten } — voor MARGE_META.tariefBronnen
 
@@ -154,7 +175,7 @@ const empInfo = {}  // werknemer-id → { naam, bedrijf }
     const [y, m] = serialToMonth(x[11])
     if (y !== 2026) continue
     const uren = x[17] ?? 0
-    const p = P(String(x[7]).trim())
+    const p = P(canonId(String(x[7]).trim()))
     if (!p.naam && x[8]) p.naam = String(x[8]).trim()
     p.uren[m - 1] += uren
     const eb = bedrijfKey(String(x[0] ?? ''))
@@ -162,7 +183,9 @@ const empInfo = {}  // werknemer-id → { naam, bedrijf }
     const emp = x[2]
     ;((empMix[emp] ??= {})[m] ??= {})[p.id] = (empMix[emp][m][p.id] ?? 0) + uren
     empInfo[emp] ??= { naam: x[3], bedrijf: bedrijfKey(String(x[0] ?? '')) }
-    const rt = rate[x[2]]
+    // S.L. (Spanje): vast €35/uur voor iedereen (afspraak Lars 25-09), ook wie niet in de invullijst staat
+    if (!rate[emp] && /Spanje/i.test(String(x[0]))) rate[emp] = { bedrijf: 'S.L. (Spanje)', naam: x[3], kostprijsAK: SPANJE_TARIEF, verkoop: null, bron: 'spanje' }
+    const rt = rate[emp]
     const bt = (bronTot[bronVan(emp)] ??= { personen: new Set(), uren: 0, kosten: 0 })
     bt.personen.add(emp); bt.uren += uren
     if (rt) { p.kosten[m - 1] += uren * rt.kostprijsAK; bt.kosten += uren * rt.kostprijsAK }
@@ -202,7 +225,7 @@ const zonderProject = {}   // facturen zonder projectnummer ('#') — buiten de 
       if (yy === '2026') zonderProject[klant] = (zonderProject[klant] ?? 0) + bedrag
       continue
     }
-    const p = P(id)
+    const p = P(canonId(id))
     if (yy === '2026') p.omzet[parseInt(mm) - 1] += bedrag
     else if (yy === '2025') p.omzet2025[parseInt(mm) - 1] += bedrag
     p.klanten[klant] = (p.klanten[klant] ?? 0) + Math.abs(bedrag)
@@ -259,16 +282,16 @@ function readConcept(file) {
   }
   return out
 }
-function readEenheden(file) {
-  const rows = sheetRows(file, 'Onderhande Werk')
-  const hdr = rows[1]
+// Eenheden-OHW: per work package; project = "Nummer 2026" (het 2026-projectnummer waarop gefactureerd
+// en uren geschreven wordt), anders het SAP-nummer (oude/doorlopende nummers, bijv. KCW = SAP E-1091 →
+// 2026 E-1158).
+function eenhedenRows(hdr, rows, out) {
   // 'Waarde NTF' is de totaalkolom van de OHW-kolommen — niet meetellen
   const wCols = hdr.map((h, i) => [h, i]).filter(([h]) => typeof h === 'string' && /^Waarde OHW/.test(h)).map(([, i]) => i)
-  const iResp = hdr.indexOf('Responsible TPG'), iKl = hdr.indexOf('Klant')
-  const out = {}
-  for (let i = 2; i < rows.length; i++) {
-    const x = rows[i]; if (!x || !x[0]) continue
-    const id = projIdOf(x[0]); if (!id) continue
+  const iResp = hdr.indexOf('Responsible TPG'), iKl = hdr.indexOf('Klant'), iSap = hdr.indexOf('SAP-nummer'), iN26 = hdr.indexOf('Nummer 2026')
+  for (const x of rows) {
+    if (!x) continue
+    const id = (/^[A-Z]-\d+/.test(String(x[iN26] ?? '').trim()) ? projIdOf(x[iN26]) : null) ?? projIdOf(x[iSap]); if (!id) continue
     let v = 0; for (const c of wCols) v += typeof x[c] === 'number' ? x[c] : 0
     out[id] = (out[id] ?? 0) + v
     const p = P(id)
@@ -277,6 +300,19 @@ function readEenheden(file) {
   }
   return out
 }
+function readEenheden(file) {
+  const rows = sheetRows(file, 'Onderhande Werk')
+  return eenhedenRows(rows[1], rows.slice(2), {})
+}
+// Weekfreezes (OHW Trendlijnen) = dezelfde bestanden als de maandsnapshots, gebundeld met Source.Name.
+let FREEZE_CACHE = null
+function readEenhedenFreeze(sourceName) {
+  FREEZE_CACHE ??= sheetRows(SRC_DETAIL.freezes, 'OHW Freezes')
+  const hdr = FREEZE_CACHE[0], iS = hdr.indexOf('Source.Name')
+  const rows = FREEZE_CACHE.slice(1).filter(x => x?.[iS] === sourceName)
+  if (!rows.length) throw new Error(`freeze ${sourceName} niet gevonden`)
+  return eenhedenRows(hdr, rows, {})
+}
 const snapTotals = { u: [], d: [], c: [], e: [] }
 for (let m = 1; m <= N_MONTHS; m++) {
   const s = SNAP[m]
@@ -284,7 +320,7 @@ for (let m = 1; m <= N_MONTHS; m++) {
     u: s.u ? readList(path.join(s.dir, s.u), 'u') : null,
     d: s.d ? readList(path.join(s.dir, s.d), 'd') : null,
     c: s.c ? readConcept(path.join(s.dir, s.c)) : null,
-    e: s.e ? readEenheden(path.join(s.dir, s.e)) : null,
+    e: s.eFreeze ? readEenhedenFreeze(s.eFreeze) : s.e ? readEenheden(path.join(s.dir, s.e)) : null,
   }
   for (const k of ['u', 'd', 'c', 'e']) {
     const l = lists[k]
@@ -293,13 +329,13 @@ for (let m = 1; m <= N_MONTHS; m++) {
     for (const [id, v] of Object.entries(l)) P(id).snaps[k][m] = v
   }
 }
-// ontbrekende eenheden-snapshots (mrt, jul) lineair interpoleren per project
-for (const p of Object.values(proj)) {
-  for (let m = 1; m <= N_MONTHS; m++) {
-    if (SNAP[m].e) continue
-    const prev = p.snaps.e[m - 1] ?? 0, next = p.snaps.e[m + 1] ?? 0
-    p.snaps.e[m] = (prev + next) / 2
-  }
+// Controle: eenheden-OHW per maand vs de stand die in de OHW-administratie is geboekt (P08, Telecom + Civiel)
+const OHW_ADMIN_EENHEDEN = [360552, 354171.61, 367709.67, 371627.34, 354065.21, 473043, 337021, 456296.97 + 25054.63]
+const eenhedenAfwijking = []
+for (let m = 1; m <= N_MONTHS; m++) {
+  const d = (snapTotals.e[m] ?? 0) - OHW_ADMIN_EENHEDEN[m - 1]
+  eenhedenAfwijking[m - 1] = Math.round(d)
+  if (Math.abs(d) > 1) console.log(`  eenheden ${m}: snapshot ${snapTotals.e[m]} vs OHW-admin ${Math.round(OHW_ADMIN_EENHEDEN[m - 1])} → verschil ${Math.round(d)}`)
 }
 // openingsstand Dec-25 naar rato van de jan-snapshot
 for (const k of ['u', 'd', 'c', 'e']) {
@@ -394,6 +430,7 @@ for (let m = 0; m <= N_MONTHS; m++) {
   }
 }
 let mhUrenTot = 0
+const mhEmpProj = {} // emp → pid → { omzet[12], kosten[12] }: missing hours per medewerker per project
 for (let m = 1; m <= N_MONTHS; m++) {
   for (const ent of Object.keys(MH_STAND)) {
     const cur = mhEmpStand[m][ent], prev = mhEmpStand[m - 1][ent]
@@ -417,6 +454,9 @@ for (let m = 1; m <= N_MONTHS; m++) {
         const p = P(pid)
         p.mhOmzet[m - 1] += dOmzet * u / tot
         p.mhKosten[m - 1] += dKosten * u / tot
+        const em = ((mhEmpProj[emp] ??= {})[pid] ??= { omzet: arr12(), kosten: arr12() })
+        em.omzet[m - 1] += dOmzet * u / tot
+        em.kosten[m - 1] += dKosten * u / tot
       }
     }
   }
@@ -476,6 +516,22 @@ const missingList = Object.values(missingRate).sort((a, b) => b.uren - a.uren).m
 const missingUren = missingList.reduce((a, b) => a + b.uren, 0)
 const totUren = Object.values(proj).reduce((a, p) => a + p.uren.reduce((x, y) => x + y, 0), 0)
 
+// Optioneel: bouwstenen per project voor een vergelijking met het Power BI-rapport (KostenBaten V3.0)
+if (process.env.PBI_VERGELIJK) {
+  const wk1 = readEenhedenFreeze('Onderhanden Werk eind week 1 NA.xlsx')
+  const rows = Object.values(proj).map(p => ({
+    id: p.id, naam: p.naam, klant: p.klant, ent: p.ent, seg: p.seg, intern: !!p.intern,
+    uren: p.uren.slice(0, N_MONTHS).reduce((a, b) => a + b, 0),
+    kosten: [...p.kosten, ...p.kostenFallback].slice(0).reduce((a, b, i) => a + (i % 12 < N_MONTHS ? b : 0), 0),
+    fact: p.omzet.slice(0, N_MONTHS).reduce((a, b) => a + b, 0),
+    snap0: Object.fromEntries(['u', 'd', 'c', 'e'].map(k => [k, p.snaps[k][0] ?? 0])),
+    snapN: Object.fromEntries(['u', 'd', 'c', 'e'].map(k => [k, p.snaps[k][N_MONTHS] ?? 0])),
+    eWk1: wk1[p.id] ?? 0,
+  }))
+  fs.writeFileSync(process.env.PBI_VERGELIJK, JSON.stringify(rows))
+  console.log(`PBI-vergelijking: ${rows.length} projecten → ${process.env.PBI_VERGELIJK}`)
+}
+
 // ── 7. Schrijven ────────────────────────────────────────────────────────────
 const L = []
 L.push(`/**`)
@@ -527,7 +583,10 @@ L.push(` *  tarievenbestand = HC-tarievenbestand; ingevuld = invullijst Lars; sp
 L.push(`  tariefBronnen: ${JSON.stringify(Object.fromEntries(['tarievenbestand', 'ingevuld', 'spanje', 'geschat'].map(b => [b, { personen: bronTot[b]?.personen.size ?? 0, uren: Math.round(bronTot[b]?.uren ?? 0), kosten: Math.round(bronTot[b]?.kosten ?? 0) }])))},`)
 L.push(`  /** Alle medewerkers buiten het tarievenbestand, met het gebruikte tarief en de bron (scripts/tarieven-aanvulling.json). */`)
 L.push(`  tarievenAanvulling: ${JSON.stringify(AANVULLING.medewerkers.map(m => ({ id: m.id, naam: m.naam, bedrijf: m.bedrijf, uren: Math.round(m.urenProductief ?? 0), tarief: typeof m.tarief === 'number' ? m.tarief : (/Spanje/i.test(m.bedrijf) ? medianBy.Projects : medianBy[bedrijfKey(m.bedrijf)]), bron: m.bron })))},`)
-L.push(`  eenhedenSnapshotsOntbreken: ['Mar-26', 'Jul-26'], // lineair geïnterpoleerd per project`)
+L.push(`  eenhedenSnapshotsOntbreken: [] as string[], // mrt/jul komen sinds 25-09 uit de weekfreezes (geboekte week)`)
+L.push(`  /** Eenheden-OHW snapshot minus geboekte stand OHW-administratie, per maand (jan..) */`)
+L.push(`  eenhedenAfwijking: ${JSON.stringify(eenhedenAfwijking)},`)
+L.push(`  projectAlias: ${JSON.stringify(PROJECT_ALIAS)},`)
 L.push(`  /** Missing hours: stand per entiteit per maand (uren × verkooptarief) zoals berekend uit de lijsten;`)
 L.push(` *  onverdeeld = mutatie van medewerkers zonder geschreven uren (niet aan een project te koppelen). */`)
 L.push(`  missingHours: { stand: ${JSON.stringify(Object.fromEntries(Object.entries(mhTotals).map(([e, a]) => [e, rnd(a)])))}, onverdeeld: ${JSON.stringify(Object.fromEntries(Object.entries(mhOnverdeeld).map(([e, a]) => [e, rnd(a)])))}, mutatieUren: ${Math.round(mhUrenTot)} },`)
@@ -559,10 +618,6 @@ console.log('✓ src/data/marginData.ts geschreven')
 //    ('Delta waarde vorige week', kolom 'Nummer 2026' → project)
 //  - Servicebevestigingen (Projectadministratie en Registratie Vergaderingen.xlsm):
 //    bevestigde/gefactureerde meters per project per week (2026)
-const SRC_DETAIL = {
-  freezes: 'C:/Users/lvanderavoird/The People Group/TPG Projects 2025 - Documenten/03 Finance/01 Finance Alex versie/OHW 2026/OHW Trendlijnen - 2026.xlsx',
-  projectadmin: 'C:/Users/lvanderavoird/The People Group/TPG Projects - OpEx - Planning/Projectadministratie en Registratie Vergaderingen.xlsm',
-}
 const isoWeek = ser => {
   const d = new Date(Date.UTC(1899, 11, 30) + ser * 86400000)
   const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
@@ -584,7 +639,7 @@ const empDecl = {}   // emp → { naam, bedrijf, klant, intern, afwezig }
     // cat-arrays per maand: alle geschreven uren per soort, voor de declarabiliteit per medewerker
     const d = (empDecl[emp] ??= { naam: x[3], bedrijf: bedrijfKey(String(x[0] ?? '')), klant: 0, intern: 0, afwezig: 0, bedrijfStr: String(x[0] ?? ''),
       cat: { klant: arr12(), intern: arr12(), improductief: arr12(), verlof: arr12(), ziekte: arr12(), bijzverlof: arr12(), overig: arr12() } })
-    const pid = x[7] ? String(x[7]).trim() : null
+    const pid = x[7] ? canonId(String(x[7]).trim()) : null
     if (cat === 'Productieve tijd' && pid) {
       const isIntern = INTERN_RE.test(pid) || pid.startsWith('G-')
       if (isIntern) { d.intern += uren; d.cat.intern[m - 1] += uren } else { d.klant += uren; d.cat.klant[m - 1] += uren }
@@ -613,7 +668,7 @@ try {
     const w = parseInt(String(x[iW] ?? '')); if (!w || w > 38) continue
     const d = typeof x[iD] === 'number' ? x[iD] : 0; if (!d) continue
     const t = String(x[iN26] ?? '').trim()
-    const pid = (/^E-\d+/.test(t) ? t : String(x[iSap] ?? '')).split('-').slice(0, 2).join('-')
+    const pid = canonId((/^E-\d+/.test(t) ? t : String(x[iSap] ?? '')).split('-').slice(0, 2).join('-'))
     if (!/^E-\d+$/.test(pid)) continue
     ;(weekProd[pid] ??= {})[w] = (weekProd[pid][w] ?? 0) + d
     const tk = `${t || x[iSap]} ${x[iWp] ?? ''}`.trim()
@@ -637,6 +692,38 @@ try {
   console.log(`Servicebevestigingen 2026: ${Object.keys(weekBev).length} projecten`)
 } catch (e) { console.warn('Servicebevestigingen niet gelezen:', e.message) }
 
+// ── Omzet per medewerker ────────────────────────────────────────────────────
+// Urenprojecten (U-) en detachering (D-) worden per medewerker per uur gefactureerd: het tarief per
+// medewerker per project komt uit de U-/D-facturatielijsten (alle maandsnapshots, uren × nettowaarde per
+// teamlid). De projectomzet (facturatie + Δ OHW) wordt per maand verdeeld naar uren × dat tarief.
+// Eenheden/vaste prijs/software (E-, F-, S-, G-, …) hebben geen tarief per persoon: daar wordt de omzet
+// verdeeld naar rato van de kosten, zodat iedere medewerker het margepercentage van het project krijgt.
+const billRate = {} // `${pid}|${emp}` → { q, v }
+const billEmp = {}  // emp → { q, v } over alle projecten
+for (let m = 1; m <= N_MONTHS; m++) for (const k of ['u', 'd']) {
+  const f = SNAP[m][k]; if (!f) continue
+  const rows = sheetRows(path.join(SNAP[m].dir, f))
+  const hi = rows.findIndex(r => r && r.includes('Teamlid')); if (hi < 0) continue
+  const h = rows[hi]
+  const iP = h.indexOf('Project'), iT = h.indexOf('Teamlid'), iQ = colIdx(h, 'Hoeveelheid'), iV = colIdx(h, 'Nog niet gefactureerde nettowaarde')
+  for (const x of rows.slice(hi + 1)) {
+    const pid = projIdOf(x?.[iP]), emp = Number(x?.[iT]), q = x?.[iQ], v = x?.[iV]
+    if (!pid || !emp || typeof q !== 'number' || typeof v !== 'number' || q <= 0 || v <= 0) continue
+    const b = (billRate[`${pid}|${emp}`] ??= { q: 0, v: 0 }); b.q += q; b.v += v
+    const be = (billEmp[emp] ??= { q: 0, v: 0 }); be.q += q; be.v += v
+  }
+}
+console.log(`gefactureerde tarieven: ${Object.keys(billRate).length} combinaties project × medewerker, ${Object.keys(billEmp).length} medewerkers`)
+const verkoopVan = (emp, pid) => {
+  const b = billRate[`${pid}|${emp}`]; if (b?.q) return { t: b.v / b.q, bron: 'gefactureerd' }
+  const be = billEmp[emp]; if (be?.q) return { t: be.v / be.q, bron: 'gefactureerd (ander project)' }
+  if (rate[emp]?.verkoop) return { t: rate[emp].verkoop, bron: 'tarievenbestand' }
+  if (mhTariefAll[emp]) return { t: mhTariefAll[emp], bron: 'missing-hours-lijst' }
+  if (IC_TARIEF[emp]) return { t: IC_TARIEF[emp], bron: 'IC-tarief' }
+  return { t: kostprijsVan(emp, empDecl[emp]?.bedrijfStr) * 1.25, bron: 'geschat' }
+}
+const perUurGefactureerd = pid => /^[DU]-/.test(pid)
+
 const D = []
 D.push(`/**`)
 D.push(` * AUTO-GENERATED door scripts/gen-margin-data.mjs — detaildata voor de drill-down in de marge-matrix.`)
@@ -647,7 +734,9 @@ D.push(` * Declarabiliteit = uren op klantprojecten / alle geschreven uren excl.
 D.push(` */`)
 D.push(`/** bron van de kostprijs: tarievenbestand | ingevuld (invullijst Lars) | spanje (€35-regel) | geschat (mediaan bedrijf) */`)
 D.push(`export type TariefBron = 'tarievenbestand' | 'ingevuld' | 'spanje' | 'geschat'`)
-D.push(`export interface DetailEmp { id: number; naam: string; bedrijf: string; uren: number[]; kosten: number[]; geschat: boolean; bron: TariefBron; tarief: number; decl: number | null }`)
+D.push(`/** omzet = aandeel in facturatie + Δ OHW van het project; sleutel 'tarief' = uren × verkooptarief (U-/D-projecten),`)
+D.push(` *  'kosten' = naar rato van kosten (eenheden/vaste prijs: marge% = project); vt/vtBron = gebruikt verkooptarief. */`)
+D.push(`export interface DetailEmp { id: number; naam: string; bedrijf: string; uren: number[]; kosten: number[]; omzet: number[]; mhOmzet: number[]; mhKosten: number[]; sleutel: 'tarief' | 'kosten'; vt: number | null; vtBron: string | null; geschat: boolean; bron: TariefBron; tarief: number; decl: number | null }`)
 D.push(`/** Alle geschreven uren per medewerker per maand, per soort (urenexport kolom "Soort"): klant = productief op`)
 D.push(` *  klantprojecten, intern = productief op interne/G-projecten, improductief = Improductief + NTCS, overig = Missing e.d. */`)
 D.push(`export interface DetailMedewerker { id: number; naam: string; bedrijf: string; bron: TariefBron; tarief: number; klant: number[]; intern: number[]; improductief: number[]; verlof: number[]; ziekte: number[]; bijzverlof: number[]; overig: number[] }`)
@@ -661,13 +750,26 @@ for (const p of Object.values(proj)) {
   const tot = a => a.slice(0, N_MONTHS).reduce((x, y) => x + y, 0)
   const kostenTot = tot(p.kosten) + tot(p.kostenFallback)
   if (tot(p.omzet) === 0 && tot(ohwDelta) === 0 && kostenTot === 0 && tot(p.mhOmzet) === 0) continue
+  // omzetverdeling over medewerkers: gewicht per maand, fallback YTD-gewicht als die maand geen uren heeft
+  const perUur = perUurGefactureerd(p.id)
+  const leden = Object.entries(empProj).filter(([, ep]) => ep[p.id]).map(([emp, ep]) => {
+    const e = ep[p.id], vk = perUur ? verkoopVan(Number(emp), p.id) : null
+    return { emp, e, vk, w: e.uren.map((u, i) => perUur ? u * vk.t : e.kosten[i]) }
+  })
+  const wM = arr12().map((_, i) => leden.reduce((a, l) => a + l.w[i], 0))
+  const wY = wM.reduce((a, b) => a + b, 0)
+  const R = p.omzet.map((v, i) => v + ohwDelta[i])
   const emps = []
-  for (const [emp, ep] of Object.entries(empProj)) {
-    const e = ep[p.id]; if (!e) continue
+  for (const { emp, e, vk, w } of leden) {
     const d = empDecl[emp]
     const worked = d.klant + d.intern
     const totU = e.uren.reduce((x, y) => x + y, 0), totK = e.kosten.reduce((x, y) => x + y, 0)
-    emps.push({ id: Number(emp), naam: d.naam, bedrijf: d.bedrijf, uren: rnd(e.uren), kosten: rnd(e.kosten), geschat: !rate[emp], bron: bronVan(emp), tarief: totU ? Math.round(totK / totU * 100) / 100 : 0, decl: worked ? Math.round(d.klant / worked * 100) : null })
+    const wEmpY = w.reduce((a, b) => a + b, 0)
+    const omzet = R.map((r, i) => wM[i] ? r * w[i] / wM[i] : (wY ? r * wEmpY / wY : 0))
+    const mh = mhEmpProj[emp]?.[p.id]
+    emps.push({ id: Number(emp), naam: d.naam, bedrijf: d.bedrijf, uren: rnd(e.uren), kosten: rnd(e.kosten), omzet: rnd(omzet), mhOmzet: rnd(mh?.omzet ?? arr12()), mhKosten: rnd(mh?.kosten ?? arr12()),
+      sleutel: perUur ? 'tarief' : 'kosten', vt: vk ? Math.round(vk.t * 100) / 100 : null, vtBron: vk?.bron ?? null,
+      geschat: !rate[emp] && !/Spanje/i.test(d.bedrijfStr), bron: bronVan(emp), tarief: totU ? Math.round(totK / totU * 100) / 100 : 0, decl: worked ? Math.round(d.klant / worked * 100) : null })
   }
   emps.sort((a, b) => b.uren.reduce((x, y) => x + y, 0) - a.uren.reduce((x, y) => x + y, 0))
   const rec = {

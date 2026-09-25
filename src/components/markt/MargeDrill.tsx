@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { DetailProject, DetailMedewerker, WeekRow, TariefBron } from '../../data/marginDetail'
+import type { DetailProject, DetailEmp, DetailMedewerker, WeekRow, TariefBron } from '../../data/marginDetail'
 import { MARGE_MAANDEN, MARGE_META } from '../../data/marginData'
 
 type DetailModule = typeof import('../../data/marginDetail')
@@ -32,23 +32,22 @@ const groupRow: CSSProperties = { color: 'var(--t3)', fontSize: 9.5, textTransfo
 const margeColor = (v: number) => v >= 0 ? 'var(--green)' : 'var(--red)'
 const declColor = (v: number | null) => v == null ? 'var(--t3)' : v >= 80 ? 'var(--green)' : v >= 60 ? 'var(--amber)' : 'var(--red)'
 const mono: CSSProperties = { fontFamily: 'var(--mono)' }
-// Kostprijs-herkomst van een medewerker die niet in het HC-tarievenbestand staat (scripts/tarieven-aanvulling.json)
-const BRON_MARKER: Record<TariefBron, string> = { tarievenbestand: '', ingevuld: '✎', spanje: 'ES', geschat: '≈' }
-const BRON_KLEUR: Record<TariefBron, string> = { tarievenbestand: 'inherit', ingevuld: 'var(--t3)', spanje: 'var(--t3)', geschat: 'var(--amber)' }
+// Kostprijs-herkomst: tarievenbestand, invullijst Lars en Spanje €35 zijn vaste gegevens; alleen 'geschat'
+// (mediaan van het bedrijf, tarief ontbreekt) krijgt een markering.
 const BRON_TITEL: Record<TariefBron, string> = {
   tarievenbestand: 'Tarievenbestand',
-  ingevuld: 'Niet in tarievenbestand — tarief ingevuld door Lars (invullijst 25-09-2026)',
-  spanje: 'Niet in tarievenbestand — Spanje-regel: €35/uur voor alle S.L.-medewerkers (Lars, 25-09-2026)',
-  geschat: 'Niet in tarievenbestand en niet ingevuld — geschat op de mediaan kostprijs+AK van het bedrijf',
+  ingevuld: 'Tarief uit de invullijst (Lars, 25-09-2026)',
+  spanje: 'S.L. (Spanje): €35/uur',
+  geschat: 'Tarief ontbreekt (niet in tarievenbestand of invullijst) — geschat op de mediaan kostprijs+AK van het bedrijf',
 }
-const BRON_LABEL: Record<TariefBron, string> = { tarievenbestand: 'tarievenbestand', ingevuld: 'ingevuld (Lars)', spanje: 'Spanje €35', geschat: 'geschat (mediaan)' }
+const BRON_LABEL: Record<TariefBron, string> = { tarievenbestand: 'tarievenbestand', ingevuld: 'invullijst', spanje: 'Spanje €35', geschat: 'geschat (mediaan)' }
 const linkStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 11.5, padding: 0, textAlign: 'left' }
 const sectionTitle: CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }
 const inputStyle: CSSProperties = { fontSize: 10.5, padding: '2px 6px', background: 'var(--bg1)', border: '1px solid var(--bd2)', borderRadius: 4, color: 'var(--t1)', fontFamily: 'var(--font)' }
 
 function BronMarker({ bron, tarief }: { bron: TariefBron; tarief: number }) {
-  if (bron === 'tarievenbestand') return null
-  return <span style={{ color: BRON_KLEUR[bron], marginLeft: 4, fontSize: 10 }} title={`${BRON_TITEL[bron]} — €${tarief}/uur`}>{BRON_MARKER[bron]}</span>
+  if (bron !== 'geschat') return null
+  return <span style={{ color: 'var(--amber)', marginLeft: 4, fontSize: 10 }} title={`${BRON_TITEL[bron]} — €${tarief}/uur`}>≈</span>
 }
 
 // ── Generiek sorteren + filteren ────────────────────────────────────────────
@@ -226,9 +225,8 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
       for (const e of p.emps) {
         const u = somM(e.uren); if (!u) continue
         const m = profielen.get(e.id); if (!m) continue
-        const share = u / k.uren
         const r = rij(m)
-        r.urenSel += u; r.omzet += share * k.omzet; r.kosten += somM(e.kosten) + share * k.mhKosten
+        r.urenSel += u; r.omzet += somM(e.omzet) + (metMh ? somM(e.mhOmzet) : 0); r.kosten += somM(e.kosten) + (metMh ? somM(e.mhKosten) : 0)
         r.projOmzet += k.omzet; r.projMarge += k.marge; r.nProj++
       }
     }
@@ -344,16 +342,8 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
       <div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
           <div style={sectionTitle}>Medewerkers — {filterLabel} · {periodeLabel} ({medewerkers.rijen.length})</div>
-          <span style={{ fontSize: 10.5, color: 'var(--t3)' }}>klik op een naam voor de projecten en klanten van die medewerker</span>
+          <span style={{ fontSize: 10.5, color: 'var(--t3)' }}>klik op een naam: de projecten, klanten en aannames van die medewerker klappen eronder open</span>
         </div>
-
-        {selectedEmp && (
-          <MedewerkerDetail
-            m={selectedEmp} mod={mod} metMh={metMh} maanden={maanden} periodeLabel={periodeLabel}
-            inSelectie={new Set(filterProj.map(p => p.id))}
-            onClose={() => setEmpId(null)}
-          />
-        )}
 
         <FilterBar state={mdwTabel.state} placeholder="filter op naam…" n={mdwTabel.rows.length} totaal={medewerkers.rijen.length}>
           <Select value={bvFilter} onChange={setBvFilter} title="BV van de medewerker" opties={[['alle', 'alle BV\'s'], ['Consultancy', 'Consultancy'], ['Projects', 'Projects'], ['Software', 'Software']]} />
@@ -399,8 +389,9 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
                   const pr = r.profiel
                   const active = r.id === empId
                   return (
-                    <tr key={r.id} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)', background: active ? 'rgba(0,169,224,.08)' : undefined }}>
-                      <td style={td('left')}><button style={{ ...linkStyle, fontSize: 11, fontWeight: active ? 700 : 500 }} onClick={() => setEmpId(active ? null : r.id)} title="Klik voor de projecten en klanten van deze medewerker">{r.naam}</button><BronMarker bron={r.bron} tarief={r.tarief} /></td>
+                    <Fragment key={r.id}>
+                    <tr style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)', background: active ? 'rgba(0,169,224,.08)' : undefined }}>
+                      <td style={td('left')}><button style={{ ...linkStyle, fontSize: 11, fontWeight: active ? 700 : 500 }} onClick={() => setEmpId(active ? null : r.id)} title="Klik om de projecten, klanten en aannames van deze medewerker hieronder open te klappen">{active ? '▾ ' : '▸ '}{r.naam}</button><BronMarker bron={r.bron} tarief={r.tarief} /></td>
                       <td style={td('left', { color: 'var(--t2)' })}>{r.bedrijf}</td>
                       <td style={td('right', mono)}>{fmtU(r.urenSel)}</td>
                       <td style={td('right', mono)}>{fmtK(r.omzet)}</td>
@@ -420,6 +411,18 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
                       <td style={td('right', { fontWeight: 700, color: declColor(pr.declAlle), borderLeft: '1px solid var(--bd2)' })}>{pr.declAlle == null ? '—' : `${pr.declAlle}%`}</td>
                       <td style={td('right', { color: declColor(pr.declExcl) })}>{pr.declExcl == null ? '—' : `${pr.declExcl}%`}</td>
                     </tr>
+                    {active && selectedEmp && (
+                      <tr>
+                        <td colSpan={19} style={{ padding: '4px 0 10px 18px', background: 'rgba(0,169,224,.04)' }}>
+                          <MedewerkerDetail
+                            m={selectedEmp} mod={mod} metMh={metMh} maanden={maanden} periodeLabel={periodeLabel}
+                            inSelectie={new Set(filterProj.map(p => p.id))}
+                            onClose={() => setEmpId(null)}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   )
                 })}
                 <tr style={{ borderTop: '2px solid var(--bd3)', color: 'var(--t1)', fontWeight: 700 }}>
@@ -448,70 +451,38 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
 }
 
 // ── Aannames & nuances per filterset ────────────────────────────────────────
-type Status = 'schatting' | 'nuance' | 'niet in model'
+// schatting = cijfer is geschat; nuance = modelkeuze die je moet kennen; signaal = opvallend in de data;
+// niet in model = zit er niet in (verklaart verschil met de P&L)
+type Status = 'schatting' | 'nuance' | 'signaal' | 'niet in model'
 interface Aanname { status: Status; tekst: string; bedrag?: number; basis?: 'omzet' | 'kosten'; detail?: string }
 const STATUS_STIJL: Record<Status, { kleur: string; label: string }> = {
   schatting: { kleur: 'var(--amber)', label: 'schatting' },
   nuance: { kleur: 'var(--t3)', label: 'nuance' },
+  signaal: { kleur: 'var(--blue)', label: 'signaal' },
   'niet in model': { kleur: 'var(--red)', label: 'niet in model' },
 }
-const INTERPOLATIE_MAANDEN = [2, 3, 6, 7] // mrt/apr en jul/aug: Δ OHW eenheden leunt op geïnterpoleerde snapshots van mrt en jul
 
-function Aannames({ filterProj, metMh, maanden, ent, label, periodeLabel, nietToerekenbaar }: {
-  filterProj: DetailProject[]; metMh: boolean; maanden: number[]; ent: string; label: string; periodeLabel: string; nietToerekenbaar: number
-}) {
-  const [open, setOpen] = useState(true)
-  const a = useMemo(() => {
-    const s = (arr: number[]) => somOver(arr, maanden)
-    let omzet = 0, kosten = 0, mhOmzet = 0, mhKosten = 0, interp = 0, verdeel = 0, verdeelN = 0, andereBv = 0, andereBvUren = 0, losN = 0
-    const bron: Record<TariefBron, { pers: Set<number>; uren: number; kosten: number }> = {
-      tarievenbestand: { pers: new Set(), uren: 0, kosten: 0 }, ingevuld: { pers: new Set(), uren: 0, kosten: 0 }, spanje: { pers: new Set(), uren: 0, kosten: 0 }, geschat: { pers: new Set(), uren: 0, kosten: 0 },
-    }
-    for (const p of filterProj) {
-      const k = kpiVan(p, metMh, maanden)
-      omzet += k.omzet; kosten += k.kosten; mhOmzet += k.mh; mhKosten += k.mhKosten
-      if (k.geenUren) losN++
-      if (p.id.startsWith('E-')) interp += somOver(p.ohw, maanden.filter(m => INTERPOLATIE_MAANDEN.includes(m)))
-      if (!['D', 'U'].includes(p.id[0]) && k.uren > 0) { verdeel += k.omzet; verdeelN++ }
-      for (const e of p.emps) {
-        const u = s(e.uren); if (!u) continue
-        const c = s(e.kosten)
-        bron[e.bron].pers.add(e.id); bron[e.bron].uren += u; bron[e.bron].kosten += c
-        if (e.bedrijf !== p.ent) { andereBv += c; andereBvUren += u }
-      }
-    }
-    const lijst: Aanname[] = []
-    if (bron.geschat.uren) lijst.push({ status: 'schatting', basis: 'kosten', bedrag: bron.geschat.kosten, tekst: `Kostprijs geschat op mediaan bedrijf: ${bron.geschat.pers.size} pers., ${fmtU(bron.geschat.uren)} uur`, detail: 'tarief ontbreekt in HC-bestand én invullijst' })
-    if (metMh && (mhOmzet || mhKosten)) lijst.push({ status: ent === 'Consultancy' ? 'nuance' : 'schatting', basis: 'omzet', bedrag: mhOmzet, tekst: `Missing hours toegerekend: omzet ${fmtK(mhOmzet)}, kosten ${fmtK(mhKosten)}`, detail: ent === 'Consultancy' ? 'detachering: exact per medewerker' : 'verdeeld naar rato van geschreven uren (Projects/Software = schatting)' })
-    if (interp) lijst.push({ status: 'schatting', basis: 'omzet', bedrag: interp, tekst: `Δ OHW eenheden in mrt/apr/jul/aug op geïnterpoleerde snapshots`, detail: 'OHW-eenhedenlijst van maart en juli ontbreekt; timing per maand onzeker, YTD klopt' })
-    if (nietToerekenbaar) lijst.push({ status: 'nuance', basis: 'omzet', bedrag: nietToerekenbaar, tekst: `Losse dossiers: ${losN} project(en) met omzet zonder uren`, detail: 'telt mee als omzet, geen kosten, niet aan medewerkers toe te rekenen' })
-    if (bron.ingevuld.uren) lijst.push({ status: 'nuance', basis: 'kosten', bedrag: bron.ingevuld.kosten, tekst: `Tarief uit invullijst Lars: ${bron.ingevuld.pers.size} pers., ${fmtU(bron.ingevuld.uren)} uur`, detail: 'inhuur = inkooptarief, eigen = kostprijs+AK' })
-    if (bron.spanje.uren) lijst.push({ status: 'nuance', basis: 'kosten', bedrag: bron.spanje.kosten, tekst: `Spanje-regel €35/uur: ${bron.spanje.pers.size} pers., ${fmtU(bron.spanje.uren)} uur`, detail: 'vaste afspraak, geen echte kostprijs per persoon' })
-    if (verdeel) lijst.push({ status: 'nuance', basis: 'omzet', bedrag: verdeel, tekst: `Omzet per medewerker via uren-verdeelsleutel op ${verdeelN} niet-uren-project(en)`, detail: 'eenheden/fixed price/software: aandeel = uren-aandeel, geen individuele productie' })
-    if (andereBv) lijst.push({ status: 'nuance', basis: 'kosten', bedrag: andereBv, tekst: `Kosten van medewerkers uit een andere BV: ${fmtU(andereBvUren)} uur`, detail: 'kosten volgen het project (IC-neutraal); in de P&L staat dit als IC-omzet/-kosten' })
-    lijst.push({ status: 'niet in model', tekst: 'Niet in dit model: inkoop/onderaanneming, handmatige OHW-posten, licenties zonder project, opex buiten de AK-opslag', detail: 'zie aansluitingsblok onderaan' })
-    const schatOmzet = lijst.filter(x => x.status === 'schatting' && x.basis === 'omzet').reduce((t, x) => t + (x.bedrag ?? 0), 0)
-    const schatKosten = lijst.filter(x => x.status === 'schatting' && x.basis === 'kosten').reduce((t, x) => t + (x.bedrag ?? 0), 0)
-    return { lijst, omzet, kosten, schatOmzet, schatKosten }
-  }, [filterProj, metMh, maanden, ent, nietToerekenbaar])
-
+function AannameBlok({ titel, lijst, omzet, kosten, startOpen = true, compact = false }: { titel: string; lijst: Aanname[]; omzet: number; kosten: number; startOpen?: boolean; compact?: boolean }) {
+  const [open, setOpen] = useState(startOpen)
+  const schatOmzet = lijst.filter(x => x.status === 'schatting' && x.basis === 'omzet').reduce((t, x) => t + (x.bedrag ?? 0), 0)
+  const schatKosten = lijst.filter(x => x.status === 'schatting' && x.basis === 'kosten').reduce((t, x) => t + (x.bedrag ?? 0), 0)
   return (
-    <div style={{ border: '1px solid var(--bd2)', borderRadius: 8, padding: '8px 12px', background: 'var(--bg1)' }}>
+    <div style={{ border: '1px solid var(--bd2)', borderRadius: 8, padding: compact ? '6px 10px' : '8px 12px', background: 'var(--bg1)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-        <button onClick={() => setOpen(v => !v)} style={{ ...linkStyle, ...sectionTitle, marginBottom: 0, color: 'var(--t2)' }}>{open ? '▾' : '▸'} Aannames &amp; nuances — {label} · {periodeLabel}</button>
+        <button onClick={() => setOpen(v => !v)} style={{ ...linkStyle, ...sectionTitle, marginBottom: 0, color: 'var(--t2)' }}>{open ? '▾' : '▸'} {titel}</button>
         <span style={{ fontSize: 10.5, color: 'var(--t2)' }}>
-          schattingen in deze selectie: omzet <b style={{ color: 'var(--amber)', ...mono }}>{fmtK(a.schatOmzet)}</b> ({pct(a.schatOmzet, a.omzet) ?? 0}% van {fmtK(a.omzet)}) · kosten <b style={{ color: 'var(--amber)', ...mono }}>{fmtK(a.schatKosten)}</b> ({pct(a.schatKosten, a.kosten) ?? 0}% van {fmtK(a.kosten)})
+          schattingen: omzet <b style={{ color: 'var(--amber)', ...mono }}>{fmtK(schatOmzet)}</b> ({pct(schatOmzet, omzet) ?? 0}% van {fmtK(omzet)}) · kosten <b style={{ color: 'var(--amber)', ...mono }}>{fmtK(schatKosten)}</b> ({pct(schatKosten, kosten) ?? 0}% van {fmtK(kosten)})
         </span>
       </div>
       {open && (
         <ul style={{ margin: '6px 0 0', paddingLeft: 0, listStyle: 'none', fontSize: 10.5, color: 'var(--t1)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '2px 24px' }}>
-          {a.lijst.map((x, i) => (
+          {lijst.map((x, i) => (
             <li key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0', borderTop: '1px solid var(--bd2)' }} title={x.detail}>
               <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.05em', color: STATUS_STIJL[x.status].kleur, width: 74, flexShrink: 0 }}>{STATUS_STIJL[x.status].label}</span>
               <span style={{ flex: 1 }}>{x.tekst}<span style={{ color: 'var(--t3)' }}>{x.detail ? ` — ${x.detail}` : ''}</span></span>
               {x.bedrag != null && (
                 <span style={{ ...mono, whiteSpace: 'nowrap', color: 'var(--t2)' }}>
-                  {fmtK(x.bedrag)} <span style={{ color: 'var(--t3)' }}>({pct(x.bedrag, x.basis === 'omzet' ? a.omzet : a.kosten) ?? 0}% {x.basis})</span>
+                  {fmtK(x.bedrag)}{x.basis && <span style={{ color: 'var(--t3)' }}> ({pct(x.bedrag, x.basis === 'omzet' ? omzet : kosten) ?? 0}% {x.basis})</span>}
                 </span>
               )}
             </li>
@@ -522,12 +493,53 @@ function Aannames({ filterProj, metMh, maanden, ent, label, periodeLabel, nietTo
   )
 }
 
+function Aannames({ filterProj, metMh, maanden, ent, label, periodeLabel, nietToerekenbaar }: {
+  filterProj: DetailProject[]; metMh: boolean; maanden: number[]; ent: string; label: string; periodeLabel: string; nietToerekenbaar: number
+}) {
+  const a = useMemo(() => {
+    const s = (arr: number[]) => somOver(arr, maanden)
+    let omzet = 0, kosten = 0, mhOmzet = 0, mhKosten = 0, eenhAug = 0, kostSleutel = 0, kostSleutelN = 0, andereBv = 0, andereBvUren = 0, losN = 0
+    const geschat = { pers: new Set<number>(), uren: 0, kosten: 0 }
+    const vtGeschat = { pers: new Set<number>(), omzet: 0 }
+    const alias = Object.entries(MARGE_META.projectAlias ?? {}).filter(([, naar]) => filterProj.some(p => p.id === naar))
+    for (const p of filterProj) {
+      const k = kpiVan(p, metMh, maanden)
+      omzet += k.omzet; kosten += k.kosten; mhOmzet += k.mh; mhKosten += k.mhKosten
+      if (k.geenUren) losN++
+      if (p.id.startsWith('E-') && maanden.includes(7)) eenhAug += p.ohw[7] ?? 0
+      if (!['D', 'U'].includes(p.id[0]) && k.uren > 0) { kostSleutel += k.omzet; kostSleutelN++ }
+      for (const e of p.emps) {
+        const u = s(e.uren); if (!u) continue
+        const c = s(e.kosten)
+        if (e.bron === 'geschat') { geschat.pers.add(e.id); geschat.uren += u; geschat.kosten += c }
+        if (e.sleutel === 'tarief' && e.vtBron === 'geschat') { vtGeschat.pers.add(e.id); vtGeschat.omzet += s(e.omzet) }
+        if (e.bedrijf !== p.ent) { andereBv += c; andereBvUren += u }
+      }
+    }
+    const augAfw = MARGE_META.eenhedenAfwijking?.[7] ?? 0
+    const lijst: Aanname[] = []
+    if (geschat.uren) lijst.push({ status: 'schatting', basis: 'kosten', bedrag: geschat.kosten, tekst: `Kostprijs ontbreekt voor ${geschat.pers.size} pers. (${fmtU(geschat.uren)} uur) → mediaan van het bedrijf`, detail: 'niet in tarievenbestand en niet ingevuld in de invullijst (≈ bij de naam)' })
+    if (metMh && (mhOmzet || mhKosten) && ent !== 'Consultancy') lijst.push({ status: 'schatting', basis: 'omzet', bedrag: mhOmzet, tekst: `Missing hours: stand OHW-admin, over projecten verdeeld naar rato van geschreven uren`, detail: `kosten ${fmtK(mhKosten)}; uit te zetten met het vinkje bovenaan` })
+    if (metMh && (mhOmzet || mhKosten) && ent === 'Consultancy') lijst.push({ status: 'nuance', basis: 'omzet', bedrag: mhOmzet, tekst: `Missing hours (stand OHW-admin) per gedetacheerde toegerekend`, detail: `kosten ${fmtK(mhKosten)}` })
+    if (vtGeschat.omzet) lijst.push({ status: 'schatting', basis: 'omzet', bedrag: vtGeschat.omzet, tekst: `Omzetverdeling binnen urenproject: verkooptarief onbekend voor ${vtGeschat.pers.size} pers.`, detail: 'kostprijs × 1,25 als gewicht; projecttotaal verandert niet' })
+    if (eenhAug && augAfw) lijst.push({ status: 'schatting', basis: 'omzet', bedrag: augAfw, tekst: 'Eenheden-OHW augustus wijkt af van de geboekte stand', detail: 'P8-bestand vs OHW-administratie; jan–jul sluiten exact (weekfreezes)' })
+    for (const [van, naar] of alias) lijst.push({ status: 'nuance', tekst: `${van} (uren vanaf augustus) meegeteld bij ${naar}`, detail: 'zelfde projectnaam; facturatie en OHW-productie lopen door op ' + naar })
+    if (nietToerekenbaar) lijst.push({ status: 'nuance', basis: 'omzet', bedrag: nietToerekenbaar, tekst: `Losse dossiers: ${losN} project(en) met omzet zonder uren`, detail: 'telt mee als omzet, geen kosten, niet aan medewerkers toe te rekenen' })
+    if (kostSleutel) lijst.push({ status: 'nuance', basis: 'omzet', bedrag: kostSleutel, tekst: `Omzet per medewerker op ${kostSleutelN} eenheden-/vaste-prijsproject(en) naar rato van kosten`, detail: 'geen tarief per persoon: iedereen krijgt het margepercentage van het project' })
+    if (andereBv) lijst.push({ status: 'nuance', basis: 'kosten', bedrag: andereBv, tekst: `Medewerkers uit een andere BV: ${fmtU(andereBvUren)} uur`, detail: 'kosten volgen het project; in de P&L staat dit als IC-omzet/-kosten' })
+    lijst.push({ status: 'niet in model', tekst: 'Inkoop/onderaanneming, handmatige OHW-posten, licenties zonder project, improductieve uren, opex buiten de AK-opslag', detail: 'zie aansluitingsblok onderaan' })
+    return { lijst, omzet, kosten }
+  }, [filterProj, metMh, maanden, ent, nietToerekenbaar])
+
+  return <AannameBlok titel={`Aannames & nuances — ${label} · ${periodeLabel}`} lijst={a.lijst} omzet={a.omzet} kosten={a.kosten} />
+}
+
 // ── Inzoom per medewerker ───────────────────────────────────────────────────
-interface EmpProjRij { p: DetailProject; id: string; naam: string; klant: string; entSeg: string; u: number; share: number; omzet: number; kosten: number; marge: number; pct: number | null; projOmzet: number; projMarge: number; projPct: number | null; sel: boolean; intern: boolean }
+interface EmpProjRij { p: DetailProject; e: DetailEmp; sleutel: 'tarief' | 'kosten'; vt: number | null; vtBron: string | null; mhOmzet: number; id: string; naam: string; klant: string; entSeg: string; u: number; share: number; omzet: number; kosten: number; marge: number; pct: number | null; projOmzet: number; projMarge: number; projPct: number | null; sel: boolean; intern: boolean }
 interface EmpKlantRij { klant: string; n: number; u: number; omzet: number; marge: number; projOmzet: number; projMarge: number; intern: boolean }
 const EMP_PROJ_KOL: Kolom<EmpProjRij>[] = [
   { key: 'id', get: r => `${r.id} ${r.naam}`, text: true }, { key: 'klant', get: r => r.klant, text: true }, { key: 'entSeg', get: r => r.entSeg, text: true },
-  { key: 'u', get: r => r.u }, { key: 'share', get: r => r.share }, { key: 'omzet', get: r => r.omzet }, { key: 'kosten', get: r => r.kosten }, { key: 'marge', get: r => r.marge }, { key: 'pct', get: r => r.pct },
+  { key: 'u', get: r => r.u }, { key: 'share', get: r => r.share }, { key: 'vt', get: r => r.u ? r.omzet / r.u : null }, { key: 'omzet', get: r => r.omzet }, { key: 'kosten', get: r => r.kosten }, { key: 'marge', get: r => r.marge }, { key: 'pct', get: r => r.pct },
   { key: 'projOmzet', get: r => r.projOmzet }, { key: 'projMarge', get: r => r.projMarge }, { key: 'projPct', get: r => r.projPct }, { key: 'sel', get: r => r.sel ? 1 : 0 },
 ]
 const EMP_KLANT_KOL: Kolom<EmpKlantRij>[] = [
@@ -547,8 +559,8 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
       const u = somM(e.uren); if (!u) return []
       const k = kpiVan(p, metMh, maanden)
       const share = k.uren ? u / k.uren : 0
-      const omzet = p.intern ? 0 : share * k.omzet, kosten = somM(e.kosten) + share * k.mhKosten
-      return [{ p, id: p.id, naam: p.naam, klant: p.intern ? '(intern)' : p.klant || '(geen klant)', entSeg: `${p.ent} · ${p.seg}`, u, share, omzet, kosten, marge: omzet - kosten, pct: p.intern ? null : pct(omzet - kosten, omzet), projOmzet: p.intern ? 0 : k.omzet, projMarge: p.intern ? 0 : k.marge, projPct: p.intern ? null : pct(k.marge, k.omzet), sel: inSelectie.has(p.id), intern: !!p.intern }]
+      const omzet = p.intern ? 0 : somM(e.omzet) + (metMh ? somM(e.mhOmzet) : 0), kosten = somM(e.kosten) + (metMh ? somM(e.mhKosten) : 0)
+      return [{ p, e, id: p.id, naam: p.naam, klant: p.intern ? '(intern)' : p.klant || '(geen klant)', entSeg: `${p.ent} · ${p.seg}`, u, share, omzet, kosten, marge: omzet - kosten, pct: p.intern ? null : pct(omzet - kosten, omzet), projOmzet: p.intern ? 0 : k.omzet, projMarge: p.intern ? 0 : k.marge, projPct: p.intern ? null : pct(k.marge, k.omzet), sel: inSelectie.has(p.id), intern: !!p.intern, sleutel: e.sleutel, vt: e.vt, vtBron: e.vtBron, mhOmzet: metMh ? somM(e.mhOmzet) : 0 }]
     })
   }, [mod, m.id, metMh, maanden, inSelectie])
   const klantRijen = useMemo<EmpKlantRij[]>(() => {
@@ -564,6 +576,31 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
   const klantTabel = useTabel(klantRijen, EMP_KLANT_KOL, { key: 'u', desc: true })
   const tot = rows.reduce((a, r) => ({ u: a.u + r.u, omzet: a.omzet + r.omzet, kosten: a.kosten + r.kosten, projOmzet: a.projOmzet + r.projOmzet, projMarge: a.projMarge + r.projMarge }), { u: 0, omzet: 0, kosten: 0, projOmzet: 0, projMarge: 0 })
 
+  // Aannames, schattingen en signalen voor deze medewerker in de gekozen periode
+  const lijst = useMemo<Aanname[]>(() => {
+    const l: Aanname[] = []
+    const extern = rows.filter(r => !r.intern)
+    if (m.bron === 'geschat') l.push({ status: 'schatting', basis: 'kosten', bedrag: tot.kosten, tekst: `Kostprijs ontbreekt → mediaan ${m.bedrijf} €${m.tarief}/uur`, detail: 'niet in tarievenbestand of invullijst' })
+    const mh = extern.reduce((a, r) => a + r.mhOmzet, 0)
+    if (mh) l.push({ status: m.bedrijf === 'Consultancy' ? 'nuance' : 'schatting', basis: 'omzet', bedrag: mh, tekst: 'Missing hours van deze medewerker, verdeeld over zijn/haar projecten', detail: m.bedrijf === 'Consultancy' ? 'stand OHW-admin, sleutel = missing-hours-lijst' : 'naar rato van geschreven uren in die maand' })
+    const tar = extern.filter(r => r.sleutel === 'tarief'), kos = extern.filter(r => r.sleutel === 'kosten')
+    const vtNiet = tar.filter(r => r.vtBron && r.vtBron !== 'gefactureerd' && r.p.emps.length > 1)
+    if (vtNiet.length) l.push({ status: vtNiet.some(r => r.vtBron === 'geschat') ? 'schatting' : 'nuance', basis: 'omzet', bedrag: vtNiet.reduce((a, r) => a + r.omzet, 0), tekst: `Verkooptarief niet op dit project gefactureerd (${vtNiet.map(r => r.id).join(', ')})`, detail: `gewicht via ${[...new Set(vtNiet.map(r => r.vtBron))].join(' / ')}; bepaalt alleen de verdeling binnen het project` })
+    if (kos.length) l.push({ status: 'nuance', basis: 'omzet', bedrag: kos.reduce((a, r) => a + r.omzet, 0), tekst: `${kos.length} eenheden-/vaste-prijsproject(en): omzet naar rato van kosten`, detail: 'geen tarief per persoon; marge% = die van het project' })
+    const onder = tar.filter(r => r.u >= 4 && r.omzet / r.u < m.tarief)
+    if (onder.length) l.push({ status: 'signaal', basis: 'kosten', bedrag: onder.reduce((a, r) => a + r.kosten - r.omzet, 0), tekst: `Omzet per uur onder kostprijs €${m.tarief}: ${onder.map(r => `${r.id} €${Math.round(r.omzet / r.u)}`).join(', ')}`, detail: 'urenprojecten; bedrag = kosten − omzet op die projecten' })
+    const verlies = extern.filter(r => r.projMarge < 0)
+    if (verlies.length) l.push({ status: 'signaal', bedrag: verlies.reduce((a, r) => a + r.marge, 0), tekst: `Werkt op ${verlies.length} verlieslatend(e) project(en): ${verlies.sort((a, b) => a.projMarge - b.projMarge).slice(0, 4).map(r => r.id).join(', ')}${verlies.length > 4 ? ', …' : ''}`, detail: 'bedrag = zijn/haar aandeel in die marge' })
+    const alias = Object.entries(MARGE_META.projectAlias ?? {}).filter(([, naar]) => rows.some(r => r.id === naar))
+    for (const [van, naar] of alias) l.push({ status: 'nuance', tekst: `${van} (uren vanaf augustus) meegeteld bij ${naar}`, detail: 'zelfde projectnaam; facturatie en productie lopen op ' + naar })
+    const intern = rows.filter(r => r.intern).reduce((a, r) => a + r.kosten, 0)
+    if (intern) l.push({ status: 'nuance', bedrag: intern, tekst: 'Uren op interne projecten: kosten zonder omzet' })
+    const improd = pr.improductief * m.tarief, afw = (pr.verlof + pr.ziekte) * m.tarief
+    if (improd || afw) l.push({ status: 'niet in model', bedrag: improd + afw, tekst: `Niet als projectkosten: improductief ${fmtU(pr.improductief)}u, verlof/ziekte ${fmtU(pr.verlof + pr.ziekte)}u`, detail: `× kostprijs €${m.tarief}; zit in de P&L, niet in de projectmarge` })
+    return l
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, m, pr.improductief, pr.verlof, pr.ziekte, tot.kosten])
+
   return (
     <div style={{ border: '1px solid var(--bd3)', borderRadius: 8, padding: '10px 12px', marginBottom: 12, background: 'var(--bg1)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', marginBottom: 8, fontSize: 11.5, color: 'var(--t2)' }}>
@@ -576,8 +613,11 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
         <span>Projecten totaal: omzet <b style={{ color: 'var(--t1)', ...mono }}>{fmtEur(tot.projOmzet)}</b> · marge <b style={{ color: margeColor(tot.projMarge), ...mono }}>{fmtEur(tot.projMarge)}</b></span>
         <button onClick={onClose} style={{ marginLeft: 'auto', fontSize: 11, background: 'none', border: 'none', color: 'var(--t3)', cursor: 'pointer' }}>✕ sluiten</button>
       </div>
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <div style={{ flex: 2, minWidth: 560 }}>
+      <div style={{ marginBottom: 10 }}>
+        <AannameBlok titel={`Aannames & signalen — ${m.naam} · ${periodeLabel}`} lijst={lijst} omzet={tot.omzet} kosten={tot.kosten} compact />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ overflowX: 'auto' }}>
           <FilterBar state={projTabel.state} placeholder="filter op project/klant…" n={projTabel.rows.length} totaal={rows.length}>
             <label style={{ fontSize: 10.5, color: 'var(--t2)', cursor: 'pointer' }}><input type="checkbox" checked={alleenSel} onChange={e => setAlleenSel(e.target.checked)} style={{ accentColor: 'var(--blue)', marginRight: 4 }} />alleen huidige selectie</label>
           </FilterBar>
@@ -585,12 +625,12 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
             <thead>
               <tr style={groupRow}>
                 <th colSpan={4} />
-                <th colSpan={5} style={groupTh()}>Aandeel medewerker</th>
+                <th colSpan={6} style={groupTh()}>Aandeel medewerker</th>
                 <th colSpan={3} style={groupTh()}>Project totaal</th>
               </tr>
               <tr style={{ color: 'var(--t3)' }}>
                 <SortTh k="id" label="Project" state={projTabel.state} align="left" /><SortTh k="klant" label="Klant" state={projTabel.state} align="left" /><SortTh k="entSeg" label="Entiteit · segment" state={projTabel.state} align="left" /><SortTh k="u" label="Uren" state={projTabel.state} />
-                <SortTh k="share" label="Aandeel" state={projTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} title="Aandeel van deze medewerker in de projecturen" /><SortTh k="omzet" label="Omzet" state={projTabel.state} /><SortTh k="kosten" label="Kosten" state={projTabel.state} /><SortTh k="marge" label="Marge" state={projTabel.state} /><SortTh k="pct" label="%" state={projTabel.state} />
+                <SortTh k="share" label="Uren%" state={projTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} title="Aandeel van deze medewerker in de projecturen" /><SortTh k="vt" label="Omzet/u" state={projTabel.state} title="Toegerekende omzet per uur van deze medewerker op dit project (rood = onder zijn/haar kostprijs). Cursief = eenheden/vaste prijs: omzet naar rato van kosten." /><SortTh k="omzet" label="Omzet" state={projTabel.state} /><SortTh k="kosten" label="Kosten" state={projTabel.state} /><SortTh k="marge" label="Marge" state={projTabel.state} /><SortTh k="pct" label="%" state={projTabel.state} />
                 <SortTh k="projOmzet" label="Omzet" state={projTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} title="Hele projectomzet (alle medewerkers)" /><SortTh k="projMarge" label="Marge" state={projTabel.state} title="Hele projectmarge (alle medewerkers)" /><SortTh k="projPct" label="%" state={projTabel.state} />
               </tr>
             </thead>
@@ -604,6 +644,7 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
                   <td style={td('left')}>{r.entSeg}</td>
                   <td style={td('right', mono)}>{fmtU(r.u)}</td>
                   <td style={td('right', { borderLeft: '1px solid var(--bd2)' })}>{Math.round(r.share * 100)}%</td>
+                  <td style={td('right', { ...mono, fontStyle: r.sleutel === 'kosten' ? 'italic' : undefined, color: !r.intern && r.u && r.omzet / r.u < m.tarief ? 'var(--red)' : 'var(--t2)' })} title={r.sleutel === 'tarief' ? `urenproject: omzet verdeeld met tarief €${r.vt} (${r.vtBron}); kostprijs €${m.tarief}` : `eenheden/vaste prijs (cursief): omzet naar rato van kosten, dus marge% = project; kostprijs €${m.tarief}`}>{r.intern || !r.u ? '—' : `€${Math.round(r.omzet / r.u)}`}</td>
                   <td style={td('right', mono)}>{r.intern ? '—' : fmtK(r.omzet)}</td>
                   <td style={td('right', mono)}>{fmtK(r.kosten)}</td>
                   <td style={td('right', { ...mono, fontWeight: 700, color: margeColor(r.marge) })}>{r.intern ? '—' : fmtK(r.marge)}</td>
@@ -615,7 +656,7 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
               ))}
               <tr style={{ borderTop: '2px solid var(--bd3)', color: 'var(--t1)', fontWeight: 700 }}>
                 <td style={td('left')}>Totaal ({rows.length} projecten)</td><td /><td />
-                <td style={td('right', mono)}>{fmtU(tot.u)}</td><td style={td('right', { borderLeft: '1px solid var(--bd2)' })} />
+                <td style={td('right', mono)}>{fmtU(tot.u)}</td><td style={td('right', { borderLeft: '1px solid var(--bd2)' })} /><td />
                 <td style={td('right', mono)}>{fmtK(tot.omzet)}</td>
                 <td style={td('right', mono)}>{fmtK(tot.kosten)}</td>
                 <td style={td('right', { ...mono, color: margeColor(tot.omzet - tot.kosten) })}>{fmtK(tot.omzet - tot.kosten)}</td>
@@ -627,7 +668,7 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
             </tbody>
           </table>
         </div>
-        <div style={{ flex: 1, minWidth: 320 }}>
+        <div style={{ maxWidth: 720, overflowX: 'auto' }}>
           <FilterBar state={klantTabel.state} placeholder="filter op klant…" n={klantTabel.rows.length} totaal={klantRijen.length} />
           <table style={{ borderCollapse: 'collapse', fontSize: 10.5, width: '100%' }}>
             <thead>
@@ -658,7 +699,7 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
           </table>
         </div>
       </div>
-      <div style={{ fontSize: 10.5, color: 'var(--t3)', marginTop: 6 }}>● = project valt in de huidige tegel/klant/project-selectie. "Aandeel" = eigen uren-aandeel × projectomzet minus eigen kosten; "Project totaal" = het hele project met alle medewerkers. Interne projecten tellen kosten maar geen omzet.</div>
+      <div style={{ fontSize: 10.5, color: 'var(--t3)', marginTop: 6 }}>● = project valt in de huidige selectie. "Aandeel" op uren-/detacheringsprojecten = uren × gefactureerd tarief van deze medewerker (geschaald naar de projectomzet); op eenheden/vaste prijs = naar rato van kosten. "Project totaal" = het hele project met alle medewerkers.</div>
     </div>
   )
 }

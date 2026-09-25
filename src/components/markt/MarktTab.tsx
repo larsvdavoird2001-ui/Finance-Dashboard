@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   marktOmzet, marktTopKlanten, MARKT_ENTITIES, MARKT_SEGMENTS, MARKT_META,
 } from '../../data/customerRevenue'
@@ -635,9 +635,10 @@ export function MarktTab() {
                 <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', fontSize: 10.5, color: 'var(--t1)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '0 24px' }}>
                   {li('schatting', `Kostprijs geschat op mediaan bedrijf: ${tb.geschat.personen} pers., ${tb.geschat.uren.toLocaleString('nl-NL')} uur (${pctBron('geschat')}% van de uren)`, `${fmtEur(tb.geschat.kosten)} · ${p(tb.geschat.kosten, tot.kosten)} kosten`)}
                   {li('schatting', 'Missing hours Projects/Software: verdeeld naar rato van geschreven uren', `${fmtEur(tot.mhProj)} · ${p(tot.mhProj, tot.omzet)} omzet`)}
-                  {li('schatting', `OHW-eenhedensnapshots ${MARGE_META.eenhedenSnapshotsOntbreken.join(' en ')} ontbreken → lineair geïnterpoleerd (maandtiming Projects)`, 'YTD sluit')}
-                  {li('nuance', 'Missing hours Consultancy: maandstand OHW-admin, exact per gedetacheerde', `${fmtEur(tot.mh - tot.mhProj)} · ${p(tot.mh - tot.mhProj, tot.omzet)} omzet`)}
-                  {li('nuance', `Tarief uit invullijst Lars: ${tb.ingevuld.personen} pers. (${pctBron('ingevuld')}% van de uren); Spanje-regel €35: ${tb.spanje.personen} pers. (${pctBron('spanje')}%)`, `${fmtEur(tb.ingevuld.kosten + tb.spanje.kosten)} · ${p(tb.ingevuld.kosten + tb.spanje.kosten, tot.kosten)} kosten`)}
+                  {li('schatting', 'Eenheden-OHW augustus: P8-bestand wijkt af van de geboekte stand (jan–jul sluiten exact via de weekfreezes)', `${fmtEur(MARGE_META.eenhedenAfwijking?.[MARGE_MAANDEN - 1] ?? 0)}`)}
+                  {li('nuance', 'Missing hours Consultancy: maandstand OHW-admin per gedetacheerde', `${fmtEur(tot.mh - tot.mhProj)} · ${p(tot.mh - tot.mhProj, tot.omzet)} omzet`)}
+                  {Object.entries(MARGE_META.projectAlias ?? {}).map(([van, naar]) => <Fragment key={van}>{li('nuance', `${van} (uren vanaf augustus) meegeteld bij ${naar}: zelfde projectnaam, facturatie en productie lopen op ${naar}`, '—')}</Fragment>)}
+                  {li('nuance', 'Omzet per medewerker: urenprojecten via gefactureerd tarief (U-/D-facturatie), eenheden/vaste prijs naar rato van kosten', 'alleen verdeling')}
                   {li('nuance', 'Losse dossiers: omzet zonder geboekte uren, telt mee, geen kosten (◌)', `${fmtEur(tot.los)} · ${p(tot.los, tot.omzet)} omzet`)}
                   {li('nuance', 'Interne projecten (S-/G-): kosten zonder omzet, buiten de matrix', `${fmtEur(tot.intern)} kosten`)}
                   {li('nuance', 'Kosten volgen het project (IC-neutraal); P&L boekt IC als omzet/kosten per BV', 'zie IC-rijen OHW')}
@@ -646,7 +647,7 @@ export function MarktTab() {
                   {li('niet in model', 'Handmatige OHW-posten (indexaties, voorzieningen, fees, meerwerk), licenties Software', `P&L − model omzet: ${fmtEur(tot.plOmzet - tot.omzet)}`)}
                   {li('niet in model', 'Directe inkoop/onderaanneming, opex buiten de AK-opslag, overige personeelskosten', 'zie P&L')}
                 </ul>
-                <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>Markering per medewerker in de drill-down: ✎ ingevuld, ES Spanje-regel, ≈ geschat (tooltip toont het tarief). Volledige tarievenlijst: scripts/tarieven-aanvulling.json.</div>
+                <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>Kostprijzen: tarievenbestand {pctBron('tarievenbestand')}%, invullijst {pctBron('ingevuld')}%, Spanje €35 {pctBron('spanje')}% van de uren; ≈ bij een naam = nog geschat (tooltip toont het tarief). Lijst: scripts/tarieven-aanvulling.json.</div>
               </div>
             )
           })()}
