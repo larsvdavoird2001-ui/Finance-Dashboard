@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { DetailProject, DetailMedewerker, WeekRow, TariefBron } from '../../data/marginDetail'
-import { MARGE_MAANDEN } from '../../data/marginData'
+import { MARGE_MAANDEN, MARGE_META } from '../../data/marginData'
 
 type DetailModule = typeof import('../../data/marginDetail')
 
@@ -12,7 +12,8 @@ const TYPE_LABEL: Record<string, string> = {
 const fmtK = (v: number) => Math.abs(v) >= 1_000_000 ? `€ ${(v / 1_000_000).toFixed(2).replace('.', ',')}M` : `€ ${Math.round(v / 1000)}k`
 const fmtEur = (v: number) => `€ ${Math.round(v).toLocaleString('nl-NL')}`
 const fmtU = (v: number) => Math.round(v).toLocaleString('nl-NL')
-const pctStr = (marge: number, omzet: number) => omzet !== 0 ? `${Math.round(marge / Math.abs(omzet) * 100)}%` : '—'
+const pct = (deel: number, totaal: number) => totaal !== 0 ? Math.round(deel / Math.abs(totaal) * 100) : null
+const pctStr = (marge: number, omzet: number) => { const p = pct(marge, omzet); return p == null ? '—' : `${p}%` }
 const somOver = (a: number[], maanden: number[]) => maanden.reduce((s, i) => s + (a[i] ?? 0), 0)
 
 interface Kpi { omzet: number; kosten: number; marge: number; uren: number; geenUren: boolean; mh: number; mhKosten: number }
@@ -21,13 +22,16 @@ function kpiVan(p: DetailProject, metMh: boolean, maanden: number[]): Kpi {
   const omzet = s(p.omzet) + s(p.ohw) + (metMh ? s(p.mhOmzet) : 0)
   const kosten = s(p.kosten) + (metMh ? s(p.mhKosten) : 0)
   const uren = s(p.uren)
-  return { omzet, kosten, marge: omzet - kosten, uren, geenUren: uren === 0 && omzet !== 0, mh: s(p.mhOmzet), mhKosten: metMh ? s(p.mhKosten) : 0 }
+  return { omzet, kosten, marge: omzet - kosten, uren, geenUren: uren === 0 && omzet !== 0, mh: metMh ? s(p.mhOmzet) : 0, mhKosten: metMh ? s(p.mhKosten) : 0 }
 }
 
 const th = (align: 'left' | 'right' = 'right', extra: CSSProperties = {}): CSSProperties => ({ textAlign: align, padding: '3px 8px', fontWeight: 600, whiteSpace: 'nowrap', ...extra })
 const td = (align: 'left' | 'right' = 'right', extra: CSSProperties = {}): CSSProperties => ({ textAlign: align, padding: '3px 8px', whiteSpace: 'nowrap', ...extra })
+const groupTh = (extra: CSSProperties = {}): CSSProperties => th('left', { color: 'var(--t2)', borderLeft: '1px solid var(--bd2)', borderBottom: '1px solid var(--bd2)', ...extra })
+const groupRow: CSSProperties = { color: 'var(--t3)', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.05em' }
 const margeColor = (v: number) => v >= 0 ? 'var(--green)' : 'var(--red)'
 const declColor = (v: number | null) => v == null ? 'var(--t3)' : v >= 80 ? 'var(--green)' : v >= 60 ? 'var(--amber)' : 'var(--red)'
+const mono: CSSProperties = { fontFamily: 'var(--mono)' }
 // Kostprijs-herkomst van een medewerker die niet in het HC-tarievenbestand staat (scripts/tarieven-aanvulling.json)
 const BRON_MARKER: Record<TariefBron, string> = { tarievenbestand: '', ingevuld: '✎', spanje: 'ES', geschat: '≈' }
 const BRON_KLEUR: Record<TariefBron, string> = { tarievenbestand: 'inherit', ingevuld: 'var(--t3)', spanje: 'var(--t3)', geschat: 'var(--amber)' }
@@ -37,12 +41,74 @@ const BRON_TITEL: Record<TariefBron, string> = {
   spanje: 'Niet in tarievenbestand — Spanje-regel: €35/uur voor alle S.L.-medewerkers (Lars, 25-09-2026)',
   geschat: 'Niet in tarievenbestand en niet ingevuld — geschat op de mediaan kostprijs+AK van het bedrijf',
 }
+const BRON_LABEL: Record<TariefBron, string> = { tarievenbestand: 'tarievenbestand', ingevuld: 'ingevuld (Lars)', spanje: 'Spanje €35', geschat: 'geschat (mediaan)' }
 const linkStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 11.5, padding: 0, textAlign: 'left' }
 const sectionTitle: CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }
+const inputStyle: CSSProperties = { fontSize: 10.5, padding: '2px 6px', background: 'var(--bg1)', border: '1px solid var(--bd2)', borderRadius: 4, color: 'var(--t1)', fontFamily: 'var(--font)' }
 
 function BronMarker({ bron, tarief }: { bron: TariefBron; tarief: number }) {
   if (bron === 'tarievenbestand') return null
   return <span style={{ color: BRON_KLEUR[bron], marginLeft: 4, fontSize: 10 }} title={`${BRON_TITEL[bron]} — €${tarief}/uur`}>{BRON_MARKER[bron]}</span>
+}
+
+// ── Generiek sorteren + filteren ────────────────────────────────────────────
+type CelWaarde = string | number | null | undefined
+interface Kolom<T> { key: string; get: (r: T) => CelWaarde; text?: boolean }
+interface SortState { key: string; desc: boolean }
+interface TabelState { sort: SortState; toggle: (key: string) => void; q: string; setQ: (q: string) => void }
+
+function useTabel<T>(rows: T[], kolommen: Kolom<T>[], init: SortState, extraFilter?: (r: T) => boolean) {
+  const [sort, setSort] = useState<SortState>(init)
+  const [q, setQ] = useState('')
+  const out = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    const tekst = kolommen.filter(c => c.text)
+    let r = rows
+    if (needle) r = r.filter(row => tekst.some(c => String(c.get(row) ?? '').toLowerCase().includes(needle)))
+    if (extraFilter) r = r.filter(extraFilter)
+    const col = kolommen.find(c => c.key === sort.key)
+    if (col) {
+      r = [...r].sort((a, b) => {
+        const va = col.get(a), vb = col.get(b)
+        if (va == null && vb == null) return 0
+        if (va == null) return 1
+        if (vb == null) return -1
+        const c = typeof va === 'string' || typeof vb === 'string' ? String(va).localeCompare(String(vb), 'nl') : (va as number) - (vb as number)
+        return sort.desc ? -c : c
+      })
+    }
+    return r
+  }, [rows, kolommen, sort, q, extraFilter])
+  const toggle = (key: string) => setSort(s => s.key === key ? { key, desc: !s.desc } : { key, desc: !kolommen.find(c => c.key === key)?.text })
+  const state: TabelState = { sort, toggle, q, setQ }
+  return { rows: out, state }
+}
+
+function SortTh({ k, label, state, align = 'right', title, extra }: { k: string; label: string; state: TabelState; align?: 'left' | 'right'; title?: string; extra?: CSSProperties }) {
+  const active = state.sort.key === k
+  return (
+    <th style={th(align, { cursor: 'pointer', userSelect: 'none', color: active ? 'var(--t1)' : undefined, ...extra })} title={title ?? 'Klik om te sorteren'} onClick={() => state.toggle(k)}>
+      {label}{active ? (state.sort.desc ? ' ▾' : ' ▴') : ''}
+    </th>
+  )
+}
+
+function FilterBar({ state, placeholder, children, n, totaal }: { state: TabelState; placeholder: string; children?: ReactNode; n: number; totaal: number }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+      <input value={state.q} onChange={e => state.setQ(e.target.value)} placeholder={placeholder} style={{ ...inputStyle, width: 190 }} />
+      {children}
+      <span style={{ fontSize: 10, color: 'var(--t3)' }}>{n === totaal ? `${n} rijen` : `${n} van ${totaal} rijen`} · klik op een kolomkop om te sorteren</span>
+    </div>
+  )
+}
+
+function Select({ value, onChange, opties, title }: { value: string; onChange: (v: string) => void; opties: [string, string][]; title?: string }) {
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)} style={inputStyle} title={title}>
+      {opties.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+    </select>
+  )
 }
 
 /** Uren per soort van één medewerker over de gekozen maanden + beide declarabiliteitsdefinities. */
@@ -65,17 +131,38 @@ interface Props {
   maandTabel?: ReactNode
 }
 
+// Rijtypes van de tabellen (alle getallen vooraf berekend, zodat de kolomdefinities statisch zijn)
+interface KlantRij { klant: string; n: number; omzet: number; kosten: number; marge: number; pct: number | null; uren: number }
+interface ProjectRij { p: DetailProject; id: string; naam: string; type: string; seg: string; omzet: number; kosten: number; marge: number; pct: number | null; uren: number; geenUren: boolean }
 /** omzet/kosten = aandeel van de medewerker; projOmzet/projMarge = totaal van de projecten waar hij/zij op schreef */
-interface MedewerkerRij { id: number; naam: string; bedrijf: string; bron: TariefBron; tarief: number; urenSel: number; omzet: number; kosten: number; projOmzet: number; projMarge: number; nProj: number; profiel: UrenProfiel }
-type SortKey = 'omzet' | 'marge' | 'projOmzet' | 'projMarge' | 'urenSel' | 'declAlle' | 'naam'
+interface MedewerkerRij { id: number; naam: string; bedrijf: string; bron: TariefBron; tarief: number; urenSel: number; omzet: number; kosten: number; marge: number; pct: number | null; projOmzet: number; projMarge: number; nProj: number; profiel: UrenProfiel }
+
+const KLANT_KOL: Kolom<KlantRij>[] = [
+  { key: 'klant', get: r => r.klant, text: true }, { key: 'n', get: r => r.n }, { key: 'omzet', get: r => r.omzet }, { key: 'kosten', get: r => r.kosten },
+  { key: 'marge', get: r => r.marge }, { key: 'pct', get: r => r.pct }, { key: 'uren', get: r => r.uren },
+]
+const PROJECT_KOL: Kolom<ProjectRij>[] = [
+  { key: 'id', get: r => `${r.id} ${r.naam}`, text: true }, { key: 'type', get: r => r.type, text: true }, { key: 'seg', get: r => r.seg, text: true },
+  { key: 'omzet', get: r => r.omzet }, { key: 'kosten', get: r => r.kosten }, { key: 'marge', get: r => r.marge }, { key: 'pct', get: r => r.pct }, { key: 'uren', get: r => r.uren },
+]
+const MEDEWERKER_KOL: Kolom<MedewerkerRij>[] = [
+  { key: 'naam', get: r => r.naam, text: true }, { key: 'bedrijf', get: r => r.bedrijf, text: true },
+  { key: 'urenSel', get: r => r.urenSel }, { key: 'omzet', get: r => r.omzet }, { key: 'kosten', get: r => r.kosten }, { key: 'marge', get: r => r.marge }, { key: 'pct', get: r => r.pct },
+  { key: 'nProj', get: r => r.nProj }, { key: 'projOmzet', get: r => r.projOmzet }, { key: 'projMarge', get: r => r.projMarge },
+  { key: 'totaal', get: r => r.profiel.totaal }, { key: 'klant', get: r => r.profiel.klant }, { key: 'intern', get: r => r.profiel.intern }, { key: 'improductief', get: r => r.profiel.improductief },
+  { key: 'verlof', get: r => r.profiel.verlof }, { key: 'ziekte', get: r => r.profiel.ziekte }, { key: 'overig', get: r => r.profiel.overig },
+  { key: 'declAlle', get: r => r.profiel.declAlle }, { key: 'declExcl', get: r => r.profiel.declExcl },
+]
 
 export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
   const [mod, setMod] = useState<DetailModule | null>(null)
   const [klant, setKlant] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [empId, setEmpId] = useState<number | null>(null)
-  const [sortKey, setSortKey] = useState<SortKey>('omzet')
   const [alleRijen, setAlleRijen] = useState(false)
+  const [bvFilter, setBvFilter] = useState('alle')
+  const [bronFilter, setBronFilter] = useState('alle')
+  const [typeFilter, setTypeFilter] = useState('alle')
 
   useEffect(() => {
     let alive = true
@@ -93,22 +180,31 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
     return mod.detailProjecten.filter(p => !p.intern && (ent === 'totaal' || p.ent === ent) && (seg === 'totaal' || p.seg === seg))
   }, [mod, ent, seg])
 
-  const klanten = useMemo(() => {
-    const byKlant = new Map<string, { klant: string; n: number; omzet: number; kosten: number; uren: number; mh: number }>()
+  const klantRijen = useMemo<KlantRij[]>(() => {
+    const byKlant = new Map<string, KlantRij>()
     for (const p of projecten) {
       const k = kpi(p)
       const key = p.klant || '(geen klant)'
-      const row = byKlant.get(key) ?? { klant: key, n: 0, omzet: 0, kosten: 0, uren: 0, mh: 0 }
-      row.n++; row.omzet += k.omzet; row.kosten += k.kosten; row.uren += k.uren; row.mh += k.mh
+      const row = byKlant.get(key) ?? { klant: key, n: 0, omzet: 0, kosten: 0, marge: 0, pct: null, uren: 0 }
+      row.n++; row.omzet += k.omzet; row.kosten += k.kosten; row.uren += k.uren
       byKlant.set(key, row)
     }
-    return [...byKlant.values()].sort((a, b) => Math.abs(b.omzet) - Math.abs(a.omzet))
+    return [...byKlant.values()].map(r => ({ ...r, marge: r.omzet - r.kosten, pct: pct(r.omzet - r.kosten, r.omzet) }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projecten, metMh, maanden])
+  const klantTabel = useTabel(klantRijen, KLANT_KOL, { key: 'omzet', desc: true })
 
   const project = projectId ? projecten.find(p => p.id === projectId) ?? null : null
-  const klantProjecten = klant ? projecten.filter(p => (p.klant || '(geen klant)') === klant).sort((a, b) => Math.abs(kpi(b).omzet) - Math.abs(kpi(a).omzet)) : []
-  // De filterset: tegel → klant → project. De medewerkerstabel volgt deze set.
+  const klantProjecten = useMemo(() => klant ? projecten.filter(p => (p.klant || '(geen klant)') === klant) : [], [projecten, klant])
+  const projectRijen = useMemo<ProjectRij[]>(() => klantProjecten.map(p => {
+    const k = kpi(p)
+    return { p, id: p.id, naam: p.naam, type: TYPE_LABEL[p.id[0]] ?? p.id[0], seg: p.seg, omzet: k.omzet, kosten: k.kosten, marge: k.marge, pct: pct(k.marge, k.omzet), uren: k.uren, geenUren: k.geenUren }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [klantProjecten, metMh, maanden])
+  const typeFilterFn = useMemo(() => typeFilter === 'alle' ? undefined : (r: ProjectRij) => r.id[0] === typeFilter, [typeFilter])
+  const projectTabel = useTabel(projectRijen, PROJECT_KOL, { key: 'omzet', desc: true }, typeFilterFn)
+
+  // De filterset: tegel → klant → project. De medewerkerstabel en de aannames volgen deze set.
   const filterProj = project ? [project] : klant ? klantProjecten : projecten
   const filterLabel = project ? `project ${project.id} ${project.naam}` : klant ? `klant ${klant}` : `${ent === 'totaal' ? 'alle entiteiten' : ent} × ${seg === 'totaal' ? 'alle segmenten' : seg}`
   const periodeLabel = maanden.length === 1 ? `${MAAND_LABELS[maanden[0]]} 2026` : `YTD t/m ${MAAND_LABELS[MARGE_MAANDEN - 1]} 2026`
@@ -120,7 +216,7 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
     const map = new Map<number, MedewerkerRij>()
     const rij = (m: DetailMedewerker) => {
       let r = map.get(m.id)
-      if (!r) { r = { id: m.id, naam: m.naam, bedrijf: m.bedrijf, bron: m.bron, tarief: m.tarief, urenSel: 0, omzet: 0, kosten: 0, projOmzet: 0, projMarge: 0, nProj: 0, profiel: urenProfiel(m, maanden) }; map.set(m.id, r) }
+      if (!r) { r = { id: m.id, naam: m.naam, bedrijf: m.bedrijf, bron: m.bron, tarief: m.tarief, urenSel: 0, omzet: 0, kosten: 0, marge: 0, pct: null, projOmzet: 0, projMarge: 0, nProj: 0, profiel: urenProfiel(m, maanden) }; map.set(m.id, r) }
       return r
     }
     let nietToerekenbaar = 0
@@ -138,32 +234,20 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
     }
     // Op de totaaltegel zonder verdere filter: iedereen uit de urenexport, ook zonder klanturen (declarabiliteit 0%)
     if (ent === 'totaal' && seg === 'totaal' && !klant && !project) for (const m of mod.detailMedewerkers) if (urenProfiel(m, maanden).totaal > 0) rij(m)
+    for (const r of map.values()) { r.marge = r.omzet - r.kosten; r.pct = pct(r.marge, r.omzet) }
     return { rijen: [...map.values()], nietToerekenbaar }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mod, filterProj, metMh, maanden])
-
-  const rijenSorted = useMemo(() => {
-    const r = [...medewerkers.rijen]
-    const cmp: Record<SortKey, (a: MedewerkerRij, b: MedewerkerRij) => number> = {
-      omzet: (a, b) => b.omzet - a.omzet,
-      marge: (a, b) => (b.omzet - b.kosten) - (a.omzet - a.kosten),
-      projOmzet: (a, b) => b.projOmzet - a.projOmzet,
-      projMarge: (a, b) => b.projMarge - a.projMarge,
-      urenSel: (a, b) => b.urenSel - a.urenSel,
-      declAlle: (a, b) => (b.profiel.declAlle ?? -1) - (a.profiel.declAlle ?? -1),
-      naam: (a, b) => a.naam.localeCompare(b.naam),
-    }
-    return r.sort(cmp[sortKey])
-  }, [medewerkers, sortKey])
+  const mdwFilterFn = useMemo(() => (bvFilter === 'alle' && bronFilter === 'alle') ? undefined
+    : (r: MedewerkerRij) => (bvFilter === 'alle' || r.bedrijf === bvFilter) && (bronFilter === 'alle' || r.bron === bronFilter), [bvFilter, bronFilter])
+  const mdwTabel = useTabel(medewerkers.rijen, MEDEWERKER_KOL, { key: 'omzet', desc: true }, mdwFilterFn)
 
   if (!mod) return <div style={{ fontSize: 11, color: 'var(--t3)' }}>Detaildata laden…</div>
 
   const selectedEmp = empId != null ? mod.detailMedewerkers.find(m => m.id === empId) ?? null : null
-  const tot = medewerkers.rijen.reduce((a, r) => ({ urenSel: a.urenSel + r.urenSel, omzet: a.omzet + r.omzet, kosten: a.kosten + r.kosten, totaal: a.totaal + r.profiel.totaal, klant: a.klant + r.profiel.klant }), { urenSel: 0, omzet: 0, kosten: 0, totaal: 0, klant: 0 })
-  const zichtbaar = alleRijen ? rijenSorted : rijenSorted.slice(0, 40)
-  const sortTh = (key: SortKey, label: string, title?: string) => (
-    <th style={th('right', { cursor: 'pointer', color: sortKey === key ? 'var(--t1)' : undefined })} title={title ?? 'Klik om te sorteren'} onClick={() => setSortKey(key)}>{label}{sortKey === key ? ' ▾' : ''}</th>
-  )
+  const tot = mdwTabel.rows.reduce((a, r) => ({ urenSel: a.urenSel + r.urenSel, omzet: a.omzet + r.omzet, kosten: a.kosten + r.kosten, totaal: a.totaal + r.profiel.totaal, klant: a.klant + r.profiel.klant }), { urenSel: 0, omzet: 0, kosten: 0, totaal: 0, klant: 0 })
+  const zichtbaar = alleRijen ? mdwTabel.rows : mdwTabel.rows.slice(0, 40)
+  const typesInLijst = [...new Set(projectRijen.map(r => r.id[0]))].sort()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -174,77 +258,87 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
           <div style={sectionTitle}>Inzoomen op klanten → projecten → weekoverzicht</div>
           {/* Breadcrumb */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, marginBottom: 8, flexWrap: 'wrap' }}>
-            <button style={{ ...linkStyle, fontWeight: klant ? 500 : 700, color: klant ? 'var(--blue)' : 'var(--t1)' }} onClick={() => { setKlant(null); setProjectId(null) }}>Klanten ({klanten.length})</button>
+            <button style={{ ...linkStyle, fontWeight: klant ? 500 : 700, color: klant ? 'var(--blue)' : 'var(--t1)' }} onClick={() => { setKlant(null); setProjectId(null) }}>Klanten ({klantRijen.length})</button>
             {klant && <>
               <span style={{ color: 'var(--t3)' }}>›</span>
               <button style={{ ...linkStyle, fontWeight: project ? 500 : 700, color: project ? 'var(--blue)' : 'var(--t1)' }} onClick={() => setProjectId(null)}>{klant} ({klantProjecten.length} projecten)</button>
             </>}
             {project && <>
               <span style={{ color: 'var(--t3)' }}>›</span>
-              <span style={{ fontWeight: 700, color: 'var(--t1)' }}><span style={{ fontFamily: 'var(--mono)', color: 'var(--t2)' }}>{project.id}</span> {project.naam}</span>
+              <span style={{ fontWeight: 700, color: 'var(--t1)' }}><span style={{ ...mono, color: 'var(--t2)' }}>{project.id}</span> {project.naam}</span>
             </>}
             <span style={{ color: 'var(--t3)', marginLeft: 'auto' }}>{periodeLabel}</span>
           </div>
 
           {/* Niveau 1: klanten */}
           {!klant && (
-            <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
-              <thead>
-                <tr style={{ color: 'var(--t3)' }}>
-                  <th style={th('left')}>Klant</th><th style={th()}>Proj.</th><th style={th()}>Omzet</th><th style={th()}>Kosten</th><th style={th()}>Marge</th><th style={th()}>%</th><th style={th()}>Uren</th>
-                </tr>
-              </thead>
-              <tbody>
-                {klanten.slice(0, 60).map(r => (
-                  <tr key={r.klant} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
-                    <td style={td('left', { maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' })}><button style={linkStyle} onClick={() => setKlant(r.klant)} title="Klik voor projecten van deze klant (de medewerkerstabel hieronder filtert mee)">{r.klant}</button></td>
-                    <td style={td('right', { color: 'var(--t3)' })}>{r.n}</td>
-                    <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtK(r.omzet)}</td>
-                    <td style={td('right', { fontFamily: 'var(--mono)', color: 'var(--t2)' })}>{fmtK(r.kosten)}</td>
-                    <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 700, color: margeColor(r.omzet - r.kosten) })}>{fmtK(r.omzet - r.kosten)}</td>
-                    <td style={td('right', { color: 'var(--t2)' })}>{pctStr(r.omzet - r.kosten, r.omzet)}</td>
-                    <td style={td('right', { color: 'var(--t3)' })}>{fmtU(r.uren)}</td>
+            <>
+              <FilterBar state={klantTabel.state} placeholder="filter op klantnaam…" n={klantTabel.rows.length} totaal={klantRijen.length} />
+              <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
+                <thead>
+                  <tr style={{ color: 'var(--t3)' }}>
+                    <SortTh k="klant" label="Klant" state={klantTabel.state} align="left" /><SortTh k="n" label="Proj." state={klantTabel.state} /><SortTh k="omzet" label="Omzet" state={klantTabel.state} />
+                    <SortTh k="kosten" label="Kosten" state={klantTabel.state} /><SortTh k="marge" label="Marge" state={klantTabel.state} /><SortTh k="pct" label="%" state={klantTabel.state} /><SortTh k="uren" label="Uren" state={klantTabel.state} />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {klantTabel.rows.slice(0, 80).map(r => (
+                    <tr key={r.klant} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
+                      <td style={td('left', { maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' })}><button style={linkStyle} onClick={() => setKlant(r.klant)} title="Klik voor projecten van deze klant (de medewerkerstabel hieronder filtert mee)">{r.klant}</button></td>
+                      <td style={td('right', { color: 'var(--t3)' })}>{r.n}</td>
+                      <td style={td('right', mono)}>{fmtK(r.omzet)}</td>
+                      <td style={td('right', { ...mono, color: 'var(--t2)' })}>{fmtK(r.kosten)}</td>
+                      <td style={td('right', { ...mono, fontWeight: 700, color: margeColor(r.marge) })}>{fmtK(r.marge)}</td>
+                      <td style={td('right', { color: 'var(--t2)' })}>{pctStr(r.marge, r.omzet)}</td>
+                      <td style={td('right', { color: 'var(--t3)' })}>{fmtU(r.uren)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
 
           {/* Niveau 2: projecten van klant */}
           {klant && !project && (
-            <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
-              <thead>
-                <tr style={{ color: 'var(--t3)' }}>
-                  <th style={th('left')}>Project</th><th style={th('left')}>Type</th><th style={th('left')}>Segment</th><th style={th()}>Omzet</th><th style={th()}>Kosten</th><th style={th()}>Marge</th><th style={th()}>%</th><th style={th()}>Uren</th>
-                </tr>
-              </thead>
-              <tbody>
-                {klantProjecten.map(p => {
-                  const k = kpi(p)
-                  return (
-                    <tr key={p.id} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
+            <>
+              <FilterBar state={projectTabel.state} placeholder="filter op projectnummer/naam…" n={projectTabel.rows.length} totaal={projectRijen.length}>
+                <Select value={typeFilter} onChange={setTypeFilter} title="Projecttype" opties={[['alle', 'alle types'], ...typesInLijst.map(t => [t, `${t} · ${TYPE_LABEL[t] ?? t}`] as [string, string])]} />
+              </FilterBar>
+              <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
+                <thead>
+                  <tr style={{ color: 'var(--t3)' }}>
+                    <SortTh k="id" label="Project" state={projectTabel.state} align="left" /><SortTh k="type" label="Type" state={projectTabel.state} align="left" /><SortTh k="seg" label="Segment" state={projectTabel.state} align="left" />
+                    <SortTh k="omzet" label="Omzet" state={projectTabel.state} /><SortTh k="kosten" label="Kosten" state={projectTabel.state} /><SortTh k="marge" label="Marge" state={projectTabel.state} /><SortTh k="pct" label="%" state={projectTabel.state} /><SortTh k="uren" label="Uren" state={projectTabel.state} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {projectTabel.rows.map(r => (
+                    <tr key={r.id} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
                       <td style={td('left', { maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' })}>
-                        {k.geenUren && <span style={{ color: 'var(--amber)', marginRight: 4 }} title="Los dossier: omzet zonder geboekte uren — hangt niet aan projectwerk (telt wel mee als omzet)">◌</span>}
-                        <button style={linkStyle} onClick={() => setProjectId(p.id)} title="Klik voor maandreeks en weekoverzicht (de medewerkerstabel hieronder filtert mee)"><span style={{ fontFamily: 'var(--mono)', color: 'var(--t2)' }}>{p.id}</span> {p.naam}</button>
+                        {r.geenUren && <span style={{ color: 'var(--amber)', marginRight: 4 }} title="Los dossier: omzet zonder geboekte uren — hangt niet aan projectwerk (telt wel mee als omzet)">◌</span>}
+                        <button style={linkStyle} onClick={() => setProjectId(r.id)} title="Klik voor maandreeks en weekoverzicht (de medewerkerstabel hieronder filtert mee)"><span style={{ ...mono, color: 'var(--t2)' }}>{r.id}</span> {r.naam}</button>
                       </td>
-                      <td style={td('left', { color: 'var(--t2)' })}>{TYPE_LABEL[p.id[0]] ?? p.id[0]}</td>
-                      <td style={td('left', { color: 'var(--t2)' })}>{p.seg}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtK(k.omzet)}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', color: 'var(--t2)' })}>{fmtK(k.kosten)}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 700, color: margeColor(k.marge) })}>{fmtK(k.marge)}</td>
-                      <td style={td('right', { color: 'var(--t2)' })}>{pctStr(k.marge, k.omzet)}</td>
-                      <td style={td('right', { color: 'var(--t3)' })}>{fmtU(k.uren)}</td>
+                      <td style={td('left', { color: 'var(--t2)' })}>{r.type}</td>
+                      <td style={td('left', { color: 'var(--t2)' })}>{r.seg}</td>
+                      <td style={td('right', mono)}>{fmtK(r.omzet)}</td>
+                      <td style={td('right', { ...mono, color: 'var(--t2)' })}>{fmtK(r.kosten)}</td>
+                      <td style={td('right', { ...mono, fontWeight: 700, color: margeColor(r.marge) })}>{fmtK(r.marge)}</td>
+                      <td style={td('right', { color: 'var(--t2)' })}>{pctStr(r.marge, r.omzet)}</td>
+                      <td style={td('right', { color: 'var(--t3)' })}>{fmtU(r.uren)}</td>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
 
           {/* Niveau 3: project */}
           {project && <ProjectDetail p={project} k={kpi(project)} metMh={metMh} periodeLabel={periodeLabel} />}
         </div>
       </div>
+
+      {/* ── Aannames & nuances in deze filterset ── */}
+      <Aannames filterProj={filterProj} metMh={metMh} maanden={maanden} ent={ent} label={filterLabel} periodeLabel={periodeLabel} nietToerekenbaar={medewerkers.nietToerekenbaar} />
 
       {/* ── Rij 2: medewerkers in de filterset (tweede inzoom-as) ── */}
       <div>
@@ -261,223 +355,327 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
           />
         )}
 
-        {medewerkers.rijen.length === 0 ? (
-          <div style={{ fontSize: 11, color: 'var(--amber)' }}>Geen medewerkers met geschreven uren in deze selectie{medewerkers.nietToerekenbaar ? ` — de omzet (${fmtEur(medewerkers.nietToerekenbaar)}) is een los dossier zonder projectwerk` : ''}.</div>
+        <FilterBar state={mdwTabel.state} placeholder="filter op naam…" n={mdwTabel.rows.length} totaal={medewerkers.rijen.length}>
+          <Select value={bvFilter} onChange={setBvFilter} title="BV van de medewerker" opties={[['alle', 'alle BV\'s'], ['Consultancy', 'Consultancy'], ['Projects', 'Projects'], ['Software', 'Software']]} />
+          <Select value={bronFilter} onChange={setBronFilter} title="Herkomst kostprijs" opties={[['alle', 'alle tarieven'], ...(['tarievenbestand', 'ingevuld', 'spanje', 'geschat'] as TariefBron[]).map(b => [b, BRON_LABEL[b]] as [string, string])]} />
+        </FilterBar>
+        {mdwTabel.rows.length === 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--amber)' }}>Geen medewerkers {medewerkers.rijen.length ? 'die aan het filter voldoen' : 'met geschreven uren in deze selectie'}{!medewerkers.rijen.length && medewerkers.nietToerekenbaar ? ` — de omzet (${fmtEur(medewerkers.nietToerekenbaar)}) is een los dossier zonder projectwerk` : ''}.</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', fontSize: 10.5, width: '100%' }}>
               <thead>
-                <tr style={{ color: 'var(--t3)', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                <tr style={groupRow}>
                   <th colSpan={2} />
-                  <th colSpan={5} style={th('left', { color: 'var(--t2)', borderBottom: '1px solid var(--bd2)' })} title="Wat deze medewerker zelf bijdroeg: aandeel in de projecturen × projectomzet, minus eigen urenkosten">Aandeel medewerker</th>
-                  <th colSpan={3} style={th('left', { color: 'var(--t2)', borderLeft: '1px solid var(--bd2)', borderBottom: '1px solid var(--bd2)' })} title="Totaal van de projecten (in deze selectie) waar de medewerker op schreef — hele project, niet alleen zijn deel">Projecten totaal</th>
-                  <th colSpan={7} style={th('left', { color: 'var(--t2)', borderLeft: '1px solid var(--bd2)', borderBottom: '1px solid var(--bd2)' })}>Alle geschreven uren</th>
-                  <th colSpan={2} style={th('left', { color: 'var(--t2)', borderLeft: '1px solid var(--bd2)', borderBottom: '1px solid var(--bd2)' })}>Declarabiliteit</th>
+                  <th colSpan={5} style={groupTh({ borderLeft: 'none' })} title="Wat deze medewerker zelf bijdroeg: aandeel in de projecturen × projectomzet, minus eigen urenkosten">Aandeel medewerker</th>
+                  <th colSpan={3} style={groupTh()} title="Totaal van de projecten (in deze selectie) waar de medewerker op schreef — hele project, niet alleen zijn deel">Projecten totaal</th>
+                  <th colSpan={7} style={groupTh()}>Alle geschreven uren</th>
+                  <th colSpan={2} style={groupTh()}>Declarabiliteit</th>
                 </tr>
                 <tr style={{ color: 'var(--t3)' }}>
-                  <th style={th('left', { cursor: 'pointer', color: sortKey === 'naam' ? 'var(--t1)' : undefined })} onClick={() => setSortKey('naam')}>Medewerker{sortKey === 'naam' ? ' ▾' : ''}</th>
-                  <th style={th('left')}>BV</th>
-                  {sortTh('urenSel', 'Uren', 'Productieve uren op de projecten in deze selectie')}
-                  {sortTh('omzet', 'Omzet', 'Toegerekende omzet: aandeel in de projecturen × projectomzet (facturatie + Δ OHW), per project')}
-                  <th style={th()} title="Uren × kostprijs+AK (+ aandeel missing-hours-kosten)">Kosten</th>
-                  {sortTh('marge', 'Marge')}
-                  <th style={th()}>%</th>
-                  <th style={th('right', { borderLeft: '1px solid var(--bd2)' })} title="Aantal projecten in de selectie waar de medewerker op schreef">Proj.</th>
-                  {sortTh('projOmzet', 'Omzet', 'Totale omzet van die projecten (hele project, alle medewerkers)')}
-                  {sortTh('projMarge', 'Marge', 'Totale marge van die projecten (hele project, alle medewerkers)')}
-                  <th style={th('right', { borderLeft: '1px solid var(--bd2)' })} title="Alle geschreven uren van deze medewerker in de periode (alle projecten, incl. verlof/ziekte)">Totaal</th>
-                  <th style={th()} title="Productief op klantprojecten">Klant</th>
-                  <th style={th()} title="Productief op interne/G-projecten">Intern</th>
-                  <th style={th()} title="Improductief + NTCS">Improd.</th>
-                  <th style={th()}>Verlof</th>
-                  <th style={th()}>Ziekte</th>
-                  <th style={th()} title="Bijzonder verlof, missing, productief zonder project">Overig</th>
-                  {sortTh('declAlle', 'Alle uren', 'Declarabiliteit = klanturen / alle geschreven uren (incl. verlof, ziekte)')}
-                  <th style={th()} title="Declarabiliteit excl. verlof/ziekte/bijz. verlof (definitie Power BI)">Excl. verlof</th>
+                  <SortTh k="naam" label="Medewerker" state={mdwTabel.state} align="left" />
+                  <SortTh k="bedrijf" label="BV" state={mdwTabel.state} align="left" />
+                  <SortTh k="urenSel" label="Uren" state={mdwTabel.state} title="Productieve uren op de projecten in deze selectie" />
+                  <SortTh k="omzet" label="Omzet" state={mdwTabel.state} title="Toegerekende omzet: aandeel in de projecturen × projectomzet (facturatie + Δ OHW), per project" />
+                  <SortTh k="kosten" label="Kosten" state={mdwTabel.state} title="Uren × kostprijs+AK (+ aandeel missing-hours-kosten)" />
+                  <SortTh k="marge" label="Marge" state={mdwTabel.state} />
+                  <SortTh k="pct" label="%" state={mdwTabel.state} />
+                  <SortTh k="nProj" label="Proj." state={mdwTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} title="Aantal projecten in de selectie waar de medewerker op schreef" />
+                  <SortTh k="projOmzet" label="Omzet" state={mdwTabel.state} title="Totale omzet van die projecten (hele project, alle medewerkers)" />
+                  <SortTh k="projMarge" label="Marge" state={mdwTabel.state} title="Totale marge van die projecten (hele project, alle medewerkers)" />
+                  <SortTh k="totaal" label="Totaal" state={mdwTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} title="Alle geschreven uren van deze medewerker in de periode (alle projecten, incl. verlof/ziekte)" />
+                  <SortTh k="klant" label="Klant" state={mdwTabel.state} title="Productief op klantprojecten" />
+                  <SortTh k="intern" label="Intern" state={mdwTabel.state} title="Productief op interne/G-projecten" />
+                  <SortTh k="improductief" label="Improd." state={mdwTabel.state} title="Improductief + NTCS" />
+                  <SortTh k="verlof" label="Verlof" state={mdwTabel.state} />
+                  <SortTh k="ziekte" label="Ziekte" state={mdwTabel.state} />
+                  <SortTh k="overig" label="Overig" state={mdwTabel.state} title="Bijzonder verlof, missing, productief zonder project" />
+                  <SortTh k="declAlle" label="Alle uren" state={mdwTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} title="Declarabiliteit = klanturen / alle geschreven uren (incl. verlof, ziekte)" />
+                  <SortTh k="declExcl" label="Excl. verlof" state={mdwTabel.state} title="Declarabiliteit excl. verlof/ziekte/bijz. verlof (definitie Power BI)" />
                 </tr>
               </thead>
               <tbody>
                 {zichtbaar.map(r => {
-                  const marge = r.omzet - r.kosten, pr = r.profiel
+                  const pr = r.profiel
                   const active = r.id === empId
                   return (
                     <tr key={r.id} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)', background: active ? 'rgba(0,169,224,.08)' : undefined }}>
                       <td style={td('left')}><button style={{ ...linkStyle, fontSize: 11, fontWeight: active ? 700 : 500 }} onClick={() => setEmpId(active ? null : r.id)} title="Klik voor de projecten en klanten van deze medewerker">{r.naam}</button><BronMarker bron={r.bron} tarief={r.tarief} /></td>
                       <td style={td('left', { color: 'var(--t2)' })}>{r.bedrijf}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtU(r.urenSel)}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtK(r.omzet)}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', color: 'var(--t2)' })}>{fmtK(r.kosten)}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 700, color: margeColor(marge) })}>{fmtK(marge)}</td>
-                      <td style={td('right', { color: 'var(--t2)' })}>{pctStr(marge, r.omzet)}</td>
+                      <td style={td('right', mono)}>{fmtU(r.urenSel)}</td>
+                      <td style={td('right', mono)}>{fmtK(r.omzet)}</td>
+                      <td style={td('right', { ...mono, color: 'var(--t2)' })}>{fmtK(r.kosten)}</td>
+                      <td style={td('right', { ...mono, fontWeight: 700, color: margeColor(r.marge) })}>{fmtK(r.marge)}</td>
+                      <td style={td('right', { color: 'var(--t2)' })}>{pctStr(r.marge, r.omzet)}</td>
                       <td style={td('right', { color: 'var(--t3)', borderLeft: '1px solid var(--bd2)' })}>{r.nProj || '—'}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', color: 'var(--t2)' })}>{r.nProj ? fmtK(r.projOmzet) : '—'}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 600, color: r.nProj ? margeColor(r.projMarge) : 'var(--t3)' })}>{r.nProj ? fmtK(r.projMarge) : '—'}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', borderLeft: '1px solid var(--bd2)' })}>{fmtU(pr.totaal)}</td>
+                      <td style={td('right', { ...mono, color: 'var(--t2)' })}>{r.nProj ? fmtK(r.projOmzet) : '—'}</td>
+                      <td style={td('right', { ...mono, fontWeight: 600, color: r.nProj ? margeColor(r.projMarge) : 'var(--t3)' })}>{r.nProj ? fmtK(r.projMarge) : '—'}</td>
+                      <td style={td('right', { ...mono, borderLeft: '1px solid var(--bd2)' })}>{fmtU(pr.totaal)}</td>
                       <td style={td('right', { color: 'var(--t2)' })}>{fmtU(pr.klant)}</td>
                       <td style={td('right', { color: 'var(--t2)' })}>{fmtU(pr.intern)}</td>
                       <td style={td('right', { color: 'var(--t2)' })}>{fmtU(pr.improductief)}</td>
                       <td style={td('right', { color: 'var(--t2)' })}>{fmtU(pr.verlof)}</td>
                       <td style={td('right', { color: 'var(--t2)' })}>{fmtU(pr.ziekte)}</td>
                       <td style={td('right', { color: 'var(--t2)' })}>{fmtU(pr.overig)}</td>
-                      <td style={td('right', { fontWeight: 700, color: declColor(pr.declAlle) })}>{pr.declAlle == null ? '—' : `${pr.declAlle}%`}</td>
+                      <td style={td('right', { fontWeight: 700, color: declColor(pr.declAlle), borderLeft: '1px solid var(--bd2)' })}>{pr.declAlle == null ? '—' : `${pr.declAlle}%`}</td>
                       <td style={td('right', { color: declColor(pr.declExcl) })}>{pr.declExcl == null ? '—' : `${pr.declExcl}%`}</td>
                     </tr>
                   )
                 })}
                 <tr style={{ borderTop: '2px solid var(--bd3)', color: 'var(--t1)', fontWeight: 700 }}>
-                  <td style={td('left')}>Totaal ({medewerkers.rijen.length})</td><td />
-                  <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtU(tot.urenSel)}</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtK(tot.omzet)}</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtK(tot.kosten)}</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)', color: margeColor(tot.omzet - tot.kosten) })}>{fmtK(tot.omzet - tot.kosten)}</td>
+                  <td style={td('left')}>Totaal ({mdwTabel.rows.length})</td><td />
+                  <td style={td('right', mono)}>{fmtU(tot.urenSel)}</td>
+                  <td style={td('right', mono)}>{fmtK(tot.omzet)}</td>
+                  <td style={td('right', mono)}>{fmtK(tot.kosten)}</td>
+                  <td style={td('right', { ...mono, color: margeColor(tot.omzet - tot.kosten) })}>{fmtK(tot.omzet - tot.kosten)}</td>
                   <td style={td('right')}>{pctStr(tot.omzet - tot.kosten, tot.omzet)}</td>
                   <td colSpan={3} style={td('left', { borderLeft: '1px solid var(--bd2)', color: 'var(--t3)', fontWeight: 400, fontSize: 10 })} title="Projecttotalen tellen per medewerker dubbel (meerdere mensen op één project) en zijn daarom niet gesommeerd">niet optelbaar</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)', borderLeft: '1px solid var(--bd2)' })}>{fmtU(tot.totaal)}</td>
+                  <td style={td('right', { ...mono, borderLeft: '1px solid var(--bd2)' })}>{fmtU(tot.totaal)}</td>
                   <td style={td('right')}>{fmtU(tot.klant)}</td><td colSpan={5} />
-                  <td style={td('right', { color: declColor(tot.totaal ? tot.klant / tot.totaal * 100 : null) })}>{tot.totaal ? `${Math.round(tot.klant / tot.totaal * 100)}%` : '—'}</td>
+                  <td style={td('right', { color: declColor(tot.totaal ? tot.klant / tot.totaal * 100 : null), borderLeft: '1px solid var(--bd2)' })}>{tot.totaal ? `${Math.round(tot.klant / tot.totaal * 100)}%` : '—'}</td>
                   <td />
                 </tr>
               </tbody>
             </table>
           </div>
         )}
-        {rijenSorted.length > 40 && (
-          <button style={{ ...linkStyle, marginTop: 6 }} onClick={() => setAlleRijen(v => !v)}>{alleRijen ? 'toon top 40' : `toon alle ${rijenSorted.length} medewerkers`}</button>
+        {mdwTabel.rows.length > 40 && (
+          <button style={{ ...linkStyle, marginTop: 6 }} onClick={() => setAlleRijen(v => !v)}>{alleRijen ? 'toon top 40' : `toon alle ${mdwTabel.rows.length} medewerkers`}</button>
         )}
-        <div style={{ fontSize: 10.5, color: 'var(--t3)', marginTop: 6, lineHeight: 1.5 }}>
-          "Aandeel medewerker" = toegerekend: per project krijgt iedereen zijn aandeel in de projecturen × de projectomzet
-          (facturatie + Δ OHW{metMh ? ' + missing hours' : ''}); bij eenheden- en fixed-price-projecten is dat een verdeelsleutel, geen individuele productie.
-          "Projecten totaal" = de hele omzet en marge van de projecten waar de medewerker op schreef (alle medewerkers samen) — kies zelf welke van de twee je pakt;
-          projecttotalen zijn per medewerker niet op te tellen, omdat meerdere mensen op hetzelfde project schrijven.
-          {medewerkers.nietToerekenbaar !== 0 && <> Niet toe te rekenen (losse dossiers zonder uren): <b style={{ color: 'var(--t2)' }}>{fmtEur(medewerkers.nietToerekenbaar)}</b>.</>}
-          {' '}De urenkolommen rechts tellen álle geschreven uren van de medewerker in de periode (ook buiten deze selectie); "Decl. alle" = klanturen / alle uren incl. verlof en ziekte, "Decl. excl." laat verlof, ziekte en bijzonder verlof buiten beschouwing.
-        </div>
       </div>
     </div>
   )
 }
 
+// ── Aannames & nuances per filterset ────────────────────────────────────────
+type Status = 'schatting' | 'nuance' | 'niet in model'
+interface Aanname { status: Status; tekst: string; bedrag?: number; basis?: 'omzet' | 'kosten'; detail?: string }
+const STATUS_STIJL: Record<Status, { kleur: string; label: string }> = {
+  schatting: { kleur: 'var(--amber)', label: 'schatting' },
+  nuance: { kleur: 'var(--t3)', label: 'nuance' },
+  'niet in model': { kleur: 'var(--red)', label: 'niet in model' },
+}
+const INTERPOLATIE_MAANDEN = [2, 3, 6, 7] // mrt/apr en jul/aug: Δ OHW eenheden leunt op geïnterpoleerde snapshots van mrt en jul
+
+function Aannames({ filterProj, metMh, maanden, ent, label, periodeLabel, nietToerekenbaar }: {
+  filterProj: DetailProject[]; metMh: boolean; maanden: number[]; ent: string; label: string; periodeLabel: string; nietToerekenbaar: number
+}) {
+  const [open, setOpen] = useState(true)
+  const a = useMemo(() => {
+    const s = (arr: number[]) => somOver(arr, maanden)
+    let omzet = 0, kosten = 0, mhOmzet = 0, mhKosten = 0, interp = 0, verdeel = 0, verdeelN = 0, andereBv = 0, andereBvUren = 0, losN = 0
+    const bron: Record<TariefBron, { pers: Set<number>; uren: number; kosten: number }> = {
+      tarievenbestand: { pers: new Set(), uren: 0, kosten: 0 }, ingevuld: { pers: new Set(), uren: 0, kosten: 0 }, spanje: { pers: new Set(), uren: 0, kosten: 0 }, geschat: { pers: new Set(), uren: 0, kosten: 0 },
+    }
+    for (const p of filterProj) {
+      const k = kpiVan(p, metMh, maanden)
+      omzet += k.omzet; kosten += k.kosten; mhOmzet += k.mh; mhKosten += k.mhKosten
+      if (k.geenUren) losN++
+      if (p.id.startsWith('E-')) interp += somOver(p.ohw, maanden.filter(m => INTERPOLATIE_MAANDEN.includes(m)))
+      if (!['D', 'U'].includes(p.id[0]) && k.uren > 0) { verdeel += k.omzet; verdeelN++ }
+      for (const e of p.emps) {
+        const u = s(e.uren); if (!u) continue
+        const c = s(e.kosten)
+        bron[e.bron].pers.add(e.id); bron[e.bron].uren += u; bron[e.bron].kosten += c
+        if (e.bedrijf !== p.ent) { andereBv += c; andereBvUren += u }
+      }
+    }
+    const lijst: Aanname[] = []
+    if (bron.geschat.uren) lijst.push({ status: 'schatting', basis: 'kosten', bedrag: bron.geschat.kosten, tekst: `Kostprijs geschat op mediaan bedrijf: ${bron.geschat.pers.size} pers., ${fmtU(bron.geschat.uren)} uur`, detail: 'tarief ontbreekt in HC-bestand én invullijst' })
+    if (metMh && (mhOmzet || mhKosten)) lijst.push({ status: ent === 'Consultancy' ? 'nuance' : 'schatting', basis: 'omzet', bedrag: mhOmzet, tekst: `Missing hours toegerekend: omzet ${fmtK(mhOmzet)}, kosten ${fmtK(mhKosten)}`, detail: ent === 'Consultancy' ? 'detachering: exact per medewerker' : 'verdeeld naar rato van geschreven uren (Projects/Software = schatting)' })
+    if (interp) lijst.push({ status: 'schatting', basis: 'omzet', bedrag: interp, tekst: `Δ OHW eenheden in mrt/apr/jul/aug op geïnterpoleerde snapshots`, detail: 'OHW-eenhedenlijst van maart en juli ontbreekt; timing per maand onzeker, YTD klopt' })
+    if (nietToerekenbaar) lijst.push({ status: 'nuance', basis: 'omzet', bedrag: nietToerekenbaar, tekst: `Losse dossiers: ${losN} project(en) met omzet zonder uren`, detail: 'telt mee als omzet, geen kosten, niet aan medewerkers toe te rekenen' })
+    if (bron.ingevuld.uren) lijst.push({ status: 'nuance', basis: 'kosten', bedrag: bron.ingevuld.kosten, tekst: `Tarief uit invullijst Lars: ${bron.ingevuld.pers.size} pers., ${fmtU(bron.ingevuld.uren)} uur`, detail: 'inhuur = inkooptarief, eigen = kostprijs+AK' })
+    if (bron.spanje.uren) lijst.push({ status: 'nuance', basis: 'kosten', bedrag: bron.spanje.kosten, tekst: `Spanje-regel €35/uur: ${bron.spanje.pers.size} pers., ${fmtU(bron.spanje.uren)} uur`, detail: 'vaste afspraak, geen echte kostprijs per persoon' })
+    if (verdeel) lijst.push({ status: 'nuance', basis: 'omzet', bedrag: verdeel, tekst: `Omzet per medewerker via uren-verdeelsleutel op ${verdeelN} niet-uren-project(en)`, detail: 'eenheden/fixed price/software: aandeel = uren-aandeel, geen individuele productie' })
+    if (andereBv) lijst.push({ status: 'nuance', basis: 'kosten', bedrag: andereBv, tekst: `Kosten van medewerkers uit een andere BV: ${fmtU(andereBvUren)} uur`, detail: 'kosten volgen het project (IC-neutraal); in de P&L staat dit als IC-omzet/-kosten' })
+    lijst.push({ status: 'niet in model', tekst: 'Niet in dit model: inkoop/onderaanneming, handmatige OHW-posten, licenties zonder project, opex buiten de AK-opslag', detail: 'zie aansluitingsblok onderaan' })
+    const schatOmzet = lijst.filter(x => x.status === 'schatting' && x.basis === 'omzet').reduce((t, x) => t + (x.bedrag ?? 0), 0)
+    const schatKosten = lijst.filter(x => x.status === 'schatting' && x.basis === 'kosten').reduce((t, x) => t + (x.bedrag ?? 0), 0)
+    return { lijst, omzet, kosten, schatOmzet, schatKosten }
+  }, [filterProj, metMh, maanden, ent, nietToerekenbaar])
+
+  return (
+    <div style={{ border: '1px solid var(--bd2)', borderRadius: 8, padding: '8px 12px', background: 'var(--bg1)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <button onClick={() => setOpen(v => !v)} style={{ ...linkStyle, ...sectionTitle, marginBottom: 0, color: 'var(--t2)' }}>{open ? '▾' : '▸'} Aannames &amp; nuances — {label} · {periodeLabel}</button>
+        <span style={{ fontSize: 10.5, color: 'var(--t2)' }}>
+          schattingen in deze selectie: omzet <b style={{ color: 'var(--amber)', ...mono }}>{fmtK(a.schatOmzet)}</b> ({pct(a.schatOmzet, a.omzet) ?? 0}% van {fmtK(a.omzet)}) · kosten <b style={{ color: 'var(--amber)', ...mono }}>{fmtK(a.schatKosten)}</b> ({pct(a.schatKosten, a.kosten) ?? 0}% van {fmtK(a.kosten)})
+        </span>
+      </div>
+      {open && (
+        <ul style={{ margin: '6px 0 0', paddingLeft: 0, listStyle: 'none', fontSize: 10.5, color: 'var(--t1)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '2px 24px' }}>
+          {a.lijst.map((x, i) => (
+            <li key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0', borderTop: '1px solid var(--bd2)' }} title={x.detail}>
+              <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.05em', color: STATUS_STIJL[x.status].kleur, width: 74, flexShrink: 0 }}>{STATUS_STIJL[x.status].label}</span>
+              <span style={{ flex: 1 }}>{x.tekst}<span style={{ color: 'var(--t3)' }}>{x.detail ? ` — ${x.detail}` : ''}</span></span>
+              {x.bedrag != null && (
+                <span style={{ ...mono, whiteSpace: 'nowrap', color: 'var(--t2)' }}>
+                  {fmtK(x.bedrag)} <span style={{ color: 'var(--t3)' }}>({pct(x.bedrag, x.basis === 'omzet' ? a.omzet : a.kosten) ?? 0}% {x.basis})</span>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ── Inzoom per medewerker ───────────────────────────────────────────────────
+interface EmpProjRij { p: DetailProject; id: string; naam: string; klant: string; entSeg: string; u: number; share: number; omzet: number; kosten: number; marge: number; pct: number | null; projOmzet: number; projMarge: number; projPct: number | null; sel: boolean; intern: boolean }
+interface EmpKlantRij { klant: string; n: number; u: number; omzet: number; marge: number; projOmzet: number; projMarge: number; intern: boolean }
+const EMP_PROJ_KOL: Kolom<EmpProjRij>[] = [
+  { key: 'id', get: r => `${r.id} ${r.naam}`, text: true }, { key: 'klant', get: r => r.klant, text: true }, { key: 'entSeg', get: r => r.entSeg, text: true },
+  { key: 'u', get: r => r.u }, { key: 'share', get: r => r.share }, { key: 'omzet', get: r => r.omzet }, { key: 'kosten', get: r => r.kosten }, { key: 'marge', get: r => r.marge }, { key: 'pct', get: r => r.pct },
+  { key: 'projOmzet', get: r => r.projOmzet }, { key: 'projMarge', get: r => r.projMarge }, { key: 'projPct', get: r => r.projPct }, { key: 'sel', get: r => r.sel ? 1 : 0 },
+]
+const EMP_KLANT_KOL: Kolom<EmpKlantRij>[] = [
+  { key: 'klant', get: r => r.klant, text: true }, { key: 'n', get: r => r.n }, { key: 'u', get: r => r.u }, { key: 'omzet', get: r => r.omzet }, { key: 'marge', get: r => r.marge }, { key: 'projOmzet', get: r => r.projOmzet }, { key: 'projMarge', get: r => r.projMarge },
+]
+
 /** Inzoom per medewerker: alle projecten en klanten waar hij/zij op schreef (over alle tegels), met toegerekende omzet/marge. */
 function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, onClose }: {
   m: DetailMedewerker; mod: DetailModule; metMh: boolean; maanden: number[]; periodeLabel: string; inSelectie: Set<string>; onClose: () => void
 }) {
+  const [alleenSel, setAlleenSel] = useState(false)
   const pr = urenProfiel(m, maanden)
-  const somM = (a: number[]) => somOver(a, maanden)
-  const rows = mod.detailProjecten.flatMap(p => {
-    const e = p.emps.find(x => x.id === m.id); if (!e) return []
-    const u = somM(e.uren); if (!u) return []
-    const k = kpiVan(p, metMh, maanden)
-    const share = k.uren ? u / k.uren : 0
-    return [{ p, u, share, omzet: share * k.omzet, kosten: somM(e.kosten) + share * k.mhKosten, projOmzet: k.omzet, projMarge: k.marge }]
-  }).sort((a, b) => b.u - a.u)
-  const klanten = new Map<string, { n: number; u: number; omzet: number; kosten: number; projOmzet: number; projMarge: number }>()
-  for (const r of rows) {
-    const key = r.p.intern ? '(intern)' : r.p.klant || '(geen klant)'
-    const c = klanten.get(key) ?? { n: 0, u: 0, omzet: 0, kosten: 0, projOmzet: 0, projMarge: 0 }
-    c.n++; c.u += r.u; c.omzet += r.omzet; c.kosten += r.kosten; c.projOmzet += r.projOmzet; c.projMarge += r.projMarge; klanten.set(key, c)
-  }
-  const tot = rows.reduce((a, r) => ({ u: a.u + r.u, omzet: a.omzet + r.omzet, kosten: a.kosten + r.kosten, projOmzet: a.projOmzet + (r.p.intern ? 0 : r.projOmzet), projMarge: a.projMarge + (r.p.intern ? 0 : r.projMarge) }), { u: 0, omzet: 0, kosten: 0, projOmzet: 0, projMarge: 0 })
+  const rows = useMemo<EmpProjRij[]>(() => {
+    const somM = (a: number[]) => somOver(a, maanden)
+    return mod.detailProjecten.flatMap(p => {
+      const e = p.emps.find(x => x.id === m.id); if (!e) return []
+      const u = somM(e.uren); if (!u) return []
+      const k = kpiVan(p, metMh, maanden)
+      const share = k.uren ? u / k.uren : 0
+      const omzet = p.intern ? 0 : share * k.omzet, kosten = somM(e.kosten) + share * k.mhKosten
+      return [{ p, id: p.id, naam: p.naam, klant: p.intern ? '(intern)' : p.klant || '(geen klant)', entSeg: `${p.ent} · ${p.seg}`, u, share, omzet, kosten, marge: omzet - kosten, pct: p.intern ? null : pct(omzet - kosten, omzet), projOmzet: p.intern ? 0 : k.omzet, projMarge: p.intern ? 0 : k.marge, projPct: p.intern ? null : pct(k.marge, k.omzet), sel: inSelectie.has(p.id), intern: !!p.intern }]
+    })
+  }, [mod, m.id, metMh, maanden, inSelectie])
+  const klantRijen = useMemo<EmpKlantRij[]>(() => {
+    const map = new Map<string, EmpKlantRij>()
+    for (const r of rows) {
+      const c = map.get(r.klant) ?? { klant: r.klant, n: 0, u: 0, omzet: 0, marge: 0, projOmzet: 0, projMarge: 0, intern: r.intern }
+      c.n++; c.u += r.u; c.omzet += r.omzet; c.marge += r.marge; c.projOmzet += r.projOmzet; c.projMarge += r.projMarge; map.set(r.klant, c)
+    }
+    return [...map.values()]
+  }, [rows])
+  const selFn = useMemo(() => alleenSel ? (r: EmpProjRij) => r.sel : undefined, [alleenSel])
+  const projTabel = useTabel(rows, EMP_PROJ_KOL, { key: 'u', desc: true }, selFn)
+  const klantTabel = useTabel(klantRijen, EMP_KLANT_KOL, { key: 'u', desc: true })
+  const tot = rows.reduce((a, r) => ({ u: a.u + r.u, omzet: a.omzet + r.omzet, kosten: a.kosten + r.kosten, projOmzet: a.projOmzet + r.projOmzet, projMarge: a.projMarge + r.projMarge }), { u: 0, omzet: 0, kosten: 0, projOmzet: 0, projMarge: 0 })
 
   return (
     <div style={{ border: '1px solid var(--bd3)', borderRadius: 8, padding: '10px 12px', marginBottom: 12, background: 'var(--bg1)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', marginBottom: 8, fontSize: 11.5, color: 'var(--t2)' }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>{m.naam}<BronMarker bron={m.bron} tarief={m.tarief} /></span>
-        <span>{m.bedrijf} · kostprijs+AK <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>€{m.tarief}</b>/uur</span>
+        <span>{m.bedrijf} · kostprijs+AK <b style={{ color: 'var(--t1)', ...mono }}>€{m.tarief}</b>/uur ({BRON_LABEL[m.bron]})</span>
         <span>{periodeLabel}</span>
-        <span>Uren <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{fmtU(pr.totaal)}</b> = klant {fmtU(pr.klant)} · intern {fmtU(pr.intern)} · improd. {fmtU(pr.improductief)} · verlof {fmtU(pr.verlof)} · ziekte {fmtU(pr.ziekte)} · overig {fmtU(pr.overig)}</span>
+        <span>Uren <b style={{ color: 'var(--t1)', ...mono }}>{fmtU(pr.totaal)}</b> = klant {fmtU(pr.klant)} · intern {fmtU(pr.intern)} · improd. {fmtU(pr.improductief)} · verlof {fmtU(pr.verlof)} · ziekte {fmtU(pr.ziekte)} · overig {fmtU(pr.overig)}</span>
         <span>Declarabel <b style={{ color: declColor(pr.declAlle) }}>{pr.declAlle == null ? '—' : `${pr.declAlle}%`}</b> (excl. verlof/ziekte <b style={{ color: declColor(pr.declExcl) }}>{pr.declExcl == null ? '—' : `${pr.declExcl}%`}</b>)</span>
-        <span>Aandeel: omzet <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{fmtEur(tot.omzet)}</b> · marge <b style={{ color: margeColor(tot.omzet - tot.kosten), fontFamily: 'var(--mono)' }}>{fmtEur(tot.omzet - tot.kosten)}</b></span>
-        <span>Projecten totaal: omzet <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{fmtEur(tot.projOmzet)}</b> · marge <b style={{ color: margeColor(tot.projMarge), fontFamily: 'var(--mono)' }}>{fmtEur(tot.projMarge)}</b></span>
+        <span>Aandeel: omzet <b style={{ color: 'var(--t1)', ...mono }}>{fmtEur(tot.omzet)}</b> · marge <b style={{ color: margeColor(tot.omzet - tot.kosten), ...mono }}>{fmtEur(tot.omzet - tot.kosten)}</b></span>
+        <span>Projecten totaal: omzet <b style={{ color: 'var(--t1)', ...mono }}>{fmtEur(tot.projOmzet)}</b> · marge <b style={{ color: margeColor(tot.projMarge), ...mono }}>{fmtEur(tot.projMarge)}</b></span>
         <button onClick={onClose} style={{ marginLeft: 'auto', fontSize: 11, background: 'none', border: 'none', color: 'var(--t3)', cursor: 'pointer' }}>✕ sluiten</button>
       </div>
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <table style={{ borderCollapse: 'collapse', fontSize: 10.5, flex: 2, minWidth: 520 }}>
-          <thead>
-            <tr style={{ color: 'var(--t3)', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.05em' }}>
-              <th colSpan={4} />
-              <th colSpan={5} style={th('left', { color: 'var(--t2)', borderLeft: '1px solid var(--bd2)', borderBottom: '1px solid var(--bd2)' })}>Aandeel medewerker</th>
-              <th colSpan={3} style={th('left', { color: 'var(--t2)', borderLeft: '1px solid var(--bd2)', borderBottom: '1px solid var(--bd2)' })}>Project totaal</th>
-            </tr>
-            <tr style={{ color: 'var(--t3)' }}>
-              <th style={th('left')}>Project</th><th style={th('left')}>Klant</th><th style={th('left')}>Entiteit · segment</th><th style={th()}>Uren</th>
-              <th style={th('right', { borderLeft: '1px solid var(--bd2)' })} title="Aandeel van deze medewerker in de projecturen">Aandeel</th><th style={th()}>Omzet</th><th style={th()}>Kosten</th><th style={th()}>Marge</th><th style={th()}>%</th>
-              <th style={th('right', { borderLeft: '1px solid var(--bd2)' })} title="Hele projectomzet (alle medewerkers)">Omzet</th><th style={th()} title="Hele projectmarge (alle medewerkers)">Marge</th><th style={th()}>%</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(r => {
-              const sel = inSelectie.has(r.p.id)
-              return (
-                <tr key={r.p.id} style={{ borderTop: '1px solid var(--bd2)', color: sel ? 'var(--t1)' : 'var(--t2)' }}>
-                  <td style={td('left', { maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' })} title={sel ? 'In de huidige selectie' : 'Buiten de huidige selectie'}>
-                    {sel && <span style={{ color: 'var(--blue)', marginRight: 4 }}>●</span>}<span style={{ fontFamily: 'var(--mono)' }}>{r.p.id}</span> {r.p.naam}{r.p.intern && <span style={{ color: 'var(--t3)' }}> (intern)</span>}
-                  </td>
-                  <td style={td('left', { maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' })}>{r.p.intern ? '—' : r.p.klant || '(geen klant)'}</td>
-                  <td style={td('left')}>{r.p.ent} · {r.p.seg}</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtU(r.u)}</td>
-                  <td style={td('right', { borderLeft: '1px solid var(--bd2)' })}>{Math.round(r.share * 100)}%</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)' })}>{r.p.intern ? '—' : fmtK(r.omzet)}</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtK(r.kosten)}</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 700, color: margeColor(r.omzet - r.kosten) })}>{r.p.intern ? '—' : fmtK(r.omzet - r.kosten)}</td>
-                  <td style={td('right')}>{r.p.intern ? '—' : pctStr(r.omzet - r.kosten, r.omzet)}</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)', borderLeft: '1px solid var(--bd2)' })}>{r.p.intern ? '—' : fmtK(r.projOmzet)}</td>
-                  <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 600, color: r.p.intern ? 'var(--t3)' : margeColor(r.projMarge) })}>{r.p.intern ? '—' : fmtK(r.projMarge)}</td>
-                  <td style={td('right')}>{r.p.intern ? '—' : pctStr(r.projMarge, r.projOmzet)}</td>
-                </tr>
-              )
-            })}
-            <tr style={{ borderTop: '2px solid var(--bd3)', color: 'var(--t1)', fontWeight: 700 }}>
-              <td style={td('left')}>Totaal ({rows.length} projecten)</td><td /><td />
-              <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtU(tot.u)}</td><td style={td('right', { borderLeft: '1px solid var(--bd2)' })} />
-              <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtK(tot.omzet)}</td>
-              <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtK(tot.kosten)}</td>
-              <td style={td('right', { fontFamily: 'var(--mono)', color: margeColor(tot.omzet - tot.kosten) })}>{fmtK(tot.omzet - tot.kosten)}</td>
-              <td style={td('right')}>{pctStr(tot.omzet - tot.kosten, tot.omzet)}</td>
-              <td style={td('right', { fontFamily: 'var(--mono)', borderLeft: '1px solid var(--bd2)' })}>{fmtK(tot.projOmzet)}</td>
-              <td style={td('right', { fontFamily: 'var(--mono)', color: margeColor(tot.projMarge) })}>{fmtK(tot.projMarge)}</td>
-              <td style={td('right')}>{pctStr(tot.projMarge, tot.projOmzet)}</td>
-            </tr>
-          </tbody>
-        </table>
-        <table style={{ borderCollapse: 'collapse', fontSize: 10.5, flex: 1, minWidth: 300 }}>
-          <thead>
-            <tr style={{ color: 'var(--t3)', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.05em' }}>
-              <th colSpan={3} />
-              <th colSpan={2} style={th('left', { color: 'var(--t2)', borderLeft: '1px solid var(--bd2)', borderBottom: '1px solid var(--bd2)' })}>Aandeel</th>
-              <th colSpan={2} style={th('left', { color: 'var(--t2)', borderLeft: '1px solid var(--bd2)', borderBottom: '1px solid var(--bd2)' })}>Projecten totaal</th>
-            </tr>
-            <tr style={{ color: 'var(--t3)' }}>
-              <th style={th('left')}>Klant</th><th style={th()}>Proj.</th><th style={th()}>Uren</th>
-              <th style={th('right', { borderLeft: '1px solid var(--bd2)' })}>Omzet</th><th style={th()}>Marge</th>
-              <th style={th('right', { borderLeft: '1px solid var(--bd2)' })}>Omzet</th><th style={th()}>Marge</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...klanten.entries()].sort((a, b) => b[1].u - a[1].u).map(([k, c]) => (
-              <tr key={k} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
-                <td style={td('left', { maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' })}>{k}</td>
-                <td style={td('right', { color: 'var(--t3)' })}>{c.n}</td>
-                <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtU(c.u)}</td>
-                <td style={td('right', { fontFamily: 'var(--mono)', borderLeft: '1px solid var(--bd2)' })}>{k === '(intern)' ? '—' : fmtK(c.omzet)}</td>
-                <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 700, color: margeColor(c.omzet - c.kosten) })}>{k === '(intern)' ? '—' : fmtK(c.omzet - c.kosten)}</td>
-                <td style={td('right', { fontFamily: 'var(--mono)', borderLeft: '1px solid var(--bd2)', color: 'var(--t2)' })}>{k === '(intern)' ? '—' : fmtK(c.projOmzet)}</td>
-                <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 600, color: k === '(intern)' ? 'var(--t3)' : margeColor(c.projMarge) })}>{k === '(intern)' ? '—' : fmtK(c.projMarge)}</td>
+        <div style={{ flex: 2, minWidth: 560 }}>
+          <FilterBar state={projTabel.state} placeholder="filter op project/klant…" n={projTabel.rows.length} totaal={rows.length}>
+            <label style={{ fontSize: 10.5, color: 'var(--t2)', cursor: 'pointer' }}><input type="checkbox" checked={alleenSel} onChange={e => setAlleenSel(e.target.checked)} style={{ accentColor: 'var(--blue)', marginRight: 4 }} />alleen huidige selectie</label>
+          </FilterBar>
+          <table style={{ borderCollapse: 'collapse', fontSize: 10.5, width: '100%' }}>
+            <thead>
+              <tr style={groupRow}>
+                <th colSpan={4} />
+                <th colSpan={5} style={groupTh()}>Aandeel medewerker</th>
+                <th colSpan={3} style={groupTh()}>Project totaal</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+              <tr style={{ color: 'var(--t3)' }}>
+                <SortTh k="id" label="Project" state={projTabel.state} align="left" /><SortTh k="klant" label="Klant" state={projTabel.state} align="left" /><SortTh k="entSeg" label="Entiteit · segment" state={projTabel.state} align="left" /><SortTh k="u" label="Uren" state={projTabel.state} />
+                <SortTh k="share" label="Aandeel" state={projTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} title="Aandeel van deze medewerker in de projecturen" /><SortTh k="omzet" label="Omzet" state={projTabel.state} /><SortTh k="kosten" label="Kosten" state={projTabel.state} /><SortTh k="marge" label="Marge" state={projTabel.state} /><SortTh k="pct" label="%" state={projTabel.state} />
+                <SortTh k="projOmzet" label="Omzet" state={projTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} title="Hele projectomzet (alle medewerkers)" /><SortTh k="projMarge" label="Marge" state={projTabel.state} title="Hele projectmarge (alle medewerkers)" /><SortTh k="projPct" label="%" state={projTabel.state} />
+              </tr>
+            </thead>
+            <tbody>
+              {projTabel.rows.map(r => (
+                <tr key={r.id} style={{ borderTop: '1px solid var(--bd2)', color: r.sel ? 'var(--t1)' : 'var(--t2)' }}>
+                  <td style={td('left', { maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' })} title={r.sel ? 'In de huidige selectie' : 'Buiten de huidige selectie'}>
+                    {r.sel && <span style={{ color: 'var(--blue)', marginRight: 4 }}>●</span>}<span style={mono}>{r.id}</span> {r.naam}{r.intern && <span style={{ color: 'var(--t3)' }}> (intern)</span>}
+                  </td>
+                  <td style={td('left', { maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' })}>{r.intern ? '—' : r.klant}</td>
+                  <td style={td('left')}>{r.entSeg}</td>
+                  <td style={td('right', mono)}>{fmtU(r.u)}</td>
+                  <td style={td('right', { borderLeft: '1px solid var(--bd2)' })}>{Math.round(r.share * 100)}%</td>
+                  <td style={td('right', mono)}>{r.intern ? '—' : fmtK(r.omzet)}</td>
+                  <td style={td('right', mono)}>{fmtK(r.kosten)}</td>
+                  <td style={td('right', { ...mono, fontWeight: 700, color: margeColor(r.marge) })}>{r.intern ? '—' : fmtK(r.marge)}</td>
+                  <td style={td('right')}>{r.intern ? '—' : pctStr(r.marge, r.omzet)}</td>
+                  <td style={td('right', { ...mono, borderLeft: '1px solid var(--bd2)' })}>{r.intern ? '—' : fmtK(r.projOmzet)}</td>
+                  <td style={td('right', { ...mono, fontWeight: 600, color: r.intern ? 'var(--t3)' : margeColor(r.projMarge) })}>{r.intern ? '—' : fmtK(r.projMarge)}</td>
+                  <td style={td('right')}>{r.intern ? '—' : pctStr(r.projMarge, r.projOmzet)}</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: '2px solid var(--bd3)', color: 'var(--t1)', fontWeight: 700 }}>
+                <td style={td('left')}>Totaal ({rows.length} projecten)</td><td /><td />
+                <td style={td('right', mono)}>{fmtU(tot.u)}</td><td style={td('right', { borderLeft: '1px solid var(--bd2)' })} />
+                <td style={td('right', mono)}>{fmtK(tot.omzet)}</td>
+                <td style={td('right', mono)}>{fmtK(tot.kosten)}</td>
+                <td style={td('right', { ...mono, color: margeColor(tot.omzet - tot.kosten) })}>{fmtK(tot.omzet - tot.kosten)}</td>
+                <td style={td('right')}>{pctStr(tot.omzet - tot.kosten, tot.omzet)}</td>
+                <td style={td('right', { ...mono, borderLeft: '1px solid var(--bd2)' })}>{fmtK(tot.projOmzet)}</td>
+                <td style={td('right', { ...mono, color: margeColor(tot.projMarge) })}>{fmtK(tot.projMarge)}</td>
+                <td style={td('right')}>{pctStr(tot.projMarge, tot.projOmzet)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style={{ flex: 1, minWidth: 320 }}>
+          <FilterBar state={klantTabel.state} placeholder="filter op klant…" n={klantTabel.rows.length} totaal={klantRijen.length} />
+          <table style={{ borderCollapse: 'collapse', fontSize: 10.5, width: '100%' }}>
+            <thead>
+              <tr style={groupRow}>
+                <th colSpan={3} />
+                <th colSpan={2} style={groupTh()}>Aandeel</th>
+                <th colSpan={2} style={groupTh()}>Projecten totaal</th>
+              </tr>
+              <tr style={{ color: 'var(--t3)' }}>
+                <SortTh k="klant" label="Klant" state={klantTabel.state} align="left" /><SortTh k="n" label="Proj." state={klantTabel.state} /><SortTh k="u" label="Uren" state={klantTabel.state} />
+                <SortTh k="omzet" label="Omzet" state={klantTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} /><SortTh k="marge" label="Marge" state={klantTabel.state} />
+                <SortTh k="projOmzet" label="Omzet" state={klantTabel.state} extra={{ borderLeft: '1px solid var(--bd2)' }} /><SortTh k="projMarge" label="Marge" state={klantTabel.state} />
+              </tr>
+            </thead>
+            <tbody>
+              {klantTabel.rows.map(c => (
+                <tr key={c.klant} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
+                  <td style={td('left', { maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' })}>{c.klant}</td>
+                  <td style={td('right', { color: 'var(--t3)' })}>{c.n}</td>
+                  <td style={td('right', mono)}>{fmtU(c.u)}</td>
+                  <td style={td('right', { ...mono, borderLeft: '1px solid var(--bd2)' })}>{c.intern ? '—' : fmtK(c.omzet)}</td>
+                  <td style={td('right', { ...mono, fontWeight: 700, color: margeColor(c.marge) })}>{c.intern ? '—' : fmtK(c.marge)}</td>
+                  <td style={td('right', { ...mono, borderLeft: '1px solid var(--bd2)', color: 'var(--t2)' })}>{c.intern ? '—' : fmtK(c.projOmzet)}</td>
+                  <td style={td('right', { ...mono, fontWeight: 600, color: c.intern ? 'var(--t3)' : margeColor(c.projMarge) })}>{c.intern ? '—' : fmtK(c.projMarge)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
       <div style={{ fontSize: 10.5, color: 'var(--t3)', marginTop: 6 }}>● = project valt in de huidige tegel/klant/project-selectie. "Aandeel" = eigen uren-aandeel × projectomzet minus eigen kosten; "Project totaal" = het hele project met alle medewerkers. Interne projecten tellen kosten maar geen omzet.</div>
     </div>
   )
 }
 
+// ── Projectdetail: maandreeks + weekoverzicht ───────────────────────────────
+interface WeekRij extends WeekRow { margeWk: number; empsTekst: string }
+const WEEK_KOL: Kolom<WeekRij>[] = [
+  { key: 'w', get: r => r.w }, { key: 'productie', get: r => r.productie }, { key: 'bevestigd', get: r => r.bevestigd }, { key: 'uren', get: r => r.uren }, { key: 'kosten', get: r => r.kosten }, { key: 'margeWk', get: r => r.margeWk }, { key: 'empsTekst', get: r => r.empsTekst, text: true },
+]
+
 function ProjectDetail({ p, k, metMh, periodeLabel }: { p: DetailProject; k: Kpi; metMh: boolean; periodeLabel: string }) {
   const isE = p.id.startsWith('E-')
-  const weeks: WeekRow[] = p.weeks ?? []
   const [alleWeken, setAlleWeken] = useState(false)
-  const wRows = alleWeken ? weeks : weeks.filter(w => w.productie !== 0 || w.uren !== 0)
-  const wTot = weeks.reduce((a, w) => ({ productie: a.productie + w.productie, bevestigd: a.bevestigd + w.bevestigd, uren: a.uren + w.uren, kosten: a.kosten + w.kosten }), { productie: 0, bevestigd: 0, uren: 0, kosten: 0 })
+  const weekRijen = useMemo<WeekRij[]>(() => (p.weeks ?? []).map(w => ({ ...w, margeWk: w.productie - w.kosten, empsTekst: w.emps.map(([n, u]) => `${n} (${u})`).join(', ') })), [p])
+  const legeFn = useMemo(() => alleWeken ? undefined : (w: WeekRij) => w.productie !== 0 || w.uren !== 0, [alleWeken])
+  const weekTabel = useTabel(weekRijen, WEEK_KOL, { key: 'w', desc: false }, legeFn)
+  const wTot = weekRijen.reduce((a, w) => ({ productie: a.productie + w.productie, bevestigd: a.bevestigd + w.bevestigd, uren: a.uren + w.uren, kosten: a.kosten + w.kosten }), { productie: 0, bevestigd: 0, uren: 0, kosten: 0 })
   const s = (a: number[]) => a.slice(0, MARGE_MAANDEN).reduce((x, y) => x + y, 0)
   const modelOmzetYtd = s(p.omzet) + s(p.ohw)
 
@@ -487,15 +685,15 @@ function ProjectDetail({ p, k, metMh, periodeLabel }: { p: DetailProject; k: Kpi
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 11.5, color: 'var(--t2)' }}>
         <span>Klant <b style={{ color: 'var(--t1)' }}>{p.klant || '—'}</b></span>
         <span>{p.ent} · {p.seg} · {TYPE_LABEL[p.id[0]] ?? p.id[0]}</span>
-        <span>Omzet {periodeLabel} <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{fmtEur(k.omzet)}</b></span>
-        <span>Kosten <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{fmtEur(k.kosten)}</b></span>
-        <span>Marge <b style={{ color: margeColor(k.marge), fontFamily: 'var(--mono)' }}>{fmtEur(k.marge)}</b> ({pctStr(k.marge, k.omzet)})</span>
-        <span>Uren <b style={{ color: 'var(--t1)', fontFamily: 'var(--mono)' }}>{fmtU(k.uren)}</b></span>
+        <span>Omzet {periodeLabel} <b style={{ color: 'var(--t1)', ...mono }}>{fmtEur(k.omzet)}</b></span>
+        <span>Kosten <b style={{ color: 'var(--t1)', ...mono }}>{fmtEur(k.kosten)}</b></span>
+        <span>Marge <b style={{ color: margeColor(k.marge), ...mono }}>{fmtEur(k.marge)}</b> ({pctStr(k.marge, k.omzet)})</span>
+        <span>Uren <b style={{ color: 'var(--t1)', ...mono }}>{fmtU(k.uren)}</b></span>
         {k.geenUren && <span style={{ color: 'var(--amber)' }}>◌ los dossier — omzet zonder geboekte uren, hangt niet aan projectwerk</span>}
       </div>
 
       {/* Maandreeks */}
-      <table style={{ borderCollapse: 'collapse', fontSize: 11, fontFamily: 'var(--mono)', alignSelf: 'flex-start' }}>
+      <table style={{ borderCollapse: 'collapse', fontSize: 11, ...mono, alignSelf: 'flex-start' }}>
         <thead>
           <tr style={{ color: 'var(--t3)', fontFamily: 'var(--font)' }}>
             <th style={th('left')}>Maand</th><th style={th()}>Fact.</th><th style={th()}>Δ OHW</th>{metMh && <th style={th()}>Δ MH</th>}<th style={th()}>Uren</th><th style={th()}>Kosten</th><th style={th()}>Marge</th>
@@ -526,52 +724,49 @@ function ProjectDetail({ p, k, metMh, periodeLabel }: { p: DetailProject; k: Kpi
       {/* Weekoverzicht (eenheden-projecten) */}
       {isE && (
         <div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
-            <div style={sectionTitle}>Weekoverzicht eenheden — productie (OHW Freezes) vs uren/kosten van die week</div>
-            <label style={{ fontSize: 10.5, color: 'var(--t3)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={alleWeken} onChange={e => setAlleWeken(e.target.checked)} style={{ accentColor: 'var(--blue)', marginRight: 4 }} />
-              ook lege weken
-            </label>
-          </div>
-          {weeks.length === 0 ? (
+          <div style={sectionTitle}>Weekoverzicht eenheden — productie (OHW Freezes) vs uren/kosten van die week</div>
+          {weekRijen.length === 0 ? (
             <div style={{ fontSize: 11, color: 'var(--amber)' }}>Geen weekproductie (OHW Freezes) en geen weekuren voor dit project gevonden — koppeling via projectnummer "Nummer 2026" niet mogelijk.</div>
           ) : (
             <>
+              <FilterBar state={weekTabel.state} placeholder="filter op medewerker…" n={weekTabel.rows.length} totaal={weekRijen.length}>
+                <label style={{ fontSize: 10.5, color: 'var(--t2)', cursor: 'pointer' }}><input type="checkbox" checked={alleWeken} onChange={e => setAlleWeken(e.target.checked)} style={{ accentColor: 'var(--blue)', marginRight: 4 }} />ook lege weken</label>
+              </FilterBar>
               <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
                 <thead>
                   <tr style={{ color: 'var(--t3)' }}>
-                    <th style={th('left')}>Week</th><th style={th()}>Productie</th><th style={th()} title="Servicebevestigingen (meters/revisie) uit de Projectadministratie">Bevestigd</th><th style={th()}>Uren</th><th style={th()}>Kosten</th><th style={th()}>Marge wk</th><th style={th('left')}>Medewerkers (uren)</th>
+                    <SortTh k="w" label="Week" state={weekTabel.state} align="left" /><SortTh k="productie" label="Productie" state={weekTabel.state} /><SortTh k="bevestigd" label="Bevestigd" state={weekTabel.state} title="Servicebevestigingen (meters/revisie) uit de Projectadministratie" />
+                    <SortTh k="uren" label="Uren" state={weekTabel.state} /><SortTh k="kosten" label="Kosten" state={weekTabel.state} /><SortTh k="margeWk" label="Marge wk" state={weekTabel.state} /><SortTh k="empsTekst" label="Medewerkers (uren)" state={weekTabel.state} align="left" />
                   </tr>
                 </thead>
                 <tbody>
-                  {wRows.map(w => (
+                  {weekTabel.rows.map(w => (
                     <tr key={w.w} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
-                      <td style={td('left', { fontFamily: 'var(--mono)', color: 'var(--t2)' })} title={w.taken ? w.taken.map(([t, v]) => `${t}: ${fmtEur(v)}`).join('\n') : undefined}>wk {w.w}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtEur(w.productie)}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', color: 'var(--t2)' })}>{w.bevestigd ? fmtEur(w.bevestigd) : '—'}</td>
+                      <td style={td('left', { ...mono, color: 'var(--t2)' })} title={w.taken ? w.taken.map(([t, v]) => `${t}: ${fmtEur(v)}`).join('\n') : undefined}>wk {w.w}</td>
+                      <td style={td('right', mono)}>{fmtEur(w.productie)}</td>
+                      <td style={td('right', { ...mono, color: 'var(--t2)' })}>{w.bevestigd ? fmtEur(w.bevestigd) : '—'}</td>
                       <td style={td('right', { color: 'var(--t3)' })}>{w.uren}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', color: 'var(--t2)' })}>{fmtEur(w.kosten)}</td>
-                      <td style={td('right', { fontFamily: 'var(--mono)', fontWeight: 700, color: margeColor(w.productie - w.kosten) })}>{fmtEur(w.productie - w.kosten)}</td>
-                      <td style={{ ...td('left'), whiteSpace: 'normal', color: 'var(--t2)', fontSize: 10.5 }}>{w.emps.map(([n, u]) => `${n} (${u})`).join(', ')}</td>
+                      <td style={td('right', { ...mono, color: 'var(--t2)' })}>{fmtEur(w.kosten)}</td>
+                      <td style={td('right', { ...mono, fontWeight: 700, color: margeColor(w.margeWk) })}>{fmtEur(w.margeWk)}</td>
+                      <td style={{ ...td('left'), whiteSpace: 'normal', color: 'var(--t2)', fontSize: 10.5 }}>{w.empsTekst}</td>
                     </tr>
                   ))}
                   <tr style={{ borderTop: '2px solid var(--bd3)', color: 'var(--t1)', fontWeight: 700 }}>
                     <td style={td('left')}>YTD</td>
-                    <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtEur(wTot.productie)}</td>
-                    <td style={td('right', { fontFamily: 'var(--mono)' })}>{wTot.bevestigd ? fmtEur(wTot.bevestigd) : '—'}</td>
+                    <td style={td('right', mono)}>{fmtEur(wTot.productie)}</td>
+                    <td style={td('right', mono)}>{wTot.bevestigd ? fmtEur(wTot.bevestigd) : '—'}</td>
                     <td style={td('right')}>{wTot.uren}</td>
-                    <td style={td('right', { fontFamily: 'var(--mono)' })}>{fmtEur(wTot.kosten)}</td>
-                    <td style={td('right', { fontFamily: 'var(--mono)', color: margeColor(wTot.productie - wTot.kosten) })}>{fmtEur(wTot.productie - wTot.kosten)}</td>
+                    <td style={td('right', mono)}>{fmtEur(wTot.kosten)}</td>
+                    <td style={td('right', { ...mono, color: margeColor(wTot.productie - wTot.kosten) })}>{fmtEur(wTot.productie - wTot.kosten)}</td>
                     <td />
                   </tr>
                 </tbody>
               </table>
-              <div style={{ fontSize: 10.5, color: 'var(--t3)', marginTop: 6, lineHeight: 1.5 }}>
-                Productie = "Delta waarde vorige week" uit OHW Trendlijnen - 2026 (OHW Freezes), gekoppeld op projectnummer;
-                hover over de week voor de work packages. Weekproductie YTD {fmtEur(wTot.productie)} vs. maandmodel
-                (facturatie + Δ OHW) {fmtEur(modelOmzetYtd)}{Math.abs(wTot.productie - modelOmzetYtd) > 1000 ? ` — verschil ${fmtEur(wTot.productie - modelOmzetYtd)} (timing facturatie/OHW-snapshots)` : ''}.
-                Uren van de week worden op het project gekoppeld (niet per work package): welke medewerkers in die week aan dit project werkten.
-              </div>
+              <ul style={{ fontSize: 10.5, color: 'var(--t3)', marginTop: 6, paddingLeft: 16, lineHeight: 1.5 }}>
+                <li>Productie = "Delta waarde vorige week" uit OHW Trendlijnen - 2026 (OHW Freezes), gekoppeld op projectnummer; hover over de week voor de work packages.</li>
+                <li>Weekproductie YTD {fmtEur(wTot.productie)} vs. maandmodel (facturatie + Δ OHW) {fmtEur(modelOmzetYtd)}{Math.abs(wTot.productie - modelOmzetYtd) > 1000 ? ` — verschil ${fmtEur(wTot.productie - modelOmzetYtd)} (timing facturatie/OHW-snapshots)` : ''}.</li>
+                <li>Uren van de week zijn op projectniveau gekoppeld (niet per work package). Bron eenheden-snapshots: {MARGE_META.eenhedenSnapshotsOntbreken.join(', ')} ontbreken (geïnterpoleerd).</li>
+              </ul>
             </>
           )}
         </div>

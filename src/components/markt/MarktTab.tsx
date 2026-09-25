@@ -609,27 +609,47 @@ export function MarktTab() {
               ))}
             </tbody>
           </table>
-          <div style={{ fontSize: 10.5, color: 'var(--t2)', marginTop: 10, lineHeight: 1.6 }}>
-            Het model rekent alleen wat aan een klantproject te koppelen is: omzet = facturatie per project + mutatie van
-            U-/D-facturatie, conceptfacturen en de OHW-eenhedenlijst; kosten = productieve uren × kostprijs+AK
-            (tarievenbestand P4 2026, kolom F). Niet toegerekend: handmatige OHW-posten (indexaties, voorzieningen,
-            fees), vooruitgefactureerde licenties (Software), directe inkoop, autokosten en overige personeelskosten.
-            Omdat de kostprijs+AK al een opslag voor algemene kosten bevat, ligt de modelmarge qua niveau tussen
-            brutomarge en EBITDA in.
-            {' '}Herkomst kostprijs per uur (aandeel productieve uren): tarievenbestand {pctBron('tarievenbestand')}%,
-            invullijst Lars {pctBron('ingevuld')}% ({MARGE_META.tariefBronnen.ingevuld.personen} pers.), Spanje-regel
-            €{MARGE_META.tarievenAanvulling.find(m => m.bron === 'spanje')?.tarief ?? 35}/uur {pctBron('spanje')}%
-            ({MARGE_META.tariefBronnen.spanje.personen} pers.), nog geschat op de mediaan van het bedrijf {pctBron('geschat')}%
-            ({MARGE_META.tariefBronnen.geschat.personen} pers., kolom "geschat tarief"). In de drill-down staat per
-            medewerker een markering (✎ ingevuld, ES Spanje-regel, ≈ geschat) met het gebruikte tarief; de volledige
-            lijst staat in scripts/tarieven-aanvulling.json.
-            OHW-eenhedensnapshots van maart en juli ontbreken en zijn lineair geïnterpoleerd. Omzet zonder geboekte uren
-            zijn losse dossiers (◌ in de projectenlijst, kolom "w.v. losse dossiers"): die tellen gewoon mee als omzet,
-            maar hangen niet aan projectwerk en hebben in dit model geen urenkosten.
-            {' '}Missing hours (nog niet geboekte/goedgekeurde uren; maandstand uit de OHW-administratie) zijn per
-            medewerker over diens projecten verdeeld — bij Consultancy-detachering is dat exact, bij Projects een
-            schatting naar rato van geschreven uren; met het vinkje "incl. missing hours" zet je ze uit.
-          </div>
+          {(() => {
+            const tot = aansluiting.reduce((t, a) => ({
+              omzet: t.omzet + a.omzetToeg, plOmzet: t.plOmzet + a.plOmzet, kosten: t.kosten + a.kosten + a.fallback, fallback: t.fallback + a.fallback,
+              mh: t.mh + (metMh ? a.mhOmzet : 0), mhProj: t.mhProj + (metMh && a.ent === 'Projects' ? a.mhOmzet : 0), los: t.los + a.zonderUren, intern: t.intern + a.intern,
+              marge: t.marge + a.marge, ebitda: t.ebitda + a.plEbitda,
+            }), { omzet: 0, plOmzet: 0, kosten: 0, fallback: 0, mh: 0, mhProj: 0, los: 0, intern: 0, marge: 0, ebitda: 0 })
+            const zonderProject = Object.values(MARGE_META.zonderProject).reduce((a, v) => a + v, 0)
+            const p = (deel: number, basis: number) => basis ? `${Math.round(deel / Math.abs(basis) * 100)}%` : '—'
+            const tb = MARGE_META.tariefBronnen
+            const tag = (s: 'schatting' | 'nuance' | 'niet in model') => (
+              <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.05em', width: 74, flexShrink: 0, color: s === 'schatting' ? 'var(--amber)' : s === 'nuance' ? 'var(--t3)' : 'var(--red)' }}>{s}</span>
+            )
+            const li = (s: 'schatting' | 'nuance' | 'niet in model', tekst: string, bedrag?: string) => (
+              <li style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0', borderTop: '1px solid var(--bd2)' }}>
+                {tag(s)}<span style={{ flex: 1 }}>{tekst}</span>{bedrag && <span style={{ fontFamily: 'var(--mono)', whiteSpace: 'nowrap', color: 'var(--t2)' }}>{bedrag}</span>}
+              </li>
+            )
+            return (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 10.5, color: 'var(--t2)', marginBottom: 4 }}>
+                  <b style={{ color: 'var(--t1)' }}>Aannames &amp; nuances — hele model, YTD.</b> Schattingen: kosten {fmtEur(tot.fallback)} ({p(tot.fallback, tot.kosten)} van de urenkosten) + missing hours Projects {fmtEur(tot.mhProj)} ({p(tot.mhProj, tot.omzet)} van de omzet).
+                  Verschil model-marge {fmtEur(tot.marge)} vs P&amp;L EBITDA {fmtEur(tot.ebitda)} = {fmtEur(tot.marge - tot.ebitda)}; per tegel staat dezelfde lijst voor die selectie.
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', fontSize: 10.5, color: 'var(--t1)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '0 24px' }}>
+                  {li('schatting', `Kostprijs geschat op mediaan bedrijf: ${tb.geschat.personen} pers., ${tb.geschat.uren.toLocaleString('nl-NL')} uur (${pctBron('geschat')}% van de uren)`, `${fmtEur(tb.geschat.kosten)} · ${p(tb.geschat.kosten, tot.kosten)} kosten`)}
+                  {li('schatting', 'Missing hours Projects/Software: verdeeld naar rato van geschreven uren', `${fmtEur(tot.mhProj)} · ${p(tot.mhProj, tot.omzet)} omzet`)}
+                  {li('schatting', `OHW-eenhedensnapshots ${MARGE_META.eenhedenSnapshotsOntbreken.join(' en ')} ontbreken → lineair geïnterpoleerd (maandtiming Projects)`, 'YTD sluit')}
+                  {li('nuance', 'Missing hours Consultancy: maandstand OHW-admin, exact per gedetacheerde', `${fmtEur(tot.mh - tot.mhProj)} · ${p(tot.mh - tot.mhProj, tot.omzet)} omzet`)}
+                  {li('nuance', `Tarief uit invullijst Lars: ${tb.ingevuld.personen} pers. (${pctBron('ingevuld')}% van de uren); Spanje-regel €35: ${tb.spanje.personen} pers. (${pctBron('spanje')}%)`, `${fmtEur(tb.ingevuld.kosten + tb.spanje.kosten)} · ${p(tb.ingevuld.kosten + tb.spanje.kosten, tot.kosten)} kosten`)}
+                  {li('nuance', 'Losse dossiers: omzet zonder geboekte uren, telt mee, geen kosten (◌)', `${fmtEur(tot.los)} · ${p(tot.los, tot.omzet)} omzet`)}
+                  {li('nuance', 'Interne projecten (S-/G-): kosten zonder omzet, buiten de matrix', `${fmtEur(tot.intern)} kosten`)}
+                  {li('nuance', 'Kosten volgen het project (IC-neutraal); P&L boekt IC als omzet/kosten per BV', 'zie IC-rijen OHW')}
+                  {li('nuance', 'Kostprijs+AK bevat al auto-/algemene kosten → modelmarge ligt tussen brutomarge en EBITDA', '—')}
+                  {li('niet in model', 'Facturen 2026 zonder projectnummer (buiten de matrix)', `${fmtEur(zonderProject)}`)}
+                  {li('niet in model', 'Handmatige OHW-posten (indexaties, voorzieningen, fees, meerwerk), licenties Software', `P&L − model omzet: ${fmtEur(tot.plOmzet - tot.omzet)}`)}
+                  {li('niet in model', 'Directe inkoop/onderaanneming, opex buiten de AK-opslag, overige personeelskosten', 'zie P&L')}
+                </ul>
+                <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>Markering per medewerker in de drill-down: ✎ ingevuld, ES Spanje-regel, ≈ geschat (tooltip toont het tarief). Volledige tarievenlijst: scripts/tarieven-aanvulling.json.</div>
+              </div>
+            )
+          })()}
         </div>
       )}
 
