@@ -6,6 +6,7 @@ import type { MarktEntity, MarktSegment } from '../../data/customerRevenue'
 import { marge2026, margeIntern2026, margeProjecten2026, MARGE_MAANDEN, MARGE_META } from '../../data/marginData'
 import { useAdjustedActuals } from '../../hooks/useAdjustedActuals'
 import { BASE_ACTUAL_MONTHS_2026 } from '../../store/useFinStore'
+import { MargeDrill } from './MargeDrill'
 
 const MAAND_LABELS = ['Jan', 'Feb', 'Mrt', 'Apr', 'Mei', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dec']
 const SEG_LABELS: Record<string, string> = {
@@ -552,38 +553,12 @@ export function MarktTab() {
                   })()}
                 </tbody>
               </table>
-              {detail.projecten.length > 0 && (
-                <div style={{ minWidth: 420, flex: 1 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
-                    Grootste projecten (YTD, op |marge|)
-                  </div>
-                  <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
-                    <thead>
-                      <tr style={{ color: 'var(--t3)' }}>
-                        <th style={{ textAlign: 'left', padding: '2px 6px 2px 0', fontWeight: 600 }}>Project</th>
-                        <th style={{ textAlign: 'left', padding: '2px 6px', fontWeight: 600 }}>Klant</th>
-                        <th style={{ textAlign: 'right', padding: '2px 6px', fontWeight: 600 }}>Omzet</th>
-                        <th style={{ textAlign: 'right', padding: '2px 6px', fontWeight: 600 }}>Kosten</th>
-                        <th style={{ textAlign: 'right', padding: '2px 0 2px 6px', fontWeight: 600 }}>Marge</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detail.projecten.map(p => (
-                        <tr key={p.id} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
-                          <td style={{ padding: '3px 6px 3px 0', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${p.id} ${p.naam}${p.geenUren ? ' — geen uren geboekt: kosten onbekend (inhuur/onderaanneming/fixed price)' : ''}`}>
-                            {p.geenUren && <span style={{ color: 'var(--amber)', marginRight: 4 }} aria-label="geen uren geboekt">⚠</span>}
-                            <span style={{ fontFamily: 'var(--mono)', color: 'var(--t2)' }}>{p.id}</span> {p.naam}
-                          </td>
-                          <td style={{ padding: '3px 6px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t2)' }} title={p.klant}>{p.klant}</td>
-                          <td style={{ textAlign: 'right', padding: '3px 6px', fontFamily: 'var(--mono)' }}>{fmtK(p.omzet + p.ohw)}</td>
-                          <td style={{ textAlign: 'right', padding: '3px 6px', fontFamily: 'var(--mono)', color: 'var(--t2)' }}>{fmtK(p.kosten)}</td>
-                          <td style={{ textAlign: 'right', padding: '3px 0 3px 6px', fontFamily: 'var(--mono)', fontWeight: 700, color: p.marge >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtK(p.marge)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div style={{ minWidth: 420, flex: 1 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>
+                  Inzoomen: klanten → projecten → medewerkers / weekoverzicht
                 </div>
-              )}
+                <MargeDrill ent={sel.ent} seg={sel.seg} metMh={metMh} />
+              </div>
             </div>
           )}
           {metric === 'omzet' && <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 10 }}>* lopende maand (nog niet volledig gefactureerd)</div>}

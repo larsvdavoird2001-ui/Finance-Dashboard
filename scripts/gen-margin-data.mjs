@@ -529,3 +529,152 @@ for (const e of ENTS) {
   console.log(`${e}: omzet ${Math.round(sum('omzet'))} + ohw ${Math.round(sum('ohw'))} − kosten ${Math.round(sum('kosten') + sum('kostenFallback'))} = marge ${Math.round(sum('omzet') + sum('ohw') - sum('kosten') - sum('kostenFallback'))}  | segmenten: ${Object.keys(segs).join(', ')}`)
 }
 console.log('✓ src/data/marginData.ts geschreven')
+
+// ── 9. Detaildata (drill-down: klant → project → medewerkers / weekoverzicht) ──
+// Bronnen bovenop het maandmodel:
+//  - urenexport per medewerker per project per maand (+ ISO-week voor E-projecten)
+//  - declarabiliteit per medewerker (definitie zoals in Power BI 'Declarabel /
+//    Niet Declarabel': klantproject-uren / alle geschreven uren excl. afwezigheid)
+//  - OHW Freezes (OHW Trendlijnen - 2026.xlsx): weekproductie per work package
+//    ('Delta waarde vorige week', kolom 'Nummer 2026' → project)
+//  - Servicebevestigingen (Projectadministratie en Registratie Vergaderingen.xlsm):
+//    bevestigde/gefactureerde meters per project per week (2026)
+const SRC_DETAIL = {
+  freezes: 'C:/Users/lvanderavoird/The People Group/TPG Projects 2025 - Documenten/03 Finance/01 Finance Alex versie/OHW 2026/OHW Trendlijnen - 2026.xlsx',
+  projectadmin: 'C:/Users/lvanderavoird/The People Group/TPG Projects - OpEx - Planning/Projectadministratie en Registratie Vergaderingen.xlsm',
+}
+const isoWeek = ser => {
+  const d = new Date(Date.UTC(1899, 11, 30) + ser * 86400000)
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  const day = t.getUTCDay() || 7
+  t.setUTCDate(t.getUTCDate() + 4 - day)
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+  return { jaar: t.getUTCFullYear(), week: Math.ceil(((t - y0) / 86400000 + 1) / 7) }
+}
+const empProj = {}   // emp → proj → { uren[12], kosten[12], weeks: { w: uren } }
+const empDecl = {}   // emp → { naam, bedrijf, klant, intern, afwezig }
+{
+  const rows = sheetRows(SRC.uren, SRC.urenSheet)
+  for (let i = 1; i < rows.length; i++) {
+    const x = rows[i]
+    if (!x || typeof x[11] !== 'number' || x[2] == null) continue
+    const [y, m] = serialToMonth(x[11])
+    if (y !== 2026) continue
+    const emp = x[2], uren = x[17] ?? 0, cat = x[15]
+    const d = (empDecl[emp] ??= { naam: x[3], bedrijf: bedrijfKey(String(x[0] ?? '')), klant: 0, intern: 0, afwezig: 0 })
+    const pid = x[7] ? String(x[7]).trim() : null
+    if (cat === 'Productieve tijd' && pid) {
+      if (INTERN_RE.test(pid) || pid.startsWith('G-')) d.intern += uren; else d.klant += uren
+      const ep = ((empProj[emp] ??= {})[pid] ??= { uren: arr12(), kosten: arr12(), weeks: {} })
+      const kp = rate[emp]?.kostprijsAK ?? (/Spanje/i.test(String(x[0])) ? medianBy.Projects : medianBy[d.bedrijf])
+      ep.uren[m - 1] += uren
+      ep.kosten[m - 1] += uren * kp
+      if (pid.startsWith('E-')) { const { jaar, week } = isoWeek(x[11]); if (jaar === 2026) ep.weeks[week] = (ep.weeks[week] ?? 0) + uren }
+    } else if (cat === 'Improductief' || cat === 'NTCS') d.intern += uren
+    else if (cat === 'Verlof' || cat === 'Ziekte' || cat === 'BijzVerlof') d.afwezig += uren
+  }
+}
+// weekproductie per project (OHW Freezes) + per taak
+const weekProd = {}   // proj → week → productie
+const weekProdTask = {} // proj → week → { taak: productie }
+try {
+  const fr = sheetRows(SRC_DETAIL.freezes, 'OHW Freezes')
+  const h = fr[0]; const c = n => h.indexOf(n)
+  const iW = c('Week'), iD = c('Delta waarde vorige week'), iN26 = c('Nummer 2026'), iSap = c('SAP-nummer'), iWp = c('Work Package')
+  for (let i = 1; i < fr.length; i++) {
+    const x = fr[i]; if (!x) continue
+    const w = parseInt(String(x[iW] ?? '')); if (!w || w > 38) continue
+    const d = typeof x[iD] === 'number' ? x[iD] : 0; if (!d) continue
+    const t = String(x[iN26] ?? '').trim()
+    const pid = (/^E-\d+/.test(t) ? t : String(x[iSap] ?? '')).split('-').slice(0, 2).join('-')
+    if (!/^E-\d+$/.test(pid)) continue
+    ;(weekProd[pid] ??= {})[w] = (weekProd[pid][w] ?? 0) + d
+    const tk = `${t || x[iSap]} ${x[iWp] ?? ''}`.trim()
+    ;((weekProdTask[pid] ??= {})[w] ??= {})[tk] = (weekProdTask[pid][w][tk] ?? 0) + d
+  }
+  console.log(`OHW Freezes: weekproductie voor ${Object.keys(weekProd).length} E-projecten`)
+} catch (e) { console.warn('OHW Freezes niet gelezen:', e.message) }
+// servicebevestigingen 2026 per project per week
+const weekBev = {}
+try {
+  const sb = sheetRows(SRC_DETAIL.projectadmin, 'Servicebevestigingen')
+  const h = sb[0]; const c = n => h.indexOf(n)
+  const iJ = c('Jaar'), iWk = c('Weeknr'), iFv = c('Factuurvolume €'), iSapK = c('SAP Klantlevel')
+  for (let i = 1; i < sb.length; i++) {
+    const x = sb[i]; if (!x || String(x[iJ]) !== '2026') continue
+    const w = parseInt(String(x[iWk] ?? '')); const v = typeof x[iFv] === 'number' ? x[iFv] : 0
+    const pid = String(x[iSapK] ?? '').trim().split('-').slice(0, 2).join('-')
+    if (!w || !/^[A-Z]-\d+$/.test(pid)) continue
+    ;(weekBev[pid] ??= {})[w] = (weekBev[pid][w] ?? 0) + v
+  }
+  console.log(`Servicebevestigingen 2026: ${Object.keys(weekBev).length} projecten`)
+} catch (e) { console.warn('Servicebevestigingen niet gelezen:', e.message) }
+
+const D = []
+D.push(`/**`)
+D.push(` * AUTO-GENERATED door scripts/gen-margin-data.mjs — detaildata voor de drill-down in de marge-matrix.`)
+D.push(` * Per project: maandreeksen + medewerkers (uren/kosten per maand, declarabiliteit) en voor eenheden-`)
+D.push(` * projecten (E-) een weekoverzicht: productie uit OHW Freezes (OHW Trendlijnen - 2026), bevestigde`)
+D.push(` * meters uit de Projectadministratie, en de uren/kosten/medewerkers van die week.`)
+D.push(` * Declarabiliteit = uren op klantprojecten / alle geschreven uren excl. verlof/ziekte (conform Power BI).`)
+D.push(` */`)
+D.push(`export interface DetailEmp { id: number; naam: string; bedrijf: string; uren: number[]; kosten: number[]; geschat: boolean; decl: number | null }`)
+D.push(`export interface WeekRow { w: number; productie: number; bevestigd: number; uren: number; kosten: number; emps: [string, number][]; taken?: [string, number][] }`)
+D.push(`export interface DetailProject { id: string; naam: string; klant: string; ent: string; seg: string; intern: boolean; omzet: number[]; ohw: number[]; mhOmzet: number[]; mhKosten: number[]; kosten: number[]; uren: number[]; emps: DetailEmp[]; weeks?: WeekRow[]; productieYtd?: number; bevestigdYtd?: number }`)
+D.push(`export const detailProjecten: DetailProject[] = [`)
+let nWeeks = 0
+for (const p of Object.values(proj)) {
+  const ohwDelta = arr12()
+  for (let m = 1; m <= N_MONTHS; m++) for (const k of ['u', 'd', 'c', 'e']) ohwDelta[m - 1] += (p.snaps[k][m] ?? 0) - (p.snaps[k][m - 1] ?? 0)
+  const tot = a => a.slice(0, N_MONTHS).reduce((x, y) => x + y, 0)
+  const kostenTot = tot(p.kosten) + tot(p.kostenFallback)
+  if (tot(p.omzet) === 0 && tot(ohwDelta) === 0 && kostenTot === 0 && tot(p.mhOmzet) === 0) continue
+  const emps = []
+  for (const [emp, ep] of Object.entries(empProj)) {
+    const e = ep[p.id]; if (!e) continue
+    const d = empDecl[emp]
+    const worked = d.klant + d.intern
+    emps.push({ id: Number(emp), naam: d.naam, bedrijf: d.bedrijf, uren: rnd(e.uren), kosten: rnd(e.kosten), geschat: !rate[emp], decl: worked ? Math.round(d.klant / worked * 100) : null })
+  }
+  emps.sort((a, b) => b.uren.reduce((x, y) => x + y, 0) - a.uren.reduce((x, y) => x + y, 0))
+  const rec = {
+    id: p.id, naam: p.naam, klant: p.klant ?? '', ent: p.ent, seg: p.seg, intern: !!p.intern,
+    omzet: rnd(p.omzet), ohw: rnd(ohwDelta), mhOmzet: rnd(p.mhOmzet), mhKosten: rnd(p.mhKosten),
+    kosten: rnd(p.kosten.map((v, i) => v + p.kostenFallback[i])), uren: rnd(p.uren), emps,
+  }
+  if (p.id.startsWith('E-') && (weekProd[p.id] || Object.values(empProj).some(ep => ep[p.id] && Object.keys(ep[p.id].weeks).length))) {
+    const weeks = []
+    for (let w = 1; w <= 38; w++) {
+      const prod = weekProd[p.id]?.[w] ?? 0
+      const bev = weekBev[p.id]?.[w] ?? 0
+      let uren = 0, kosten = 0; const we = []
+      for (const [emp, ep] of Object.entries(empProj)) {
+        const u = ep[p.id]?.weeks[w]; if (!u) continue
+        const kp = rate[emp]?.kostprijsAK ?? medianBy[empDecl[emp]?.bedrijf] ?? 60
+        uren += u; kosten += u * kp; we.push([empDecl[emp].naam, Math.round(u * 10) / 10])
+      }
+      if (!prod && !bev && !uren) continue
+      const row = { w, productie: Math.round(prod), bevestigd: Math.round(bev), uren: Math.round(uren), kosten: Math.round(kosten), emps: we.sort((a, b) => b[1] - a[1]) }
+      const taken = weekProdTask[p.id]?.[w]
+      if (taken) row.taken = Object.entries(taken).map(([t, v]) => [t, Math.round(v)]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 8)
+      weeks.push(row)
+    }
+    rec.weeks = weeks
+    rec.productieYtd = Math.round(weeks.reduce((a, r) => a + r.productie, 0))
+    rec.bevestigdYtd = Math.round(weeks.reduce((a, r) => a + r.bevestigd, 0))
+    nWeeks += weeks.length
+  }
+  D.push(`  ${JSON.stringify(rec)},`)
+}
+D.push(`]`)
+D.push(``)
+D.push(`/** Declarabiliteit per medewerker (2026 t/m aug): klantproject-uren, interne uren, afwezigheid. */`)
+D.push(`export const declarabiliteit: Record<string, { naam: string; bedrijf: string; klant: number; intern: number; afwezig: number; pct: number | null }> = {`)
+for (const [emp, d] of Object.entries(empDecl)) {
+  const worked = d.klant + d.intern
+  D.push(`  '${emp}': ${JSON.stringify({ naam: d.naam, bedrijf: d.bedrijf, klant: Math.round(d.klant), intern: Math.round(d.intern), afwezig: Math.round(d.afwezig), pct: worked ? Math.round(d.klant / worked * 100) : null })},`)
+}
+D.push(`}`)
+D.push(``)
+fs.writeFileSync(path.join(ROOT, 'src/data/marginDetail.ts'), D.join('\n'))
+console.log(`✓ src/data/marginDetail.ts geschreven (${D.length} regels, ${nWeeks} weekregels, ${Object.keys(empDecl).length} medewerkers)`)
