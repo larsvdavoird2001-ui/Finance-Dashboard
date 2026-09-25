@@ -330,10 +330,17 @@ export function MargeDrill({ ent, seg, metMh, maanden, maandTabel }: Props) {
             </>
           )}
 
-          {/* Niveau 3: project */}
-          {project && <ProjectDetail p={project} k={kpi(project)} metMh={metMh} periodeLabel={periodeLabel} />}
+          {project && <div style={{ fontSize: 11, color: 'var(--t3)' }}>Projectdetail, balans van de bakjes en weekoverzicht staan hieronder over de volle breedte.</div>}
         </div>
       </div>
+
+      {/* Niveau 3: project — over de volle breedte (balans heeft 10 maandkolommen) */}
+      {project && (
+        <div style={{ borderTop: '1px solid var(--bd2)', paddingTop: 12 }}>
+          <div style={{ ...sectionTitle, marginBottom: 8 }}><span style={{ ...mono, color: 'var(--t2)' }}>{project.id}</span> {project.naam}</div>
+          <ProjectDetail p={project} k={kpi(project)} metMh={metMh} periodeLabel={periodeLabel} />
+        </div>
+      )}
 
       {/* ── Aannames & nuances in deze filterset ── */}
       <Aannames filterProj={filterProj} metMh={metMh} maanden={maanden} ent={ent} label={filterLabel} periodeLabel={periodeLabel} nietToerekenbaar={medewerkers.nietToerekenbaar} />
@@ -704,6 +711,120 @@ function MedewerkerDetail({ m, mod, metMh, maanden, periodeLabel, inSelectie, on
   )
 }
 
+// ── Balans van de bakjes per project ────────────────────────────────────────
+const BAKJES: { k: 'u' | 'd' | 'c' | 'e'; label: string; titel: string }[] = [
+  { k: 'u', label: 'Nog te factureren uren', titel: 'U-facturatie (SAP): geschreven uren met tarief, status "Niet toegewezen". Vrijgegeven uren zitten al in een conceptfactuur.' },
+  { k: 'd', label: 'Nog te factureren detachering', titel: 'D-facturatie (SAP): geschreven detacheringsuren, nog niet gefactureerd' },
+  { k: 'c', label: 'Conceptfacturen', titel: 'Facturen niet vrijgegeven (SAP)' },
+  { k: 'e', label: 'OHW eenheden (Excel)', titel: 'Eenheden-Excel: Waarde OHW (HLD/CROW/LLD/Revisie/Dataset) — gerealiseerd maar nog niet gefactureerd' },
+]
+
+function BalansTabel({ p }: { p: DetailProject }) {
+  const b = p.balans
+  if (!b && !p.eStand) return null
+  const N = MARGE_MAANDEN
+  const kol = ['Dec-25', ...MAAND_LABELS.slice(0, N)]
+  const rijen = b ? BAKJES.filter(x => b[x.k].some(v => v !== 0)) : []
+  const totaal = b ? kol.map((_, m) => BAKJES.reduce((a, x) => a + b[x.k][m], 0)) : []
+  const productie = kol.map((_, m) => m === 0 ? null : (p.omzet[m - 1] ?? 0) + (b ? totaal[m] - totaal[m - 1] : p.ohw[m - 1]))
+  const gw = p.gw ? kol.map((_, m) => m === 0 ? null : p.gw![m - 1] ?? 0) : null
+  const verschil = gw ? kol.map((_, m) => m === 0 ? null : (gw[m] ?? 0) - (productie[m] ?? 0)) : null
+  const zt = b ? kol.map((_, m) => (b.uZt[m] ?? 0) + (b.dZt[m] ?? 0)) : null
+  const somN = (a: (number | null)[]) => a.slice(1).reduce<number>((x, y) => x + (y ?? 0), 0)
+  const cel = (v: number | null, extra: CSSProperties = {}) => <td style={td('right', { ...mono, ...extra })}>{v == null ? '—' : v === 0 ? <span style={{ color: 'var(--t3)' }}>0</span> : fmtEur(v)}</td>
+  const kopRij = (label: string, titel?: string, extra: CSSProperties = {}) => <td style={td('left', { color: 'var(--t2)', ...extra })} title={titel}>{label}</td>
+  const eOpening = p.balans?.e[0] ? 'week-1-freeze' : null
+
+  return (
+    <div>
+      <div style={sectionTitle}>Balans onderhanden werk — stand per bakje, ultimo maand</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: 10.5 }}>
+          <thead>
+            <tr style={{ color: 'var(--t3)' }}>
+              <th style={th('left')}>Bakje</th>
+              {kol.map((k, i) => <th key={k} style={th('right', i === 0 ? { color: 'var(--t3)', fontStyle: 'italic' } : {})} title={i === 0 ? 'Openingsstand 31-12-2025' : undefined}>{k}</th>)}
+              <th style={th('right', { borderLeft: '1px solid var(--bd2)' })}>Δ YTD</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rijen.map(x => (
+              <tr key={x.k} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
+                {kopRij(x.label, x.titel)}
+                {b![x.k].map((v, m) => <Fragment key={m}>{cel(v, m === 0 ? { color: 'var(--t3)', fontStyle: 'italic' } : {})}</Fragment>)}
+                {cel(b![x.k][N] - b![x.k][0], { borderLeft: '1px solid var(--bd2)', fontWeight: 600 })}
+              </tr>
+            ))}
+            {rijen.length > 0 && (
+              <tr style={{ borderTop: '2px solid var(--bd3)', color: 'var(--t1)', fontWeight: 700 }}>
+                {kopRij('Totaal onderhanden', undefined, { color: 'var(--t1)' })}
+                {totaal.map((v, m) => <Fragment key={m}>{cel(v)}</Fragment>)}
+                {cel(totaal[N] - totaal[0], { borderLeft: '1px solid var(--bd2)' })}
+              </tr>
+            )}
+            <tr style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
+              {kopRij('Gefactureerd in maand', 'Factuurvolume SAP (vrijgegeven facturen)')}
+              <td />{p.omzet.slice(0, N).map((v, i) => <Fragment key={i}>{cel(v)}</Fragment>)}
+              {cel(p.omzet.slice(0, N).reduce((x, y) => x + y, 0), { borderLeft: '1px solid var(--bd2)', fontWeight: 600 })}
+            </tr>
+            <tr style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)', fontWeight: 700 }}>
+              {kopRij('Productie (gefactureerd + Δ onderhanden)', 'Dit is de omzet van het project in het marge-model', { color: 'var(--t1)' })}
+              {productie.map((v, m) => <Fragment key={m}>{cel(v)}</Fragment>)}
+              {cel(somN(productie), { borderLeft: '1px solid var(--bd2)' })}
+            </tr>
+            {gw && verschil && (
+              <>
+                <tr style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
+                  {kopRij('Geschreven waarde (uren × tarief)', `Geschreven productieve uren × gefactureerd tarief per medewerker (${p.gwDekking}% van de uren met een op dit project gefactureerd tarief)`)}
+                  {gw.map((v, m) => <Fragment key={m}>{cel(v)}</Fragment>)}
+                  {cel(somN(gw), { borderLeft: '1px solid var(--bd2)', fontWeight: 600 })}
+                </tr>
+                <tr style={{ borderTop: '1px solid var(--bd2)' }}>
+                  {kopRij('Niet in omzet: afgeschreven / nog niet verwerkt', 'Geschreven waarde − productie. Positief = uren geschreven die (nog) niet als omzet of onderhanden werk zijn opgenomen: afgeschreven, zonder tarief, of later gefactureerd. Negatief = meer gefactureerd dan geschreven (bijv. vooruit, indexatie, of uren uit 2025).')}
+                  {verschil.map((v, m) => <Fragment key={m}>{cel(v, v != null && v > 0 ? { color: 'var(--red)' } : { color: 'var(--t2)' })}</Fragment>)}
+                  {cel(somN(verschil), { borderLeft: '1px solid var(--bd2)', fontWeight: 700, color: somN(verschil) > 0 ? 'var(--red)' : 'var(--t2)' })}
+                </tr>
+              </>
+            )}
+            {zt && zt.some(v => v) && (
+              <tr style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t2)' }}>
+                {kopRij('Uren zonder tarief (aantal uren)', 'Uren in de U-/D-lijst zonder waarde: tarief of klantorder ontbreekt, niet factureerbaar tot dat geregeld is')}
+                {zt.map((v, m) => <td key={m} style={td('right', mono)}>{v ? fmtU(v) : <span style={{ color: 'var(--t3)' }}>0</span>}</td>)}
+                <td style={td('right', { borderLeft: '1px solid var(--bd2)' })} />
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {p.eStand && (
+        <div style={{ overflowX: 'auto', marginTop: 8 }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 10.5 }}>
+            <thead>
+              <tr style={{ color: 'var(--t3)' }}>
+                <th style={th('left')}>Projectstand eenheden-Excel</th>
+                {kol.slice(1).map(k => <th key={k} style={th()}>{k}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {([['tw', 'Totale projectwaarde'], ['gr', 'Gerealiseerd'], ['gf', 'Reeds gefactureerd'], ['ohw', 'OHW (gerealiseerd − gefactureerd)'], ['rest', 'Resterend (nog te realiseren)']] as const).map(([k, l]) => (
+                <tr key={k} style={{ borderTop: '1px solid var(--bd2)', color: k === 'ohw' ? 'var(--t1)' : 'var(--t2)', fontWeight: k === 'ohw' ? 600 : 400 }}>
+                  {kopRij(l)}
+                  {p.eStand!.slice(1).map((s, m) => <Fragment key={m}>{cel(s == null ? null : k === 'ohw' ? s.gr - s.gf : s[k])}</Fragment>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ul style={{ fontSize: 10.5, color: 'var(--t3)', margin: '6px 0 0', paddingLeft: 16, lineHeight: 1.5 }}>
+        <li>Standen uit de maandelijkse SAP-overzichten en de eenheden-Excel (mrt/apr/jul uit de weekfreezes, gelijk aan de geboekte OHW-administratie).</li>
+        <li>Openingsstand Dec-25: {eOpening ? 'eenheden uit de freeze van week 1; ' : ''}uren, detachering en concepten verdeeld naar rato van de januari-stand (<span style={{ color: 'var(--amber)' }}>schatting per project</span>, totaal = geboekt).</li>
+        {gw && <li>"Niet in omzet" is een afgeleide: SAP kent geen status "afgeschreven". Het verschil kan ook timing zijn (uren van eind augustus nog niet in de lijst) of uren uit 2025 die in 2026 gefactureerd zijn.</li>}
+      </ul>
+    </div>
+  )
+}
+
 // ── Projectdetail: maandreeks + weekoverzicht ───────────────────────────────
 interface WeekRij extends WeekRow { margeWk: number; empsTekst: string }
 const WEEK_KOL: Kolom<WeekRij>[] = [
@@ -758,6 +879,7 @@ function ProjectDetail({ p, k, metMh, periodeLabel }: { p: DetailProject; k: Kpi
           })}
         </tbody>
       </table>
+      <BalansTabel p={p} />
       {p.emps.length === 0 && (
         <div style={{ fontSize: 11, color: 'var(--amber)' }}>Los dossier: geen uren in de urenexport — de omzet telt mee in de matrix, maar er is geen medewerker of weekproductie aan te koppelen.</div>
       )}

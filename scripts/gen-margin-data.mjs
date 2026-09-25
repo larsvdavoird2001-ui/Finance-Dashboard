@@ -59,9 +59,9 @@ const SNAP = [
   { dir: `${ZIP}/08 Augustus 2026/Overzichten SAP augustus 2026`, u: 'U-facturatie augustus.xlsx', d: 'D-facturatie augustus.xlsx', c: 'Conceptfacturen augustus.xlsx', e: 'EXCEL Onderhanden Werk P8 2026.xlsx' },
 ]
 const N_MONTHS = 8
-// Openingsstand Dec-25 per OHW-lijst (uit de OHW-administratie P08, sheet OHW mbM);
-// wordt naar rato van de jan-snapshot over projecten verdeeld.
-const OPENING_DEC25 = { u: 123447.88 + 9375.99, d: 182462.9, c: 311120.3, e: 299966 }
+// Openingsstand Dec-25 per OHW-lijst (uit de OHW-administratie P08, sheet OHW mbM). U = alleen 'met tarief':
+// de maandlijsten tellen 'zonder tarief' (OHW-admin 5–15k per maand) ook niet mee.
+const OPENING_DEC25 = { u: 123447.88, d: 182462.9, c: 311120.3, e: 299966 }
 // Missing hours-lijsten (nog niet geboekte/goedgekeurde uren) per maand, index = maand.
 const MISSING = [null,
   'Missing hours januari 2026.xlsx', 'Missing hours februari.xlsx', 'Missing hours maart.xlsx', 'Missing hours april.xlsx',
@@ -246,23 +246,30 @@ function readList(file, kind) {
   if (hi < 0) throw new Error(`geen header in ${file}`)
   const hdr = rows[hi]
   const iProj = hdr.indexOf('Project'), iVal = colIdx(hdr, 'Nog niet gefactureerde nettowaarde'), iKl = hdr.indexOf('Klant'),
-    iSeg = hdr.indexOf('Marktsegment'), iPb = hdr.indexOf('Projectbedrijf'), iSt = colIdx(hdr, 'Projectfactuuraanvraag - status')
+    iSeg = hdr.indexOf('Marktsegment'), iPb = hdr.indexOf('Projectbedrijf'), iSt = colIdx(hdr, 'Projectfactuuraanvraag - status'),
+    iQ = colIdx(hdr, 'Hoeveelheid')
   const out = {}
+  const zonderTarief = {} // id → uren met hoeveelheid maar zonder waarde (tarief ontbreekt → niet factureerbaar)
   for (let i = hi + 1; i < rows.length; i++) {
     const x = rows[i]; if (!x) continue
     const id = projIdOf(x[iProj]); if (!id) continue
-    // Subtotaalregels (status leeg) en al gefactureerde regels overslaan — de
-    // OHW-administratie telt alleen 'Niet toegewezen' (+ 'Vrijgegeven' = factuuraanvraag).
+    // Subtotaalregels (status leeg), gefactureerde regels en 'Vrijgegeven' overslaan. 'Vrijgegeven' = al in
+    // een factuuraanvraag en daarmee in de conceptfacturen; de OHW-administratie boekt ze daarom niet bij de
+    // U-lijst (feb: 128.096 = exact 'Niet toegewezen'). Tot en met mei stonden ze wél in de export, vanaf juni
+    // niet meer — meetellen gaf dubbeltelling jan–mei en een kunstmatige dip in juni.
     const status = iSt >= 0 ? String(x[iSt] ?? '').trim() : 'Niet toegewezen'
-    if (!status || status === 'Gefactureerd') continue
+    if (!status || status === 'Gefactureerd' || status === 'Vrijgegeven') continue
     const v = typeof x[iVal] === 'number' ? x[iVal] : 0
     out[id] = (out[id] ?? 0) + v
+    const q = iQ >= 0 && typeof x[iQ] === 'number' ? x[iQ] : 0
+    if (q > 0 && v === 0) zonderTarief[id] = (zonderTarief[id] ?? 0) + q
     const p = P(id)
     if (iKl >= 0 && x[iKl] && !p.klanten[x[iKl]]) p.klanten[x[iKl]] = (p.klanten[x[iKl]] ?? 0) + 0.001
     if (iSeg >= 0 && x[iSeg]) { const s = normSeg(x[iSeg]); if (s) p.segList[s] = (p.segList[s] ?? 0) + 1 }
     if (iPb >= 0 && x[iPb]) { const e = projBedrijfEnt(x[iPb]); if (e) p.ents[e] = (p.ents[e] ?? 0) + 0.001 }
   }
   void kind
+  Object.defineProperty(out, '_zonderTarief', { value: zonderTarief, enumerable: false })
   return out
 }
 function readConcept(file) {
@@ -289,15 +296,22 @@ function eenhedenRows(hdr, rows, out) {
   // 'Waarde NTF' is de totaalkolom van de OHW-kolommen — niet meetellen
   const wCols = hdr.map((h, i) => [h, i]).filter(([h]) => typeof h === 'string' && /^Waarde OHW/.test(h)).map(([, i]) => i)
   const iResp = hdr.indexOf('Responsible TPG'), iKl = hdr.indexOf('Klant'), iSap = hdr.indexOf('SAP-nummer'), iN26 = hdr.indexOf('Nummer 2026')
+  // projectstand eenheden: totale waarde, gerealiseerd, reeds gefactureerd, resterend
+  const iTw = hdr.indexOf('Totaal waarde project'), iGr = hdr.indexOf('Gerealiseerde waarde'), iGf = hdr.indexOf('Reeds gefactureerd'), iRest = hdr.indexOf('Resterende waarde')
+  const stand = {}
+  const num = v => typeof v === 'number' ? v : 0
   for (const x of rows) {
     if (!x) continue
     const id = (/^[A-Z]-\d+/.test(String(x[iN26] ?? '').trim()) ? projIdOf(x[iN26]) : null) ?? projIdOf(x[iSap]); if (!id) continue
     let v = 0; for (const c of wCols) v += typeof x[c] === 'number' ? x[c] : 0
     out[id] = (out[id] ?? 0) + v
+    const s = (stand[id] ??= { tw: 0, gr: 0, gf: 0, rest: 0 })
+    s.tw += num(x[iTw]); s.gr += num(x[iGr]); s.gf += num(x[iGf]); s.rest += num(x[iRest])
     const p = P(id)
     if (String(x[iResp] ?? '').trim() === 'Feron van Hoeven' && v !== 0) p.feron = true
     if (x[iKl] && !Object.keys(p.klanten).length) p.klanten[String(x[iKl])] = 0.001
   }
+  Object.defineProperty(out, '_stand', { value: stand, enumerable: false })
   return out
 }
 function readEenheden(file) {
@@ -327,6 +341,8 @@ for (let m = 1; m <= N_MONTHS; m++) {
     snapTotals[k][m] = l ? Math.round(Object.values(l).reduce((a, b) => a + b, 0)) : null
     if (!l) continue
     for (const [id, v] of Object.entries(l)) P(id).snaps[k][m] = v
+    for (const [id, q] of Object.entries(l._zonderTarief ?? {})) ((P(id).zt ??= { u: [], d: [] })[k])[m] = q
+    for (const [id, st] of Object.entries(l._stand ?? {})) (P(id).eStand ??= [])[m] = st
   }
 }
 // Controle: eenheden-OHW per maand vs de stand die in de OHW-administratie is geboekt (P08, Telecom + Civiel)
@@ -337,8 +353,16 @@ for (let m = 1; m <= N_MONTHS; m++) {
   eenhedenAfwijking[m - 1] = Math.round(d)
   if (Math.abs(d) > 1) console.log(`  eenheden ${m}: snapshot ${snapTotals.e[m]} vs OHW-admin ${Math.round(OHW_ADMIN_EENHEDEN[m - 1])} → verschil ${Math.round(d)}`)
 }
-// openingsstand Dec-25 naar rato van de jan-snapshot
-for (const k of ['u', 'd', 'c', 'e']) {
+// Openingsstand Dec-25 per project. Eenheden: de weekfreeze "eind week 1 NA" per project (totaal 299.142 vs
+// geboekt 299.966 → geschaald). U/D/concept: geen december-lijst beschikbaar → naar rato van de jan-snapshot
+// (schatting; het totaal per lijst is wel de geboekte stand).
+const OPENING_BRON = { u: 'rato jan', d: 'rato jan', c: 'rato jan', e: 'week 1' }
+{
+  const wk1 = readEenhedenFreeze('Onderhanden Werk eind week 1 NA.xlsx')
+  const totWk1 = Object.values(wk1).reduce((a, b) => a + b, 0)
+  for (const [id, v] of Object.entries(wk1)) P(id).snaps.e[0] = totWk1 ? v / totWk1 * OPENING_DEC25.e : 0
+}
+for (const k of ['u', 'd', 'c']) {
   const tot = Object.values(proj).reduce((a, p) => a + (p.snaps[k][1] ?? 0), 0)
   for (const p of Object.values(proj)) p.snaps[k][0] = tot ? (p.snaps[k][1] ?? 0) / tot * OPENING_DEC25[k] : 0
 }
@@ -741,7 +765,13 @@ D.push(`/** Alle geschreven uren per medewerker per maand, per soort (urenexport
 D.push(` *  klantprojecten, intern = productief op interne/G-projecten, improductief = Improductief + NTCS, overig = Missing e.d. */`)
 D.push(`export interface DetailMedewerker { id: number; naam: string; bedrijf: string; bron: TariefBron; tarief: number; klant: number[]; intern: number[]; improductief: number[]; verlof: number[]; ziekte: number[]; bijzverlof: number[]; overig: number[] }`)
 D.push(`export interface WeekRow { w: number; productie: number; bevestigd: number; uren: number; kosten: number; emps: [string, number][]; taken?: [string, number][] }`)
-D.push(`export interface DetailProject { id: string; naam: string; klant: string; ent: string; seg: string; intern: boolean; omzet: number[]; ohw: number[]; mhOmzet: number[]; mhKosten: number[]; kosten: number[]; uren: number[]; emps: DetailEmp[]; weeks?: WeekRow[]; productieYtd?: number; bevestigdYtd?: number }`)
+D.push(`/** Stand per bakje, index 0 = Dec-25 (opening), 1..${N_MONTHS} = ultimo maand. u = nog te factureren uren (U-lijst),`)
+D.push(` *  d = detachering (D-lijst), c = conceptfacturen, e = OHW eenheden (Waarde OHW); uZt/dZt = uren zonder tarief (aantal uren). */`)
+D.push(`export interface Balans { u: number[]; d: number[]; c: number[]; e: number[]; uZt: number[]; dZt: number[] }`)
+D.push(`/** Projectstand eenheden-Excel per maand: totale projectwaarde, gerealiseerd, reeds gefactureerd, resterend. */`)
+D.push(`export interface EenhedenStand { tw: number; gr: number; gf: number; rest: number }`)
+D.push(`export const OPENING_BRON: Record<'u' | 'd' | 'c' | 'e', string> = ${JSON.stringify(OPENING_BRON)}`)
+D.push(`export interface DetailProject { id: string; naam: string; klant: string; ent: string; seg: string; intern: boolean; omzet: number[]; ohw: number[]; mhOmzet: number[]; mhKosten: number[]; kosten: number[]; uren: number[]; emps: DetailEmp[]; weeks?: WeekRow[]; productieYtd?: number; bevestigdYtd?: number; balans?: Balans; eStand?: (EenhedenStand | null)[]; gw?: number[]; gwDekking?: number }`)
 D.push(`export const detailProjecten: DetailProject[] = [`)
 let nWeeks = 0
 for (const p of Object.values(proj)) {
@@ -776,6 +806,19 @@ for (const p of Object.values(proj)) {
     id: p.id, naam: p.naam, klant: p.klant ?? '', ent: p.ent, seg: p.seg, intern: !!p.intern,
     omzet: rnd(p.omzet), ohw: rnd(ohwDelta), mhOmzet: rnd(p.mhOmzet), mhKosten: rnd(p.mhKosten),
     kosten: rnd(p.kosten.map((v, i) => v + p.kostenFallback[i])), uren: rnd(p.uren), emps,
+  }
+  // Balans van de bakjes: stand per lijst Dec-25 (index 0) .. aug (index N_MONTHS)
+  const reeks = a => Array.from({ length: N_MONTHS + 1 }, (_, m) => Math.round(a?.[m] ?? 0))
+  const bal = { u: reeks(p.snaps.u), d: reeks(p.snaps.d), c: reeks(p.snaps.c), e: reeks(p.snaps.e), uZt: reeks(p.zt?.u), dZt: reeks(p.zt?.d) }
+  if (Object.values(bal).some(a => a.some(v => v !== 0))) rec.balans = bal
+  if (p.eStand?.some(Boolean)) rec.eStand = Array.from({ length: N_MONTHS + 1 }, (_, m) => p.eStand[m] ? Object.fromEntries(Object.entries(p.eStand[m]).map(([k, v]) => [k, Math.round(v)])) : null)
+  // Urenprojecten: geschreven waarde = uren × verkooptarief per medewerker; dekking = aandeel uren met een
+  // op dit project gefactureerd tarief
+  if (perUur && leden.length) {
+    rec.gw = rnd(arr12().map((_, i) => leden.reduce((a, l) => a + l.e.uren[i] * l.vk.t, 0)))
+    const uTot = leden.reduce((a, l) => a + l.e.uren.reduce((x, y) => x + y, 0), 0)
+    const uGef = leden.filter(l => l.vk.bron === 'gefactureerd').reduce((a, l) => a + l.e.uren.reduce((x, y) => x + y, 0), 0)
+    rec.gwDekking = uTot ? Math.round(uGef / uTot * 100) : 0
   }
   if (p.id.startsWith('E-') && (weekProd[p.id] || Object.values(empProj).some(ep => ep[p.id] && Object.keys(ep[p.id].weeks).length))) {
     const weeks = []
