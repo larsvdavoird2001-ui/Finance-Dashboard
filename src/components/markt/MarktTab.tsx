@@ -54,27 +54,30 @@ function reeks(jaar: '2024' | '2025' | '2026', ent: MarktEntity | 'totaal', seg:
   return out
 }
 
-interface MargeReeks { omzetFact: number[]; ohw: number[]; omzet: number[]; kosten: number[]; fallback: number[]; marge: number[]; uren: number[] }
-/** Marge-maandreeksen (12 posities) voor een cel; 'totaal'-assen sommeren. */
-function margeReeks(ent: MarktEntity | 'totaal', seg: string | 'totaal', segs: string[]): MargeReeks {
+interface MargeReeks { omzetFact: number[]; ohw: number[]; mhOmzet: number[]; mhKosten: number[]; omzet: number[]; kosten: number[]; fallback: number[]; marge: number[]; uren: number[] }
+/** Marge-maandreeksen (12 posities) voor een cel; 'totaal'-assen sommeren.
+ *  metMh: missing hours (nog niet geboekte uren) meenemen in omzet én kosten. */
+function margeReeks(ent: MarktEntity | 'totaal', seg: string | 'totaal', segs: string[], metMh: boolean): MargeReeks {
   const ents = ent === 'totaal' ? [...MARKT_ENTITIES] : [ent]
   const sl = seg === 'totaal' ? segs : [seg]
   const z = () => new Array(12).fill(0)
-  const r: MargeReeks = { omzetFact: z(), ohw: z(), omzet: z(), kosten: z(), fallback: z(), marge: z(), uren: z() }
+  const r: MargeReeks = { omzetFact: z(), ohw: z(), mhOmzet: z(), mhKosten: z(), omzet: z(), kosten: z(), fallback: z(), marge: z(), uren: z() }
   for (const e of ents) for (const s of sl) {
     const c = marge2026[e]?.[s]
     if (!c) continue
     for (let i = 0; i < MARGE_MAANDEN; i++) {
       r.omzetFact[i] += c.omzet[i] ?? 0
       r.ohw[i] += c.ohw[i] ?? 0
+      r.mhOmzet[i] += c.mhOmzet?.[i] ?? 0
+      r.mhKosten[i] += c.mhKosten?.[i] ?? 0
       r.kosten[i] += c.kosten[i] ?? 0
       r.fallback[i] += c.kostenFallback[i] ?? 0
       r.uren[i] += c.uren[i] ?? 0
     }
   }
   for (let i = 0; i < 12; i++) {
-    r.omzet[i] = r.omzetFact[i] + r.ohw[i]
-    r.marge[i] = r.omzet[i] - r.kosten[i] - r.fallback[i]
+    r.omzet[i] = r.omzetFact[i] + r.ohw[i] + (metMh ? r.mhOmzet[i] : 0)
+    r.marge[i] = r.omzet[i] - r.kosten[i] - r.fallback[i] - (metMh ? r.mhKosten[i] : 0)
   }
   return r
 }
@@ -104,12 +107,13 @@ interface TileProps {
   segs: string[]
   jaar: Jaar
   metric: Metric
+  metMh: boolean
   mode: 'maand' | 'ytd'
   maand: number           // 1-12
   selected: boolean
   onSelect: () => void
 }
-function Tile({ ent, seg, segs, jaar, metric, mode, maand, selected, onSelect }: TileProps) {
+function Tile({ ent, seg, segs, jaar, metric, metMh, mode, maand, selected, onSelect }: TileProps) {
   const kleur = ent === 'totaal' ? 'var(--blue)' : ENT_COLORS[ent]
   let val: number, ref: number, pct: number | null, leeg: boolean, pos: boolean
   let yCur: number[], yRef: number[], caption: string, badge: string | null
@@ -125,17 +129,19 @@ function Tile({ ent, seg, segs, jaar, metric, mode, maand, selected, onSelect }:
     caption = `${mode === 'maand' ? MAAND_LABELS[maand - 1] : `YTD t/m ${MAAND_LABELS[maand - 1]}`} · ${REF_JAAR[jaar]}: ${fmtK(ref)}`
     badge = pct == null ? null : `${pos ? '▲' : '▼'} ${Math.abs(pct).toFixed(0)}%`
   } else {
-    const r = margeReeks(ent, seg, segs)
+    const r = margeReeks(ent, seg, segs, metMh)
     yCur = r.marge
     yRef = []
     const omz = mode === 'maand' ? r.omzet[maand - 1] : som(r.omzet, maand)
-    const kst = mode === 'maand' ? r.kosten[maand - 1] + r.fallback[maand - 1] : som(r.kosten, maand) + som(r.fallback, maand)
-    val = omz - kst
+    const mrg = mode === 'maand' ? r.marge[maand - 1] : som(r.marge, maand)
+    const kst = omz - mrg
+    val = mrg
     ref = omz
     pct = omz !== 0 ? (val / Math.abs(omz)) * 100 : null
     leeg = omz === 0 && kst === 0
     pos = val >= 0
-    caption = `omz ${fmtK(omz)} · kst ${fmtK(kst)}`
+    const mh = mode === 'maand' ? r.mhOmzet[maand - 1] : som(r.mhOmzet, maand)
+    caption = `omz ${fmtK(omz)} · kst ${fmtK(kst)}${metMh && mh !== 0 && ent === 'Projects' ? ' · mh≈' : ''}`
     badge = pct == null ? null : `${Math.round(pct)}%`
   }
 
@@ -209,6 +215,7 @@ export function MarktTab() {
   const [mode, setMode] = useState<'maand' | 'ytd'>('ytd')
   const [maand, setMaand] = useState<number>(Math.min(MARKT_META.laatsteVolledigeMaand, maxMaandVoor('2026', 'omzet')))
   const [sel, setSel] = useState<{ ent: MarktEntity | 'totaal'; seg: string | 'totaal' } | null>(null)
+  const [metMh, setMetMh] = useState(true)
   const { getYtd } = useAdjustedActuals()
 
   const effJaar: Jaar = metric === 'marge' ? '2026' : jaar
@@ -244,32 +251,37 @@ export function MarktTab() {
     const top = sel.ent !== 'totaal' && sel.seg !== 'totaal'
       ? (marktTopKlanten[`${sel.ent}|${sel.seg}`] ?? [])
       : []
-    const mr = margeReeks(sel.ent, sel.seg, segs)
+    const mr = margeReeks(sel.ent, sel.seg, segs, metMh)
     const projecten = margeProjecten2026
       .filter(p => (sel.ent === 'totaal' || p.ent === sel.ent) && (sel.seg === 'totaal' || p.seg === sel.seg))
+      .map(p => metMh
+        ? { ...p, omzet: p.omzet + (p.mhOmzet ?? 0), kosten: p.kosten + (p.mhKosten ?? 0), marge: p.marge + (p.mhOmzet ?? 0) - (p.mhKosten ?? 0) }
+        : p)
+      .sort((a, b) => Math.abs(b.marge) - Math.abs(a.marge))
       .slice(0, 10)
     return { y26, y25, y24, top, mr, projecten }
-  }, [sel, segs])
+  }, [sel, segs, metMh])
 
   // Aansluiting marge-model ↔ P&L (YTD t/m MARGE_MAANDEN)
   const aansluiting = useMemo(() => {
     if (metric !== 'marge') return null
     const months = BASE_ACTUAL_MONTHS_2026.slice(0, MARGE_MAANDEN)
     return MARKT_ENTITIES.map(e => {
-      const r = margeReeks(e, 'totaal', segs)
+      const r = margeReeks(e, 'totaal', segs, metMh)
       const pl = getYtd(e, months)
       const omzetToeg = som(r.omzet, MARGE_MAANDEN)
-      const kosten = som(r.kosten, MARGE_MAANDEN)
+      const kosten = som(r.kosten, MARGE_MAANDEN) + (metMh ? som(r.mhKosten, MARGE_MAANDEN) : 0)
       const fallback = som(r.fallback, MARGE_MAANDEN)
+      const mhOmzet = som(r.mhOmzet, MARGE_MAANDEN)
       const intern = margeIntern2026[e] ? som(margeIntern2026[e].kosten, MARGE_MAANDEN) : 0
       const zonderUren = (MARGE_META.zonderUren as Record<string, { omzet: number } | undefined> | undefined)?.[e]?.omzet ?? 0
       return {
-        ent: e, omzetToeg, plOmzet: pl['netto_omzet'] ?? 0, kosten, fallback, intern, zonderUren,
+        ent: e, omzetToeg, plOmzet: pl['netto_omzet'] ?? 0, kosten, fallback, intern, zonderUren, mhOmzet,
         marge: omzetToeg - kosten - fallback,
         plDirect: pl['directe_kosten'] ?? 0, plOpex: pl['operationele_kosten'] ?? 0, plEbitda: pl['ebitda'] ?? 0,
       }
     })
-  }, [metric, segs, getYtd])
+  }, [metric, segs, getYtd, metMh])
 
   return (
     <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -287,6 +299,15 @@ export function MarktTab() {
         </div>
         <div style={{ flex: 1 }} />
         <ToggleGroup value={metric} onChange={kiesMetric} options={[{ id: 'omzet', label: 'Omzet' }, { id: 'marge', label: 'Marge' }]} />
+        {metric === 'marge' && (
+          <label
+            title="Missing hours = nog niet geboekte/goedgekeurde uren (stand uit de OHW-administratie). Verdeeld per medewerker over diens projecten: bij Consultancy-detachering exact, bij Projects een schatting naar rato van geschreven uren."
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--t2)', cursor: 'pointer', userSelect: 'none' }}
+          >
+            <input type="checkbox" checked={metMh} onChange={e => setMetMh(e.target.checked)} style={{ accentColor: 'var(--blue)' }} />
+            incl. missing hours <span style={{ color: 'var(--t3)', fontSize: 10.5 }}>(Projects ≈ schatting)</span>
+          </label>
+        )}
         <ToggleGroup value={mode} onChange={setMode} options={[{ id: 'ytd', label: 'YTD' }, { id: 'maand', label: 'Per maand' }]} />
         <select
           value={effJaar}
@@ -379,13 +400,13 @@ export function MarktTab() {
               {segs.map(seg => (
                 <Tile
                   key={`${ent}|${seg}`}
-                  ent={ent} seg={seg} segs={segs} jaar={effJaar} metric={metric} mode={mode} maand={maand}
+                  ent={ent} seg={seg} segs={segs} jaar={effJaar} metric={metric} metMh={metMh} mode={mode} maand={maand}
                   selected={sel?.ent === ent && sel?.seg === seg}
                   onSelect={() => setSel(prev => prev?.ent === ent && prev?.seg === seg ? null : { ent, seg })}
                 />
               ))}
               <Tile
-                ent={ent} seg="totaal" segs={segs} jaar={effJaar} metric={metric} mode={mode} maand={maand}
+                ent={ent} seg="totaal" segs={segs} jaar={effJaar} metric={metric} metMh={metMh} mode={mode} maand={maand}
                 selected={sel?.ent === ent && sel?.seg === 'totaal'}
                 onSelect={() => setSel(prev => prev?.ent === ent && prev?.seg === 'totaal' ? null : { ent, seg: 'totaal' })}
               />
@@ -397,13 +418,13 @@ export function MarktTab() {
             {segs.map(seg => (
               <Tile
                 key={`tot|${seg}`}
-                ent="totaal" seg={seg} segs={segs} jaar={effJaar} metric={metric} mode={mode} maand={maand}
+                ent="totaal" seg={seg} segs={segs} jaar={effJaar} metric={metric} metMh={metMh} mode={mode} maand={maand}
                 selected={sel?.ent === 'totaal' && sel?.seg === seg}
                 onSelect={() => setSel(prev => prev?.ent === 'totaal' && prev?.seg === seg ? null : { ent: 'totaal', seg })}
               />
             ))}
             <Tile
-              ent="totaal" seg="totaal" segs={segs} jaar={effJaar} metric={metric} mode={mode} maand={maand}
+              ent="totaal" seg="totaal" segs={segs} jaar={effJaar} metric={metric} metMh={metMh} mode={mode} maand={maand}
               selected={sel?.ent === 'totaal' && sel?.seg === 'totaal'}
               onSelect={() => setSel(prev => prev?.ent === 'totaal' && prev?.seg === 'totaal' ? null : { ent: 'totaal', seg: 'totaal' })}
             />
@@ -484,6 +505,7 @@ export function MarktTab() {
                     <th style={{ textAlign: 'left', padding: '3px 10px 3px 0', fontWeight: 600 }}>Maand</th>
                     <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Facturatie</th>
                     <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Δ OHW</th>
+                    {metMh && <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }} title="Missing hours (mutatie, toegerekend)">Δ MH</th>}
                     <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Omzet</th>
                     <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Uren</th>
                     <th style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>Kosten</th>
@@ -494,13 +516,14 @@ export function MarktTab() {
                 <tbody>
                   {MAAND_LABELS.slice(0, MARGE_MAANDEN).map((l, i) => {
                     const r = detail.mr
-                    const kst = r.kosten[i] + r.fallback[i]
+                    const kst = r.omzet[i] - r.marge[i]
                     const pct = r.omzet[i] !== 0 ? (r.marge[i] / Math.abs(r.omzet[i])) * 100 : null
                     return (
                       <tr key={l} style={{ borderTop: '1px solid var(--bd2)', color: 'var(--t1)' }}>
                         <td style={{ padding: '3px 10px 3px 0', fontFamily: 'var(--font)', color: 'var(--t2)' }}>{l}</td>
                         <td style={{ textAlign: 'right', padding: '3px 8px', color: 'var(--t2)' }}>{fmtK(r.omzetFact[i])}</td>
                         <td style={{ textAlign: 'right', padding: '3px 8px', color: 'var(--t2)' }}>{fmtK(r.ohw[i])}</td>
+                        {metMh && <td style={{ textAlign: 'right', padding: '3px 8px', color: 'var(--t2)' }}>{fmtK(r.mhOmzet[i])}</td>}
                         <td style={{ textAlign: 'right', padding: '3px 8px', fontWeight: 600 }}>{fmtK(r.omzet[i])}</td>
                         <td style={{ textAlign: 'right', padding: '3px 8px', color: 'var(--t3)' }}>{Math.round(r.uren[i]).toLocaleString('nl-NL')}</td>
                         <td style={{ textAlign: 'right', padding: '3px 8px', color: 'var(--t2)' }}>{fmtK(kst)}</td>
@@ -512,12 +535,13 @@ export function MarktTab() {
                   {(() => {
                     const r = detail.mr
                     const n = MARGE_MAANDEN
-                    const omz = som(r.omzet, n), kst = som(r.kosten, n) + som(r.fallback, n), mrg = som(r.marge, n)
+                    const omz = som(r.omzet, n), mrg = som(r.marge, n), kst = omz - mrg
                     return (
                       <tr style={{ borderTop: '2px solid var(--bd3)', color: 'var(--t1)', fontWeight: 700 }}>
                         <td style={{ padding: '4px 10px 3px 0', fontFamily: 'var(--font)' }}>YTD</td>
                         <td style={{ textAlign: 'right', padding: '4px 8px' }}>{fmtK(som(r.omzetFact, n))}</td>
                         <td style={{ textAlign: 'right', padding: '4px 8px' }}>{fmtK(som(r.ohw, n))}</td>
+                        {metMh && <td style={{ textAlign: 'right', padding: '4px 8px' }}>{fmtK(som(r.mhOmzet, n))}</td>}
                         <td style={{ textAlign: 'right', padding: '4px 8px' }}>{fmtK(omz)}</td>
                         <td style={{ textAlign: 'right', padding: '4px 8px', color: 'var(--t3)' }}>{Math.round(som(r.uren, n)).toLocaleString('nl-NL')}</td>
                         <td style={{ textAlign: 'right', padding: '4px 8px' }}>{fmtK(kst)}</td>
@@ -581,6 +605,7 @@ export function MarktTab() {
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Dekking</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Urenkosten</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>w.v. geschat tarief</th>
+                <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>w.v. missing hours</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Omzet zonder uren</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Intern (geen omzet)</th>
                 <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Marge model</th>
@@ -596,6 +621,7 @@ export function MarktTab() {
                   <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--t2)' }}>{a.plOmzet ? `${Math.round(a.omzetToeg / a.plOmzet * 100)}%` : '—'}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px' }}>{fmtEur(a.kosten + a.fallback)}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--amber)' }}>{a.kosten + a.fallback ? `${Math.round(a.fallback / (a.kosten + a.fallback) * 100)}%` : '—'}</td>
+                  <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--t2)' }} title="Missing hours (nog niet geboekte uren) in de toegerekende omzet; Projects = schatting">{metMh && a.mhOmzet ? fmtEur(a.mhOmzet) : '—'}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--amber)' }} title="Omzet op projecten zonder geboekte uren — kosten (inhuur/onderaanneming/fixed price) onbekend, marge overschat">{a.zonderUren ? fmtEur(a.zonderUren) : '—'}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px', color: 'var(--t2)' }}>{a.intern ? fmtEur(a.intern) : '—'}</td>
                   <td style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 700, color: a.marge >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtEur(a.marge)}</td>
@@ -615,6 +641,9 @@ export function MarktTab() {
             OHW-eenhedensnapshots van maart en juli ontbreken en zijn lineair geïnterpoleerd. Projecten met omzet maar
             zonder geboekte uren (⚠ in de projectenlijst, kolom "Omzet zonder uren") betreffen inhuur, onderaanneming of
             fixed price: hun kosten zitten niet in het model en hun marge is dus overschat.
+            {' '}Missing hours (nog niet geboekte/goedgekeurde uren; maandstand uit de OHW-administratie) zijn per
+            medewerker over diens projecten verdeeld — bij Consultancy-detachering is dat exact, bij Projects een
+            schatting naar rato van geschreven uren; met het vinkje "incl. missing hours" zet je ze uit.
           </div>
         </div>
       )}

@@ -53,6 +53,13 @@ const N_MONTHS = 8
 // Openingsstand Dec-25 per OHW-lijst (uit de OHW-administratie P08, sheet OHW mbM);
 // wordt naar rato van de jan-snapshot over projecten verdeeld.
 const OPENING_DEC25 = { u: 123447.88 + 9375.99, d: 182462.9, c: 311120.3, e: 299966 }
+// Missing hours-lijsten (nog niet geboekte/goedgekeurde uren) per maand, index = maand.
+const MISSING = [null,
+  'Missing hours januari 2026.xlsx', 'Missing hours februari.xlsx', 'Missing hours maart.xlsx', 'Missing hours april.xlsx',
+  'Missing hours mei (aangepast).xlsx', 'Missing hours juni 2026.xlsx', 'Missing hours juli.xlsx', 'Missing hours augustus.xlsx',
+]
+// Openingsstand missing hours Dec-25 (OHW-admin): Consultancy 39.569, Projects 0
+const MISSING_OPENING = { Consultancy: 39569, Projects: 0, Software: 0 }
 
 const ENTS = ['Consultancy', 'Projects', 'Software']
 const SEGS = ['1. Public', '2. Telecom', '3. Energy', '4. Civil', '5. Industry', '6. Overig']
@@ -123,8 +130,10 @@ console.log(`tarieven: ${Object.keys(rate).length} medewerkers; mediaan kostprij
 
 // ── 2. Uren × kostprijs per project per maand ───────────────────────────────
 const proj = {} // id → { naam, uren[12], kosten[12], kostenFallback[12], empEnt:{}, omzet[12], ohw:{u,d,c,e}[snapshots], klant, btk, segFromList, ent }
-const P = id => (proj[id] ??= { id, naam: '', uren: arr12(), kosten: arr12(), kostenFallback: arr12(), empEnt: {}, omzet: arr12(), omzet2025: arr12(), snaps: { u: [], d: [], c: [], e: [] }, klant: null, klanten: {}, btks: {}, segList: {}, ents: {}, feron: false })
+const P = id => (proj[id] ??= { id, naam: '', uren: arr12(), kosten: arr12(), kostenFallback: arr12(), mhOmzet: arr12(), mhKosten: arr12(), empEnt: {}, omzet: arr12(), omzet2025: arr12(), snaps: { u: [], d: [], c: [], e: [] }, klant: null, klanten: {}, btks: {}, segList: {}, ents: {}, feron: false })
 const missingRate = {}
+const empMix = {}   // werknemer-id → maand(1-12) → { projId: uren }  (projectmix voor verdeling missing hours)
+const empInfo = {}  // werknemer-id → { naam, bedrijf }
 {
   const rows = sheetRows(SRC.uren, SRC.urenSheet)
   for (let i = 1; i < rows.length; i++) {
@@ -138,6 +147,9 @@ const missingRate = {}
     p.uren[m - 1] += uren
     const eb = bedrijfKey(String(x[0] ?? ''))
     p.empEnt[eb] = (p.empEnt[eb] ?? 0) + uren
+    const emp = x[2]
+    ;((empMix[emp] ??= {})[m] ??= {})[p.id] = (empMix[emp][m][p.id] ?? 0) + uren
+    empInfo[emp] ??= { naam: x[3], bedrijf: bedrijfKey(String(x[0] ?? '')) }
     const rt = rate[x[2]]
     if (rt) p.kosten[m - 1] += uren * rt.kostprijsAK
     else {
@@ -283,6 +295,121 @@ for (const k of ['u', 'd', 'c', 'e']) {
 console.log('snapshot-totalen per lijst (jan..aug):')
 for (const k of ['u', 'd', 'c', 'e']) console.log(`  ${k}:`, snapTotals[k].slice(1).map(v => v == null ? '—' : v).join(' | '))
 
+// ── 4b. Missing hours (nog niet geboekte/goedgekeurde uren) ─────────────────
+// De maandstand per entiteit komt uit de OHW-administratie (leidend, zoals
+// geboekt in de maandafsluiting). De missing-hours-lijst van die maand levert
+// alleen de VERDEELSLEUTEL over medewerkers (positieve missing hours × bruto
+// verkooptarief). De mutatie per medewerker per maand wordt vervolgens verdeeld
+// over de projecten waar die medewerker in die maand op heeft geschreven (naar
+// rato van uren; fallback: YTD-mix). Kosten = mutatie-uren × kostprijs+AK.
+// Bij detachering (één project per medewerker) is dit exact; bij Projects een
+// schatting — daarom apart opgeslagen (mhOmzet/mhKosten) en in de UI uitzetbaar.
+const MH_STAND = {  // OHW-admin P08: stand per maand (Dec-25 .. Aug-26)
+  Consultancy: [39569, 64256, 76090, 49700, 48750.5, 33768, 56173.5, 49938, 72037.5],
+  Projects:    [0, 12000, 12000, 6000, 0, 0, 0, 23152.5, 32000],
+  Software:    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+}
+const nameToId = {}
+for (const [id, e] of Object.entries(empInfo)) nameToId[String(e.naam).trim().toLowerCase()] = Number(id)
+function readMissing(file) {
+  const wb = xlsx.readFile(file)
+  const tarief = {}
+  for (const n of wb.SheetNames) {
+    const rows = xlsx.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null })
+    const hi = rows.findIndex(r => r && r.some(c => typeof c === 'string' && /Persoons-?ID/i.test(c)))
+    if (hi < 0) continue
+    const hdr = rows[hi]
+    const iId = hdr.findIndex(c => typeof c === 'string' && /Persoons-?ID/i.test(c))
+    const iN = hdr.findIndex(c => typeof c === 'string' && /^Naam$/i.test(c))
+    const iT = hdr.findIndex(c => typeof c === 'string' && /verkoop\s*tarief/i.test(c))
+    if (iId < 0 || iT < 0) continue
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r = rows[i]
+      if (typeof r?.[iId] === 'number' && typeof r[iT] === 'number') {
+        tarief[r[iId]] = r[iT]
+        if (iN >= 0 && r[iN]) nameToId[String(r[iN]).trim().toLowerCase()] ??= r[iId]
+      }
+    }
+    break
+  }
+  const rows = sheetRows(file)
+  const hi = rows.findIndex(r => r && r.some(c => typeof c === 'string' && /^Missing hours/i.test(c)))
+  if (hi < 0) throw new Error(`geen Missing Hours-header in ${file}`)
+  const hdr = rows[hi]
+  // positieve weekwaarden van 'Missing Hours' (negatief = overuren, telt niet mee)
+  const iMh = hdr.findIndex(c => typeof c === 'string' && /^Missing hours$/i.test(c))
+  const iBed = hdr.indexOf('Bedrijf'), iEmp = hdr.indexOf('Werknemer')
+  const share = {} // ent → emp → gewogen uren (uren × tarief)
+  let onbekend = 0
+  for (let i = hi + 1; i < rows.length; i++) {
+    const x = rows[i]; if (!x) continue
+    const mh = typeof x[iMh] === 'number' ? x[iMh] : 0
+    if (mh <= 0) continue
+    let emp = x[iEmp]
+    if (typeof emp === 'string') emp = /^\d+$/.test(emp.trim()) ? Number(emp.trim()) : (nameToId[emp.trim().toLowerCase()] ?? null)
+    if (typeof emp !== 'number') { onbekend += mh; continue }
+    const ent = projBedrijfEnt(x[iBed]) ?? 'Projects'
+    ;(share[ent] ??= {})[emp] = (share[ent][emp] ?? 0) + mh
+  }
+  return { share, tarief, onbekend }
+}
+const mhSnap = []
+const mhTariefAll = {}
+const mhLog = []
+for (let m = 1; m <= N_MONTHS; m++) {
+  if (!MISSING[m]) { mhSnap[m] = null; continue }
+  const s = readMissing(path.join(SNAP[m].dir, MISSING[m]))
+  Object.assign(mhTariefAll, s.tarief)
+  mhSnap[m] = s
+  mhLog.push(`${m}: ${Object.entries(s.share).map(([e, o]) => `${e} ${Object.keys(o).length} mdw/${Math.round(Object.values(o).reduce((a, b) => a + b, 0))}u`).join(', ')}${s.onbekend ? ` (onbekend ${Math.round(s.onbekend)}u)` : ''}`)
+}
+console.log('missing hours-lijsten (verdeelsleutel):', mhLog.join(' | '))
+// stand per medewerker per maand = entiteitstand × aandeel (uren × verkooptarief)
+const mhEmpStand = [] // m → ent → emp → waarde
+const mhOnverdeeld = {}
+for (let m = 0; m <= N_MONTHS; m++) {
+  mhEmpStand[m] = {}
+  const src = mhSnap[m] ?? mhSnap[1] // Dec-25: verdeel opening met de jan-sleutel
+  for (const ent of Object.keys(MH_STAND)) {
+    const total = MH_STAND[ent][m] ?? 0
+    const sh = src?.share[ent] ?? {}
+    const w = Object.fromEntries(Object.entries(sh).map(([emp, u]) => [emp, u * (mhTariefAll[emp] ?? 70)]))
+    const wt = Object.values(w).reduce((a, b) => a + b, 0)
+    // geen verdeelsleutel voor deze entiteit/maand → hele stand op één pseudo-medewerker
+    mhEmpStand[m][ent] = wt ? Object.fromEntries(Object.entries(w).map(([emp, v]) => [emp, total * v / wt])) : (total ? { '_onverdeeld': total } : {})
+  }
+}
+let mhUrenTot = 0
+for (let m = 1; m <= N_MONTHS; m++) {
+  for (const ent of Object.keys(MH_STAND)) {
+    const cur = mhEmpStand[m][ent], prev = mhEmpStand[m - 1][ent]
+    const emps = new Set([...Object.keys(cur), ...Object.keys(prev)])
+    for (const emp of emps) {
+      const dOmzet = (cur[emp] ?? 0) - (prev[emp] ?? 0)
+      if (!dOmzet) continue
+      if (emp === '_onverdeeld') { (mhOnverdeeld[ent] ??= arr12())[m - 1] += dOmzet; continue }
+      const vt = mhTariefAll[emp] ?? 70
+      const dUren = dOmzet / vt
+      const dKosten = dUren * (rate[emp]?.kostprijsAK ?? medianBy[ent] ?? 60)
+      mhUrenTot += Math.abs(dUren)
+      let mix = empMix[emp]?.[m]
+      if (!mix || Object.keys(mix).length === 0) {
+        mix = {}
+        for (let mm = 1; mm <= N_MONTHS; mm++) for (const [pid, u] of Object.entries(empMix[emp]?.[mm] ?? {})) mix[pid] = (mix[pid] ?? 0) + u
+      }
+      const tot = Object.values(mix).reduce((a, b) => a + b, 0)
+      if (!tot) { (mhOnverdeeld[ent] ??= arr12())[m - 1] += dOmzet; continue }
+      for (const [pid, u] of Object.entries(mix)) {
+        const p = P(pid)
+        p.mhOmzet[m - 1] += dOmzet * u / tot
+        p.mhKosten[m - 1] += dKosten * u / tot
+      }
+    }
+  }
+}
+const mhTotals = Object.fromEntries(Object.entries(MH_STAND).map(([e, a]) => [e, a.slice(1)]))
+for (const [e, arr] of Object.entries(mhOnverdeeld)) console.log(`  missing hours onverdeeld ${e}:`, arr.slice(0, N_MONTHS).map(v => Math.round(v / 1000) + 'k').join(' '))
+
 // ── 5. Projectmaster: entiteit / klant / segment ────────────────────────────
 const top = obj => Object.entries(obj).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
 const INTERN_RE = /^(S-2301|S-2302|S-2801|S-2501|S-2701|G-1009)$/
@@ -304,7 +431,7 @@ for (const p of Object.values(proj)) {
 
 // ── 6. Aggregeren ───────────────────────────────────────────────────────────
 const cell = {} // ent → seg → { omzet, ohw, kosten, kostenFallback, uren }
-const C = (e, s) => ((cell[e] ??= {})[s] ??= { omzet: arr12(), ohw: arr12(), kosten: arr12(), kostenFallback: arr12(), uren: arr12() })
+const C = (e, s) => ((cell[e] ??= {})[s] ??= { omzet: arr12(), ohw: arr12(), kosten: arr12(), kostenFallback: arr12(), uren: arr12(), mhOmzet: arr12(), mhKosten: arr12() })
 const intern = {}  // ent → { kosten, uren }
 const projectRows = []
 for (const p of Object.values(proj)) {
@@ -319,10 +446,12 @@ for (const p of Object.values(proj)) {
   const c = C(p.ent, p.seg)
   for (let i = 0; i < 12; i++) {
     c.omzet[i] += p.omzet[i]; c.ohw[i] += ohwDelta[i]; c.kosten[i] += p.kosten[i]; c.kostenFallback[i] += p.kostenFallback[i]; c.uren[i] += p.uren[i]
+    c.mhOmzet[i] += p.mhOmzet[i]; c.mhKosten[i] += p.mhKosten[i]
   }
   const omzet = tot(p.omzet), ohw = tot(ohwDelta), kosten = tot(p.kosten) + tot(p.kostenFallback), uren = tot(p.uren)
-  if (omzet !== 0 || ohw !== 0 || kosten !== 0) {
-    projectRows.push({ ent: p.ent, seg: p.seg, id: p.id, naam: p.naam, klant: p.klant ?? '', omzet: Math.round(omzet), ohw: Math.round(ohw), kosten: Math.round(kosten), uren: Math.round(uren), marge: Math.round(omzet + ohw - kosten), geenUren: uren === 0 && (omzet + ohw) !== 0 })
+  const mhO = tot(p.mhOmzet), mhK = tot(p.mhKosten)
+  if (omzet !== 0 || ohw !== 0 || kosten !== 0 || mhO !== 0) {
+    projectRows.push({ ent: p.ent, seg: p.seg, id: p.id, naam: p.naam, klant: p.klant ?? '', omzet: Math.round(omzet), ohw: Math.round(ohw), kosten: Math.round(kosten), uren: Math.round(uren), marge: Math.round(omzet + ohw - kosten), mhOmzet: Math.round(mhO), mhKosten: Math.round(mhK), geenUren: uren === 0 && (omzet + ohw) !== 0 })
   }
 }
 // Omzet op projecten zonder geboekte uren (kosten onbekend: inhuur/onderaanneming/fixed price)
@@ -345,14 +474,16 @@ L.push(` *             medewerkers zónder tarief × mediaan van hun bedrijf (zi
 L.push(` * Kosten volgen het project (IC-uren tellen mee bij het project), directe inkoop/auto/overige`)
 L.push(` * personeelskosten zitten er NIET in — zie de aansluiting met de P&L in het tabblad.`)
 L.push(` */`)
-L.push(`export interface MargeCel { omzet: number[]; ohw: number[]; kosten: number[]; kostenFallback: number[]; uren: number[] }`)
+L.push(`/** mhOmzet/mhKosten = missing hours (nog niet geboekte uren): mutatie per maand, per medewerker`)
+L.push(` *  verdeeld over diens projecten (exact bij detachering, schatting bij Projects) — apart zodat de UI ze kan uitzetten. */`)
+L.push(`export interface MargeCel { omzet: number[]; ohw: number[]; kosten: number[]; kostenFallback: number[]; uren: number[]; mhOmzet: number[]; mhKosten: number[] }`)
 L.push(`export const MARGE_MAANDEN = ${N_MONTHS}  // aantal gevulde maanden (jan..)`)
 L.push(`export const marge2026: Record<string, Record<string, MargeCel>> = {`)
 for (const e of ENTS) {
   L.push(`  ${e}: {`)
   for (const s of [...SEGS, 'Niet toegewezen']) {
     const c = cell[e]?.[s]; if (!c) continue
-    L.push(`    '${s}': { omzet: ${JSON.stringify(rnd(c.omzet))}, ohw: ${JSON.stringify(rnd(c.ohw))}, kosten: ${JSON.stringify(rnd(c.kosten))}, kostenFallback: ${JSON.stringify(rnd(c.kostenFallback))}, uren: ${JSON.stringify(rnd(c.uren))} },`)
+    L.push(`    '${s}': { omzet: ${JSON.stringify(rnd(c.omzet))}, ohw: ${JSON.stringify(rnd(c.ohw))}, kosten: ${JSON.stringify(rnd(c.kosten))}, kostenFallback: ${JSON.stringify(rnd(c.kostenFallback))}, uren: ${JSON.stringify(rnd(c.uren))}, mhOmzet: ${JSON.stringify(rnd(c.mhOmzet))}, mhKosten: ${JSON.stringify(rnd(c.mhKosten))} },`)
   }
   L.push(`  },`)
 }
@@ -363,7 +494,7 @@ L.push(`export const margeIntern2026: Record<string, { kosten: number[]; uren: n
 for (const [e, t] of Object.entries(intern)) L.push(`  ${e}: { kosten: ${JSON.stringify(rnd(t.kosten))}, uren: ${JSON.stringify(rnd(t.uren))} },`)
 L.push(`}`)
 L.push(``)
-L.push(`export interface MargeProject { ent: string; seg: string; id: string; naam: string; klant: string; omzet: number; ohw: number; kosten: number; uren: number; marge: number; geenUren: boolean }`)
+L.push(`export interface MargeProject { ent: string; seg: string; id: string; naam: string; klant: string; omzet: number; ohw: number; kosten: number; uren: number; marge: number; mhOmzet: number; mhKosten: number; geenUren: boolean }`)
 L.push(`/** Per project (YTD t/m aug), gesorteerd op |marge| — voor het detailpaneel. */`)
 L.push(`export const margeProjecten2026: MargeProject[] = [`)
 for (const r of projectRows.sort((a, b) => Math.abs(b.marge) - Math.abs(a.marge))) L.push(`  ${JSON.stringify(r)},`)
@@ -377,6 +508,9 @@ L.push(`  urenTotaal: ${Math.round(totUren)},`)
 L.push(`  urenZonderTarief: ${missingUren},`)
 L.push(`  medianKostprijs: ${JSON.stringify(medianBy)},`)
 L.push(`  eenhedenSnapshotsOntbreken: ['Mar-26', 'Jul-26'], // lineair geïnterpoleerd per project`)
+L.push(`  /** Missing hours: stand per entiteit per maand (uren × verkooptarief) zoals berekend uit de lijsten;`)
+L.push(` *  onverdeeld = mutatie van medewerkers zonder geschreven uren (niet aan een project te koppelen). */`)
+L.push(`  missingHours: { stand: ${JSON.stringify(Object.fromEntries(Object.entries(mhTotals).map(([e, a]) => [e, rnd(a)])))}, onverdeeld: ${JSON.stringify(Object.fromEntries(Object.entries(mhOnverdeeld).map(([e, a]) => [e, rnd(a)])))}, mutatieUren: ${Math.round(mhUrenTot)} },`)
 L.push(`  /** Omzet op projecten zonder geboekte uren (kosten onbekend), per entiteit. */`)
 L.push(`  zonderUren: ${JSON.stringify(Object.fromEntries(Object.entries(zonderUren).map(([e, v]) => [e, { omzet: Math.round(v.omzet), projecten: v.projecten }])))},`)
 L.push(`  /** Facturen 2026 zonder projectnummer (buiten de matrix gehouden), per klant. */`)
